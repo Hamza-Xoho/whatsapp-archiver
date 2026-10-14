@@ -7,6 +7,7 @@ import (
 	"go.mau.fi/whatsmeow/proto/waWeb"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
+	"google.golang.org/protobuf/proto"
 	"whatsapp-archiver/internal/store"
 )
 
@@ -36,7 +37,9 @@ func (p *Pipeline) ImportHistory(ctx context.Context, evt *events.HistorySync) (
 	if p.parse == nil {
 		return 0, 0, fmt.Errorf("pipeline has no history parser")
 	}
-	chunk := store.HistoryChunk{ID: stableID(fmt.Sprint(hs.GetSyncType()), fmt.Sprint(hs.GetChunkOrder()), fmt.Sprint(hs.GetProgress()), fmt.Sprint(len(hs.GetConversations()))), SyncType: hs.GetSyncType().String(), ChunkOrder: int(hs.GetChunkOrder()), Progress: int(hs.GetProgress()), ConversationCount: len(hs.GetConversations()), ReceivedAt: now.Unix()}
+	// The chunk's content is its identity: distinct chunks never collide and a redelivered chunk is ledgered once.
+	raw, _ := proto.MarshalOptions{Deterministic: true}.Marshal(hs)
+	chunk := store.HistoryChunk{ID: stableID(string(raw)), SyncType: hs.GetSyncType().String(), ChunkOrder: int(hs.GetChunkOrder()), Progress: int(hs.GetProgress()), ConversationCount: len(hs.GetConversations()), ReceivedAt: now.Unix()}
 	for _, conv := range hs.GetConversations() {
 		if conv == nil {
 			continue
