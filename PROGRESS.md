@@ -42,7 +42,15 @@
 - Deviations: the pinned API has `Client.SynchronousAck`; it is enabled. `GetLatestVersion` now accepts `(context.Context, *http.Client)`, not the older single-argument form shown in its stale doc comment. Modernc's sqlstore upgrade was exercised in the unit test.
 - Open questions for Hamza: none.
 
-## Tasks 5–11 — not started
+## Task 5 — complete
+
+- Test commit: `08ca602`.
+- Implementation commit: pending at time of this entry.
+- Coverage: `internal/ingest` 51.0%.
+- Deviations: handler write retries use short exponential intervals in-process; production failures still retry indefinitely after one health notification. `ImportHistory` is a compile-safe no-op until Task 6's red tests demand the implementation.
+- Open questions for Hamza: none.
+
+## Tasks 6–11 — not started
 
 ## Task 12 — not attempted
 
