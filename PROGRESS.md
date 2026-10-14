@@ -225,3 +225,16 @@ Per the brief, only a ready-to-fill acceptance checklist will be produced.
 - Mutations killed: m2-sync, m2-nojoin, m2-bgctx, m2-block, m2-nolog (5/5). Full spec file at `42a0396`: 85/85 KILLED (h10-downstart's match string was updated for the M2 constructor line and re-run).
 - Probe (scratch, httptest ntfy that hangs): before `SetState` still blocked after 3 s → after it returns in 1.3 ms and `Run` returns 0.5 ms after cancel. The H10 probes call `check()` without `Run`, so after M2 they send nothing until `Run` runs; with `Run` added to the probe the output is the same as after H10 (80 disconnected, 79 no-events, 40 phone-quiet; no-events then recovered).
 - Open: Notify errors are still discarded (not logged); `serve` does not wait for `mon.Run` to return before exiting.
+
+## Phase 0 fixes — H7/H8 fix round 1 (review I1, I2, I3, M2, M3, M6)
+
+- Test commit `5feb288`; fix commit `e8aa845`.
+- I1: `groupChange` now also carries `delete` (`*types.GroupDelete`), `link`/`unlink` (`*types.GroupLinkChange`), `invite_link`, `membership_approval`, `suspended`/`unsuspended`, `join_reason`, `version` (`ParticipantVersionID`) and `unknown` (each `UnknownChanges` node's `String()`; attributes are sorted, so the text is deterministic).
+- I2: `JoinedGroup` adds `version`, `create_key` and `created` (`GroupCreated`, unix seconds). A repeat join with a new participant version is a new row.
+- I3: a `SecretEncryptedMessage` with `SecretEncType` MESSAGE_EDIT is `KindEdit`. Its target is `TargetMessageKey.ID`, `NewText` is empty (the content is encrypted), the raw proto is kept, and no message row is written. The other secret types (EVENT_EDIT, POLL_EDIT, POLL_ADD_OPTION, MESSAGE_SCHEDULE) are unchanged.
+- M2: the chat-event `stableID` uses `UnixMilli`; the `ts` column stays in seconds.
+- M3: `messageText` falls back to image, video and document captions.
+- M6: protocol types APP_STATE_SYNC_KEY_SHARE, SHARED_DEVICE_CONTACT_HASH_KEY_SHARE, HISTORY_SYNC_NOTIFICATION (history blob `mediaKey` + `directPath`) and PEER_DATA_OPERATION_REQUEST_RESPONSE_MESSAGE (media keys, web message bytes) are stored as `protocol` events with empty raw_proto. `TestNonRevokeProtocolMessageIsNotARevoke` was changed in the test commit to expect no raw proto for its two key-carrying cases, per the M6 ruling (the expectation is stricter, not weaker).
+- Tests (all red first): `TestApprovalModeChangesAreDistinct`, `TestGroupDeleteStoredWithReason`, `TestGroupInfoKeepsEveryChangeKind`, `TestRepeatJoinedGroupIsDistinct`, `TestArchiveToggleWithinOneSecondIsThreeRows`, `TestKeyShareProtocolMessageKeepsNoRawProto`, `TestSecretEncryptedEditIsAnEdit`, `TestEditedMediaCaptionIsNewText`.
+- Coverage: internal/ingest 86.2%.
+- Mutations: added h7-groupfields, h7-approval, h7-unknown, h7-joinversion, h7-secretedit, h7-ms, h7-caption and h8-keyraw. The h7-ptr, h7-ts and h7-zerots spec text was updated to the millisecond code. Full spec file at `e8aa845`: 93/93 KILLED.
