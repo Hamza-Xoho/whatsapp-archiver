@@ -109,27 +109,42 @@ func Scan(root string, rules Rules) ([]Violation, error) {
 			}
 		}
 		importsClient := false
+		wmName := "whatsmeow"
 		for _, imp := range file.Imports {
 			if name, _ := strconv.Unquote(imp.Path.Value); name == "go.mau.fi/whatsmeow" {
 				importsClient = true
+				if imp.Name != nil {
+					wmName = imp.Name.Name
+				}
 			}
 		}
+		// Every non-test file in internal/wa may hold a *whatsmeow.Client passed in
+		// from another file, through an interface or a type parameter, so the prefix
+		// rule does not depend on this file importing the client.
+		waProd := inWA && !strings.HasSuffix(rel, "_test.go")
+		prefixRule := importsClient || waProd
 		pkgNames := importNames(file)
-		fileAllowed := rules.FileAllowedCalls[rel]
+		fileAllowed := rel2allowed(rules, rel)
+		exempt := func(name string) bool { _, ok := fileAllowed[name]; return ok }
 		ast.Inspect(file, func(node ast.Node) bool {
+			if waProd {
+				out = append(out, escapes(set, rel, node, wmName, rules, exempt)...)
+			}
 			sel, ok := node.(*ast.SelectorExpr)
 			if !ok {
 				return true
 			}
 			name := sel.Sel.Name
-			if _, ok := fileAllowed[name]; ok {
+			if exempt(name) {
 				return true
 			}
 			if _, banned := rules.BannedCalls[name]; banned {
 				out = append(out, violation(set, sel.Sel.Pos(), rel, "banned-call", name))
 				return true
 			}
-			if importsClient && rules.bannedPrefix(name) {
+			// A prefix hit on a receiver that is not a whatsmeow client (a struct
+			// field, say) is a false positive; it fails safe and is fixed by renaming.
+			if prefixRule && rules.bannedPrefix(name) {
 				if id, isIdent := sel.X.(*ast.Ident); isIdent {
 					if _, isPkg := pkgNames[id.Name]; isPkg {
 						return true // package-level function, not a client method
@@ -146,4 +161,74 @@ func Scan(root string, rules Rules) ([]Violation, error) {
 
 func violation(set *token.FileSet, pos token.Pos, path, rule, detail string) Violation {
 	return Violation{Path: path, Line: set.Position(pos).Line, Rule: rule, Detail: detail}
+}
+
+func rel2allowed(rules Rules, rel string) map[string]struct{} { return rules.FileAllowedCalls[rel] }
+
+// mentionsClient reports whether the type expression is or contains whatsmeow.Client.
+func mentionsClient(expr ast.Expr, wm string) bool {
+	found := false
+	ast.Inspect(expr, func(n ast.Node) bool {
+		if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == "Client" {
+			if id, ok := sel.X.(*ast.Ident); ok && id.Name == wm {
+				found = true
+			}
+		}
+		return !found
+	})
+	return found
+}
+
+// escapes reports, for internal/wa files, interface or constraint methods with a
+// banned name and any way the raw client can leave the package.
+func escapes(set *token.FileSet, rel string, node ast.Node, wm string, rules Rules, exempt func(string) bool) []Violation {
+	var out []Violation
+	add := func(pos token.Pos, rule string) {
+		out = append(out, violation(set, pos, rel, rule, "Client"))
+	}
+	switch n := node.(type) {
+	case *ast.InterfaceType:
+		for _, m := range n.Methods.List {
+			for _, name := range m.Names {
+				_, banned := rules.BannedCalls[name.Name]
+				if (banned || rules.bannedPrefix(name.Name)) && !exempt(name.Name) {
+					out = append(out, violation(set, name.Pos(), rel, "interface-method", name.Name))
+				}
+			}
+		}
+	case *ast.TypeSpec:
+		if n.Assign.IsValid() && mentionsClient(n.Type, wm) {
+			add(n.Pos(), "client-escape")
+		}
+	case *ast.StructType:
+		for _, f := range n.Fields.List {
+			if !mentionsClient(f.Type, wm) {
+				continue
+			}
+			exported := false
+			for _, name := range f.Names {
+				exported = exported || name.IsExported()
+			}
+			if len(f.Names) == 0 || exported { // embedded, or an exported field
+				add(f.Pos(), "client-escape")
+			}
+		}
+	case *ast.FuncDecl:
+		if n.Name.IsExported() && n.Type.Results != nil {
+			for _, r := range n.Type.Results.List {
+				if mentionsClient(r.Type, wm) {
+					add(r.Pos(), "client-escape")
+				}
+			}
+		}
+	case *ast.ValueSpec:
+		if n.Type != nil && mentionsClient(n.Type, wm) {
+			for _, name := range n.Names {
+				if name.IsExported() {
+					add(name.Pos(), "client-escape")
+				}
+			}
+		}
+	}
+	return out
 }

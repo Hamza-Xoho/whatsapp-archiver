@@ -15,7 +15,7 @@ Review work list: `docs/reviews/2026-10-14-phase0-review.md`. Prompts: `docs/pro
 
 ## Invariants
 
-- CON-1: never send anything a contact can see. Never call presence, read-receipt, message, reaction, edit, delete, group, or account mutation methods. Only `internal/wa/rerequest.go` may call `SendMediaRetryReceipt`.
+- CON-1: never send anything a contact can see. Never call presence, read-receipt, message, reaction, edit, delete, group, or account mutation methods. Only `internal/wa/rerequest.go` may call `SendMediaRetryReceipt`. The guards are static and cannot see calls made through reflection; do not use reflection on the client.
 - Only `internal/wa` imports the root `go.mau.fi/whatsmeow` client package. Data subpackages are allowed elsewhere.
 - CON-2: `messages`, `message_events`, `chat_events`, `id_mappings`, and `history_sync_chunks` are insert-only.
 - CON-7: store JIDs exactly as received; resolve LID/phone aliases in read views.
