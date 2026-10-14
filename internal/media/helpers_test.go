@@ -90,7 +90,9 @@ func newTestQueue(t *testing.T, st *store.Store, d Downloader, r config.MediaRul
 	if st == nil {
 		st = testkit.Store(t)
 	}
-	return NewQueue(t.TempDir(), r, st, d, c, quietLog(), onPanic)
+	q := NewQueue(t.TempDir(), r, st, d, c, quietLog(), onPanic)
+	q.sleep = func(time.Duration) {} // backoff waits are seconds long; tests never really sleep
+	return q
 }
 
 // start runs q until the returned stop is called (or the test ends); stop waits for Run to return.
