@@ -134,12 +134,12 @@ func (s *Store) insert(ctx context.Context, query string, args ...any) (bool, er
 }
 
 func (s *Store) UpsertChat(ctx context.Context, c Chat) error {
-	_, err := s.write.ExecContext(ctx, `INSERT INTO chats(jid,name,type,parent_jid) VALUES(?,?,?,?) ON CONFLICT(jid) DO UPDATE SET name=excluded.name,type=excluded.type,parent_jid=excluded.parent_jid`, c.JID, c.Name, c.Type, c.ParentJID)
-	return err
+	_, err := s.write.ExecContext(ctx, `INSERT INTO chats(jid,name,type,parent_jid) VALUES(?,?,?,?) ON CONFLICT(jid) DO UPDATE SET name=COALESCE(NULLIF(excluded.name,''),name),type=excluded.type,parent_jid=excluded.parent_jid`, c.JID, c.Name, c.Type, c.ParentJID)
+	return classify(err)
 }
 func (s *Store) UpsertParticipant(ctx context.Context, p Participant) error {
 	_, err := s.write.ExecContext(ctx, `INSERT INTO participants(jid,display_name) VALUES(?,?) ON CONFLICT(jid) DO UPDATE SET display_name=excluded.display_name`, p.JID, p.DisplayName)
-	return err
+	return classify(err)
 }
 func (s *Store) InsertIDMapping(ctx context.Context, m IDMapping) (bool, error) {
 	return s.insert(ctx, `INSERT INTO id_mappings(lid,pn,source,first_seen) VALUES(?,?,?,?) ON CONFLICT DO NOTHING`, m.LID, m.PN, m.Source, m.FirstSeen.Unix())
@@ -154,7 +154,7 @@ func (s *Store) InsertMessage(ctx context.Context, m Message) (bool, error) {
 	var exists int
 	err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM messages x LEFT JOIN chat_aliases xa ON xa.alias_jid=x.chat_jid LEFT JOIN chat_aliases ma ON ma.alias_jid=? WHERE x.id=? AND COALESCE(xa.canonical_jid,x.chat_jid)=COALESCE(ma.canonical_jid,?))`, m.ChatJID, m.ID, m.ChatJID).Scan(&exists)
 	if err != nil {
-		return false, fmt.Errorf("check message alias: %w", err)
+		return false, fmt.Errorf("check message alias: %w", classify(err))
 	}
 	if exists != 0 {
 		return false, nil
@@ -164,7 +164,7 @@ func (s *Store) InsertMessage(ctx context.Context, m Message) (bool, error) {
 		return false, fmt.Errorf("insert message %s: %w", m.ID, classify(err))
 	}
 	if err = tx.Commit(); err != nil {
-		return false, fmt.Errorf("commit message %s: %w", m.ID, err)
+		return false, fmt.Errorf("commit message %s: %w", m.ID, classify(err))
 	}
 	n, err := result.RowsAffected()
 	return n > 0, err
@@ -187,7 +187,7 @@ func (s *Store) InsertMedia(ctx context.Context, m Media) error {
 		m.RawProto = []byte{}
 	}
 	_, err := s.write.ExecContext(ctx, `INSERT INTO media(chat_jid,message_id,sender_jid,source,type,mime,declared_size,raw_proto,path,sha256,state,reason,attempts,retry_direct_path,updated_at,message_ts) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(chat_jid,message_id) DO NOTHING`, m.ChatJID, m.MessageID, m.SenderJID, m.Source, m.Type, m.MIME, m.DeclaredSize, m.RawProto, m.Path, m.SHA256, m.State, m.Reason, m.Attempts, m.RetryDirectPath, m.UpdatedAt, m.MessageTimestamp)
-	return err
+	return classify(err)
 }
 func (s *Store) SetMediaState(ctx context.Context, chat, id, state, reason string) error {
 	_, err := s.write.ExecContext(ctx, `UPDATE media SET state=?,reason=?,updated_at=? WHERE chat_jid=? AND message_id=?`, state, reason, time.Now().Unix(), chat, id)

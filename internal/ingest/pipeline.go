@@ -84,17 +84,25 @@ func (p *Pipeline) persist(ctx context.Context, what string, fn func() error) er
 	}
 	p.health.WriteFailed(err)
 	if isPermanent(err) {
-		err = fmt.Errorf("%s: %w", what, err)
-		p.log.Error("write rejected, not retrying", "what", what, "err", err)
-		return err
+		return p.rejected(what, err)
 	}
 	for ctx.Err() == nil {
 		p.sleep(ctx, writeMaxWait)
 		if err = fn(); err == nil {
 			return nil
 		}
+		if isPermanent(err) {
+			return p.rejected(what, err)
+		}
 	}
 	return fmt.Errorf("%s: %w", what, err)
+}
+
+// rejected logs and returns a write that can never succeed.
+func (p *Pipeline) rejected(what string, err error) error {
+	err = fmt.Errorf("%s: %w", what, err)
+	p.log.Error("write rejected, not retrying", "what", what, "err", err)
+	return err
 }
 
 func (p *Pipeline) Handle(evt any) {
