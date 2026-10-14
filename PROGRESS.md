@@ -290,3 +290,8 @@ Per the brief, only a ready-to-fill acceptance checklist will be produced.
 
 - Test commit `5a912af`; fix commit `6663f1c`. The request pass now fails, before taking a limiter token and without sending anything, an `expired` row that already has a `RetryDirectPath` (reason `re-uploaded media expired`) or `Attempts >= 20` (reason `download attempts exhausted`); so a message gets one re-upload request, and a crash loop cannot re-request it. `ResetMediaOnStart` errors are logged at Error (`stuck media rows not reset at start`).
 - Tests (`internal/media/bound_test.go`): `TestReuploadedMediaThatExpiresAgainFailsAfterOneRequest`, `TestExpiredRowAtAttemptCapFailsWithoutRequest`, `TestResetMediaOnStartFailureIsLogged` (Run with a cancelled context so only the reset runs). Red: requests = 2; requests = 1; no Error record.
+
+## Phase 0 fixes — media fix round 2 (request pass cannot spin on an unsaveable row)
+
+- Test commit `9ca2c95`; fix commit `6bfa971`. `save` now reports whether the write succeeded; when failing an exhausted expired row cannot be saved, `requestPass` returns (the row stays expired, the next wake/tick retries) instead of re-reading it in a hot loop holding the pass lock.
+- Test: `TestRequestPassEndsWhenFailingARowCannotBeSaved` (a SQLite trigger aborts updates to `failed`; red: pass still looping after 2 s).
