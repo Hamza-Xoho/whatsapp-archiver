@@ -260,3 +260,12 @@ Per the brief, only a ready-to-fill acceptance checklist will be produced.
 - Coverage: internal/media 73.3%.
 - Mutations killed: rf10c, rf10d-media, h11-row, x4, x5, x6, x7 (7/7).
 - Probe `TestProbeWorkerPanic`: before poison row `state="downloading" reason=""` → after `state="failed" reason="panic"`; sibling `done` both times.
+
+## Phase 0 fixes — H12 (CON-1 guard by prefix with an explicit allow-list)
+
+- Test commits `e62cd20`, `17fb8db` (lint-only fix to the helper: no deprecated `runtime.GOROOT`/`parser.ParseDir`), `95d8998` (pins the explicit `SendMediaRetryReceipt` name); fix commit `221d677`.
+- archtest `Rules`: `BannedCalls` (explicit names, any receiver, now also `SendMediaRetryReceipt`), `BannedPrefixes` (the 13 CON-1 prefixes, word-boundary match so fields like `Sender` are not hits), `AllowedCalls` (SetProxy, SetProxyAddress, SetSOCKSProxy, SetMediaHTTPClient, SetWebsocketHTTPClient, SetPreLoginHTTPClient, SetMaxParallelRetryReceiptHandling) and `FileAllowedCalls` (`internal/wa/rerequest.go` exempt for `SendMediaRetryReceipt` only; the old whole-file exemption is gone). The prefix rule applies to selectors whose receiver is not an imported package name, in files importing `go.mau.fi/whatsmeow`.
+- forbidigo (type-aware): `^whatsmeow\.Client\.(prefixes)([A-Z]\w*)?$` (forbidigo with analyze-types matches the pointer-stripped `whatsmeow.Client.Method` form, checked empirically). golangci exclusions: the allow-list by message text, and `SendMediaRetryReceipt` by text only for `rerequest.go`; the rerequest.go blanket forbidigo exclusion is removed.
+- Tests: `TestScanFlagsEveryBannedPrefixMethod` (enumerates the pinned whatsmeow `(*Client)` methods via `go list -m`; fails if not found), `TestAllowListedFileStillRejectsSendMessage`, `TestRetryReceiptThroughInterfaceOutsideRerequestIsFlagged`. All red first.
+- Mutations: h12-prefix, h12-allowfile, h12-allowlist-extra, h12-boundary, h12-nosendmedia (5/5 KILLED, `mutations/specs-h12.json`). Shared specs.json: 111 KILLED, 7 NOMATCH (code in other agents' worktrees: media/store, not present in this branch).
+- Canary (not committed): `SetStatusMessage`, `SetGroupName`, `SubscribePresence` in `internal/wa/sneaky.go` and `SendMessage` in `rerequest.go` fail both `make lint` and `TestRepoHasNoViolations`; `SetProxyAddress` and `SendMediaRetryReceipt` in `rerequest.go` pass.
