@@ -240,3 +240,13 @@ func TestNoEventsSilentWhileDisconnected(t *testing.T) {
 		t.Fatalf("disconnected and phone-quiet must still alert:\n%s", all)
 	}
 }
+
+func TestNeverConnectedStartupAlertsDisconnected(t *testing.T) {
+	r := newRig(t, config.AlertConfig{DisconnectedAfter: 15 * time.Minute})
+	r.advance(16 * time.Minute) // no SetState at all since start
+	r.m.check()
+	r.advance(time.Minute)
+	r.m.check()
+	r.m.SetState("connected", "")
+	wantBodies(t, r.sent(), "Disconnected for 16m", "ecovered")
+}
