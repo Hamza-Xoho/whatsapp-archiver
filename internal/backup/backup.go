@@ -38,7 +38,7 @@ func Run(ctx context.Context, cfg *config.Config) (report Report, err error) {
 		return report, fmt.Errorf("create snapshot folder: %w", err)
 	}
 	defer func() {
-		if err != nil {
+		if err != nil && report.Snapshot == "" {
 			_ = os.RemoveAll(folder)
 		}
 	}()
