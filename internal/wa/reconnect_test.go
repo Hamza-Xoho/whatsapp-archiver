@@ -60,10 +60,11 @@ func TestLoggedOutStopsTheReconnectLoop(t *testing.T) {
 
 	h := newHarness(t)
 	h.send(t, &events.LoggedOut{})
+	// Bounded window: a loop that returns on stop does so at once.
 	select {
 	case err := <-h.done:
 		t.Fatalf("reconnect returned %v before ctx was cancelled", err)
-	default:
+	case <-time.After(200 * time.Millisecond):
 	}
 	h.cancel()
 	if err := <-h.done; err != nil {
@@ -131,6 +132,36 @@ func TestOutdatedAfterConnectedTriggersRefresh(t *testing.T) {
 	}
 }
 
+func TestUnknownConnectFailureRetriesIn30Minutes(t *testing.T) {
+	for _, evt := range []any{&events.ConnectFailure{Reason: 499}, &events.CATRefreshError{Error: errors.New("cat")}} {
+		var p policy
+		for range 3 { // fixed, no doubling
+			if got, want := p.next(evt, t0), (action{disconnect: true, wait: 30 * time.Minute, connect: true}); got != want {
+				t.Fatalf("%T: got %+v want %+v", evt, got, want)
+			}
+		}
+	}
+}
+
+func TestOutdatedSameVersionWaitsThroughTheLoop(t *testing.T) {
+	h := newHarness(t)
+	h.mu.Lock()
+	h.changed = false
+	h.mu.Unlock()
+	h.send(t, &events.Connected{})
+	h.send(t, &events.ClientOutdated{})
+	h.sock.waitConnects(t, 2)
+	h.cancel()
+	if err := <-h.done; err != nil {
+		t.Fatalf("reconnect returned %v", err)
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.nRefresh != 2 || len(h.slept) != 1 || h.slept[0] != 30*time.Minute {
+		t.Fatalf("refreshes=%d slept=%v, want 2 refreshes around one 30m wait", h.nRefresh, h.slept)
+	}
+}
+
 func TestReconnectLoopBacksOffFailedConnects(t *testing.T) {
 	h := newHarness(t, errors.New("dial"), errors.New("dial"))
 	h.sock.waitConnects(t, 3)
@@ -195,6 +226,7 @@ type harness struct {
 	mu        sync.Mutex
 	slept     []time.Duration
 	nRefresh  int
+	changed   bool // what refresh reports
 }
 
 func (h *harness) send(t *testing.T, evt any) {
@@ -223,6 +255,7 @@ func newHarness(t *testing.T, errs ...error) *harness {
 		cancel:    cancel,
 		done:      make(chan error, 1),
 		refreshed: make(chan struct{}, 64),
+		changed:   true,
 	}
 	c := &Client{
 		sock: h.sock,
@@ -230,9 +263,10 @@ func newHarness(t *testing.T, errs ...error) *harness {
 		refresh: func(context.Context) (bool, error) {
 			h.mu.Lock()
 			h.nRefresh++
+			changed := h.changed
 			h.mu.Unlock()
 			h.refreshed <- struct{}{}
-			return true, nil
+			return changed, nil
 		},
 		sleep: func(_ context.Context, d time.Duration) error {
 			h.mu.Lock()

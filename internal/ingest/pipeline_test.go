@@ -25,11 +25,11 @@ func (q *queueFake) OnRetry(context.Context, *events.MediaRetry) {}
 
 type healthFake struct {
 	seen, failed, panics int
-	state                string
+	state, detail        string
 }
 
 func (h *healthFake) Seen(time.Time, bool) { h.seen++ }
-func (h *healthFake) SetState(s, _ string) { h.state = s }
+func (h *healthFake) SetState(s, d string) { h.state, h.detail = s, d }
 func (h *healthFake) WriteFailed(error)    { h.failed++ }
 func (h *healthFake) Panic(string)         { h.panics++ }
 
@@ -67,3 +67,12 @@ func TestUndecryptableThenResentClosesGap(t *testing.T) {
 	}
 }
 func text(value string) *waE2E.Message { return &waE2E.Message{Conversation: proto.String(value)} }
+
+func TestConnectFailureReportsDisconnected(t *testing.T) {
+	h := &healthFake{}
+	p := ingest.NewPipeline(testkit.Store(t), ingest.NewFilter(nil, nil), &queueFake{}, h, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	p.Handle(&events.ConnectFailure{Reason: events.ConnectFailureReason(499), Message: "odd failure"})
+	if h.state != "disconnected" || h.detail != "499: unknown error odd failure" {
+		t.Fatalf("state=%q detail=%q", h.state, h.detail)
+	}
+}
