@@ -252,3 +252,11 @@ Per the brief, only a ready-to-fill acceptance checklist will be produced.
 
 - Test commit `6483e86`; fix commit `f48e20f`. The disconnected rule also fires while the state is still empty (never connected), measured from monitor creation, and clears with one "Recovered" on the first `connected`. No-events stays connected-only.
 - Test: `TestNeverConnectedStartupAlertsDisconnected` (red: no alert). Mutation h10-neverconnected KILLED; h10-disc match string updated. Full spec file at `f48e20f`: 99/99 KILLED.
+
+## Phase 0 fixes — H11 (media-worker panic marks the row failed and is reported)
+
+- Test commit `ec7edd4`; fix commit `1a38d19`. `NewQueue` takes `onPanic func(string)` (nil allowed); `serve` passes `mon.Panic`. Each worker keeps its current row; the guard's callback (one `guard.Run` per worker pass, unchanged boundary) sets that row `failed` with reason `panic` through the store and calls `onPanic("media")` once; the worker then goes on with the next row. Media row writes that fail are logged at Error with chat, id and state (no second retry loop; the row is re-claimable after a restart).
+- Tests (`internal/media/worker_test.go`, helpers in `helpers_test.go`): `TestWorkerPanicMarksRowFailedAndIsCounted` (red: poison row stayed `downloading`; compile-only red for the new argument, behavioural failure shown against a scratch stub that ignored it), and pinning tests that already held: `TestPendingAndDownloadingRowsRecoverAfterRestart`, `TestMediaMetadataRecorded` (layout path, sha256, `downloading` while claimed), `TestLiveMediaBeforeHistoryBacklog`. New tests wait by polling the store and stop by cancelling and waiting for `Run`; no sleeps.
+- Coverage: internal/media 73.3%.
+- Mutations killed: rf10c, rf10d-media, h11-row, x4, x5, x6, x7 (7/7).
+- Probe `TestProbeWorkerPanic`: before poison row `state="downloading" reason=""` → after `state="failed" reason="panic"`; sibling `done` both times.
