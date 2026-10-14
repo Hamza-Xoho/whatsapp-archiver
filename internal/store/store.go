@@ -145,6 +145,16 @@ func (s *Store) InsertIDMapping(ctx context.Context, m IDMapping) (bool, error) 
 	return s.insert(ctx, `INSERT INTO id_mappings(lid,pn,source,first_seen) VALUES(?,?,?,?) ON CONFLICT DO NOTHING`, m.LID, m.PN, m.Source, m.FirstSeen.Unix())
 }
 
+// dedupeQuery reports whether message ?2 already exists under any alias of chat ?1. It first resolves the one chat's
+// aliases (the chat, the lids of a phone number, the phone numbers of those lids) from id_mappings, then probes
+// messages by its (chat_jid, id) primary key, so its cost does not depend on the size of messages. The chat_aliases
+// view stays for read paths; it must not be used here because it scans messages.
+const dedupeQuery = `SELECT EXISTS(SELECT 1 FROM messages WHERE id=?2 AND chat_jid IN (
+ SELECT ?1
+ UNION SELECT lid FROM id_mappings WHERE pn=?1
+ UNION SELECT pn FROM id_mappings WHERE lid=?1
+ UNION SELECT pn FROM id_mappings WHERE lid IN (SELECT lid FROM id_mappings WHERE pn=?1)))`
+
 func (s *Store) InsertMessage(ctx context.Context, m Message) (bool, error) {
 	tx, err := s.write.BeginTx(ctx, nil)
 	if err != nil {
@@ -152,7 +162,7 @@ func (s *Store) InsertMessage(ctx context.Context, m Message) (bool, error) {
 	}
 	defer func() { _ = tx.Rollback() }()
 	var exists int
-	err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM messages x LEFT JOIN chat_aliases xa ON xa.alias_jid=x.chat_jid LEFT JOIN chat_aliases ma ON ma.alias_jid=? WHERE x.id=? AND COALESCE(xa.canonical_jid,x.chat_jid)=COALESCE(ma.canonical_jid,?))`, m.ChatJID, m.ID, m.ChatJID).Scan(&exists)
+	err = tx.QueryRowContext(ctx, dedupeQuery, m.ChatJID, m.ID).Scan(&exists)
 	if err != nil {
 		return false, fmt.Errorf("check message alias: %w", classify(err))
 	}

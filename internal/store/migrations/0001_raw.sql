@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS id_mappings (
   first_seen INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (lid, pn)
 );
+CREATE INDEX IF NOT EXISTS id_mappings_pn ON id_mappings(pn, lid);
 CREATE TABLE IF NOT EXISTS messages (
   chat_jid TEXT NOT NULL,
   id TEXT NOT NULL,
