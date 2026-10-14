@@ -29,12 +29,18 @@ func newRig(t *testing.T, alerts config.AlertConfig) *rig {
 	r := &rig{n: &note{}, c: &clock{time.Unix(1_700_000_000, 0).UTC()}, free: 99 << 30}
 	cfg := &config.Config{DataDir: t.TempDir(), Alerts: alerts}
 	r.m = NewMonitor(cfg, r.n, r.c, func(string) (uint64, error) { return r.free, nil }, func() string { return "2.3000.1" })
+	r.stop = running(t, r.m)
+	return r
+}
+
+// running runs m until the returned stop is called (or the test ends); stop returns once Run has returned.
+func running(t *testing.T, m *Monitor) (stop func()) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
-	go func() { defer close(done); r.m.Run(ctx) }()
-	r.stop = func() { cancel(); <-done }
-	t.Cleanup(r.stop)
-	return r
+	go func() { defer close(done); m.Run(ctx) }()
+	stop = func() { cancel(); <-done }
+	t.Cleanup(stop)
+	return stop
 }
 
 // sent stops the monitor and returns every alert body it handed to the notifier.

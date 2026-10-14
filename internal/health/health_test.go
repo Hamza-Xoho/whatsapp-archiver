@@ -22,8 +22,10 @@ func TestImmediateStateAlertsAreGated(t *testing.T) {
 	n := &note{}
 	c := &clock{time.Unix(1, 0)}
 	m := NewMonitor(&config.Config{DataDir: dir, Alerts: config.AlertConfig{}}, n, c, func(string) (uint64, error) { return 99 << 30, nil }, func() string { return "2.3000.1" })
+	stop := running(t, m)
 	m.SetState("client_outdated", "")
 	m.SetState("client_outdated", "")
+	stop()
 	if len(n.bodies) != 1 || m.Status().State != "client_outdated" {
 		t.Fatalf("notes=%v status=%+v", n.bodies, m.Status())
 	}
