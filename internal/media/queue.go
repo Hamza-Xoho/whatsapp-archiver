@@ -22,6 +22,14 @@ import (
 	"whatsapp-archiver/internal/wa"
 )
 
+// A download round is roundAttempts tries 1+2+4+8 s apart; a row that still fails is tried again requeueAfter later,
+// until maxAttempts tries in all.
+const (
+	roundAttempts = 5
+	maxAttempts   = 20
+	requeueAfter  = 15 * time.Minute
+)
+
 type Downloader interface {
 	Download(context.Context, []byte, string) ([]byte, error)
 	RequestMediaRetry(context.Context, wa.MediaRef, []byte) error
@@ -38,7 +46,8 @@ type Queue struct {
 	wake    chan struct{}
 	limiter *rate.Limiter
 	onPanic func(string)
-	pass    sync.Mutex // one request pass at a time
+	sleep   func(time.Duration) // backoff wait; nil waits on a timer that stops with the context
+	pass    sync.Mutex          // one request pass at a time
 	wg      sync.WaitGroup
 }
 
@@ -103,7 +112,7 @@ func (q *Queue) Run(ctx context.Context) {
 }
 func (q *Queue) work(ctx context.Context, current **store.Media) {
 	for {
-		job, err := q.store.ClaimMedia(ctx)
+		job, err := q.store.ClaimMedia(ctx, q.clock.Now())
 		if err != nil || job == nil {
 			return
 		}
@@ -167,9 +176,11 @@ func (q *Queue) save(ctx context.Context, m store.Media) {
 }
 func (q *Queue) download(ctx context.Context, m *store.Media) {
 	var data []byte
-	attempts, err := retry.Do(ctx, retry.Policy{Max: 5, Base: 10 * time.Millisecond}, func() error { var e error; data, e = q.down.Download(ctx, m.RawProto, m.RetryDirectPath); return e })
+	policy := retry.Policy{Max: roundAttempts, Base: time.Second, Sleep: q.sleep, Permanent: func(e error) bool { return errors.Is(e, wa.ErrMediaExpired) }}
+	attempts, err := retry.Do(ctx, policy, func() error { var e error; data, e = q.down.Download(ctx, m.RawProto, m.RetryDirectPath); return e })
 	m.Attempts += attempts
-	m.UpdatedAt = q.clock.Now().Unix()
+	now := q.clock.Now()
+	m.UpdatedAt = now.Unix()
 	if errors.Is(err, wa.ErrMediaExpired) {
 		m.State = "expired" // the next request pass asks for a re-upload
 		m.Reason = err.Error()
@@ -179,6 +190,10 @@ func (q *Queue) download(ctx context.Context, m *store.Media) {
 	if err != nil {
 		m.State = "failed"
 		m.Reason = err.Error()
+		if m.Attempts < maxAttempts {
+			m.State = "pending" // a later round, after the network had time to come back
+			m.NextAttemptAt = now.Add(requeueAfter).Unix()
+		}
 		q.save(ctx, *m)
 		return
 	}

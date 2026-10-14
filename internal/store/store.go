@@ -59,6 +59,7 @@ type Media struct {
 	DeclaredSize, UpdatedAt, MessageTimestamp                                                       int64
 	Attempts                                                                                        int
 	FromMe                                                                                          bool
+	NextAttemptAt                                                                                   int64 // a pending row is not claimed before this unix time
 	RawProto                                                                                        []byte
 }
 type ChatStat struct {
@@ -211,13 +212,13 @@ func (s *Store) SetMediaState(ctx context.Context, chat, id, state, reason strin
 	return err
 }
 
-const mediaColumns = `chat_jid,message_id,sender_jid,source,type,mime,declared_size,raw_proto,path,sha256,state,reason,attempts,retry_direct_path,updated_at,message_ts,from_me`
+const mediaColumns = `chat_jid,message_id,sender_jid,source,type,mime,declared_size,raw_proto,path,sha256,state,reason,attempts,retry_direct_path,updated_at,message_ts,from_me,next_attempt_at`
 
 // mediaOrder is the queue order: live before history, newest first.
 const mediaOrder = `CASE source WHEN 'live' THEN 0 ELSE 1 END,message_ts DESC`
 
 func (m *Media) fields() []any {
-	return []any{&m.ChatJID, &m.MessageID, &m.SenderJID, &m.Source, &m.Type, &m.MIME, &m.DeclaredSize, &m.RawProto, &m.Path, &m.SHA256, &m.State, &m.Reason, &m.Attempts, &m.RetryDirectPath, &m.UpdatedAt, &m.MessageTimestamp, &m.FromMe}
+	return []any{&m.ChatJID, &m.MessageID, &m.SenderJID, &m.Source, &m.Type, &m.MIME, &m.DeclaredSize, &m.RawProto, &m.Path, &m.SHA256, &m.State, &m.Reason, &m.Attempts, &m.RetryDirectPath, &m.UpdatedAt, &m.MessageTimestamp, &m.FromMe, &m.NextAttemptAt}
 }
 
 func (s *Store) MediaByID(ctx context.Context, chat, id string) (Media, error) {
@@ -225,14 +226,16 @@ func (s *Store) MediaByID(ctx context.Context, chat, id string) (Media, error) {
 	err := s.read.QueryRowContext(ctx, `SELECT `+mediaColumns+` FROM media WHERE chat_jid=? AND message_id=?`, chat, id).Scan(m.fields()...)
 	return m, err
 }
-func (s *Store) ClaimMedia(ctx context.Context) (*Media, error) {
+
+// ClaimMedia marks the next pending row that is due at now as downloading and returns it, or nil.
+func (s *Store) ClaimMedia(ctx context.Context, now time.Time) (*Media, error) {
 	tx, err := s.write.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	var m Media
-	err = tx.QueryRowContext(ctx, `SELECT `+mediaColumns+` FROM media WHERE state='pending' ORDER BY `+mediaOrder+` LIMIT 1`).Scan(m.fields()...)
+	err = tx.QueryRowContext(ctx, `SELECT `+mediaColumns+` FROM media WHERE state='pending' AND next_attempt_at<=? ORDER BY `+mediaOrder+` LIMIT 1`, now.Unix()).Scan(m.fields()...)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -249,7 +252,7 @@ func (s *Store) ClaimMedia(ctx context.Context) (*Media, error) {
 	return &m, nil
 }
 func (s *Store) UpdateMedia(ctx context.Context, m Media) error {
-	_, err := s.write.ExecContext(ctx, `UPDATE media SET path=?,sha256=?,state=?,reason=?,attempts=?,retry_direct_path=?,updated_at=? WHERE chat_jid=? AND message_id=?`, m.Path, m.SHA256, m.State, m.Reason, m.Attempts, m.RetryDirectPath, m.UpdatedAt, m.ChatJID, m.MessageID)
+	_, err := s.write.ExecContext(ctx, `UPDATE media SET path=?,sha256=?,state=?,reason=?,attempts=?,retry_direct_path=?,updated_at=?,next_attempt_at=? WHERE chat_jid=? AND message_id=?`, m.Path, m.SHA256, m.State, m.Reason, m.Attempts, m.RetryDirectPath, m.UpdatedAt, m.NextAttemptAt, m.ChatJID, m.MessageID)
 	return err
 }
 func (s *Store) ResetMediaOnStart(ctx context.Context, now time.Time) error {
