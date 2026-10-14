@@ -90,3 +90,35 @@ func TestInsertMessageDuplicateAcrossSiblingPhoneNumbers(t *testing.T) {
 		}
 	}
 }
+
+// Filter.Keep calls Aliases for every event, so its query must be answered by index lookups only: no materialised view
+// and no table or index scan (the view's scans of chats and id_mappings grow with the archive).
+func TestAliasesQueryUsesIndexLookupsOnly(t *testing.T) {
+	s := openInternal(t)
+	rows, err := s.read.QueryContext(context.Background(), "EXPLAIN QUERY PLAN "+aliasesQuery, "a@g.us")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var plan []string
+	for rows.Next() {
+		var id, parent, unused int
+		var detail string
+		if err = rows.Scan(&id, &parent, &unused, &detail); err != nil {
+			t.Fatal(err)
+		}
+		plan = append(plan, detail)
+	}
+	if err = rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	all := strings.Join(plan, "\n")
+	if strings.Contains(all, "MATERIALIZE") || strings.Contains(all, "CO-ROUTINE") {
+		t.Fatalf("aliases query plan builds a view:\n%s", all)
+	}
+	for _, line := range plan {
+		if strings.HasPrefix(line, "SCAN ") && line != "SCAN CONSTANT ROW" {
+			t.Fatalf("aliases query plan scans (%s):\n%s", line, all)
+		}
+	}
+}
