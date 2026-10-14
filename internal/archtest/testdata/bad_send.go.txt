@@ -1,0 +1,5 @@
+package scratch
+
+func bad(client interface{ SendMessage() }) {
+	client.SendMessage()
+}

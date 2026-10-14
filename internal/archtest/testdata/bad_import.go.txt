@@ -1,0 +1,5 @@
+package scratch
+
+import "go.mau.fi/whatsmeow"
+
+var _ *whatsmeow.Client
