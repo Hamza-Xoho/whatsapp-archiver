@@ -260,3 +260,12 @@ Per the brief, only a ready-to-fill acceptance checklist will be produced.
 - Coverage: internal/media 73.3%.
 - Mutations killed: rf10c, rf10d-media, h11-row, x4, x5, x6, x7 (7/7).
 - Probe `TestProbeWorkerPanic`: before poison row `state="downloading" reason=""` → after `state="failed" reason="panic"`; sibling `done` both times.
+
+## Phase 0 fixes — H16 (retention removes only snapshot folders) and H15 (service can write the backup path)
+
+- H16: test commit `3824f8e`; fix commit `b9ee812`. `snapshotLayout` is the one layout `Run` writes and retention parses with; retention keeps the newest `Keep` folders by parsed time and ignores files and foreign folders. Any failure after the snapshot folder exists (open, VACUUM, Verify, Stat, retention) removes that folder; errors are wrapped with context.
+- H15: test commit `db811df`; fix commit `fcef416`. `ReadWritePaths` now lists the data folder and `/srv/backups/whatsapp-archiver`; the guide says a different destination must be added there too and gives the `install -d` command. `TestServiceUnitCanWriteDataAndBackupFolders` (`cmd/archiver/unit_test.go`) reads the unit's `--data` and `ReadWritePaths` and the guide's `destination:` value, so they cannot drift.
+- Tests (`internal/backup/backup_test.go`): `TestRetentionOnlyRemovesSnapshotFolders` and `TestFailedSnapshotLeavesNoFolder` were red; `TestKeepTwoLeavesTwoSnapshots` already held (it is the x13 killer). Task 8 gaps added and green on arrival: `TestSnapshotRowCountMatchesSource`, `TestSnapshotDuringConcurrentInserts`, `TestScheduleFiresOnceAtConfiguredTime` (fake clock; first wait 30m, one run), `TestDestinationNotWritableReturnsError`, `TestVerifyRejectsFailedIntegrityCheck` (index root page replaced by an empty leaf: file opens, integrity_check fails; kills x12).
+- Coverage: internal/backup 81.7%.
+- Mutations (`specs-backup.json`) 6/6 KILLED: x12, x13, h16-foreign, h16-failed, h15-rwpath, backup-schedule-twice. Shared `specs.json` at `fcef416`: 112 KILLED, 1 NOMATCH (`h6-classify-media`, store.go; its match string is not in this branch's base).
+- Probe (scratch copy): `TestProbeRetentionDeletesForeignDirs` now leaves `0-keep-me`, `2023-family-photos`, `media` and the fresh snapshot; `TestProbeFailedSnapshotLeavesJunkFolder` leaves 0 folders.
