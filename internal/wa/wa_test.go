@@ -7,8 +7,28 @@ import (
 	"testing"
 
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/proto/waCommon"
+	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/proto/waWeb"
+	wmstore "go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
+	"go.mau.fi/whatsmeow/types"
+	"google.golang.org/protobuf/proto"
 )
+
+// The client's history parser reads the account's own JID at parse time, so it works after pairing too.
+func TestClientHistoryParserUsesOwnJID(t *testing.T) {
+	device := &wmstore.Device{}
+	c := &Client{client: whatsmeow.NewClient(device, nil)}
+	parse := c.HistoryParser()
+	own := types.NewADJID("111", 0, 5)
+	device.ID = &own
+	web := &waWeb.WebMessageInfo{Key: &waCommon.MessageKey{ID: proto.String("A"), FromMe: proto.Bool(true)}, Message: &waE2E.Message{Conversation: proto.String("hi")}}
+	evt, err := parse(types.NewJID("4915111", types.DefaultUserServer), web)
+	if err != nil || evt.Info.Sender.String() != "111@s.whatsapp.net" || evt.Message.GetConversation() != "hi" {
+		t.Fatalf("evt=%+v err=%v", evt, err)
+	}
+}
 
 func TestSessionDSNEnablesForeignKeys(t *testing.T) {
 	dsn := sessionDSN(filepath.Join(t.TempDir(), "session.db"))

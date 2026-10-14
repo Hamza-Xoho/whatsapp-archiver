@@ -1,22 +1,165 @@
 package ingest_test
 
 import (
-	"io"
+	"bytes"
+	"database/sql"
+	"fmt"
 	"log/slog"
+	"strings"
 	"testing"
 
 	"go.mau.fi/whatsmeow/proto/waCommon"
+	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/proto/waWeb"
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
 	"whatsapp-archiver/internal/ingest"
+	"whatsapp-archiver/internal/store"
 	"whatsapp-archiver/internal/testkit"
+	"whatsapp-archiver/internal/wa"
 )
+
+// historyParser is the real whatsmeow-backed parser for an account with these own IDs.
+func historyParser() ingest.HistoryParser {
+	return wa.NewHistoryParser(jid("111:5@s.whatsapp.net"), jid("222:5@lid"))
+}
+func historyPipeline(st ingest.Writer, f *ingest.Filter, q ingest.MediaQueue) *ingest.Pipeline {
+	return ingest.NewPipeline(st, f, q, &healthFake{}, quiet()).WithHistoryParser(historyParser())
+}
+
+// rows returns the query result, one "a|b|c" string per row.
+func rows(t *testing.T, st *store.Store, query string) []string {
+	t.Helper()
+	db, err := sql.Open("sqlite", "file:"+st.Path()+"?mode=ro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	r, err := db.Query(query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = r.Close() }()
+	cols, _ := r.Columns()
+	var out []string
+	for r.Next() {
+		vals := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err = r.Scan(ptrs...); err != nil {
+			t.Fatal(err)
+		}
+		parts := make([]string, len(vals))
+		for i, v := range vals {
+			if b, ok := v.([]byte); ok {
+				v = string(b)
+			}
+			parts[i] = fmt.Sprint(v)
+		}
+		out = append(out, strings.Join(parts, "|"))
+	}
+	return out
+}
+
+func chunk(chat string, msgs ...*waWeb.WebMessageInfo) *events.HistorySync {
+	items := make([]*waHistorySync.HistorySyncMsg, len(msgs))
+	for i, m := range msgs {
+		items[i] = &waHistorySync.HistorySyncMsg{Message: m}
+	}
+	return &events.HistorySync{Data: &waHistorySync.HistorySync{Progress: proto.Uint32(1), Conversations: []*waHistorySync.Conversation{{ID: proto.String(chat), Messages: items}}}}
+}
+func webMsg(id, participant string, fromMe bool, msg *waE2E.Message) *waWeb.WebMessageInfo {
+	key := &waCommon.MessageKey{ID: proto.String(id), FromMe: proto.Bool(fromMe)}
+	if participant != "" {
+		key.Participant = proto.String(participant)
+	}
+	return &waWeb.WebMessageInfo{Key: key, MessageTimestamp: proto.Uint64(10), Message: msg}
+}
+
+// H5a: wrapped history messages are unwrapped like live ones: text is kept and media is queued.
+func TestHistoryEphemeralAndDocumentCaptionAreUnwrapped(t *testing.T) {
+	st := testkit.Store(t)
+	q := &queueFake{}
+	p := historyPipeline(st, ingest.NewFilter(nil, nil), q)
+	eph := &waE2E.Message{EphemeralMessage: &waE2E.FutureProofMessage{Message: text("disappearing hello")}}
+	doc := &waE2E.Message{DocumentWithCaptionMessage: &waE2E.FutureProofMessage{Message: &waE2E.Message{DocumentMessage: &waE2E.DocumentMessage{Mimetype: proto.String("application/pdf"), Caption: proto.String("syllabus")}}}}
+	stored, skipped, err := p.ImportHistory(t.Context(), chunk("g@g.us", webMsg("EPH", "3@lid", false, eph), webMsg("DOC", "3@lid", false, doc)))
+	if err != nil || stored != 2 || skipped != 0 {
+		t.Fatalf("stored=%d skipped=%d err=%v", stored, skipped, err)
+	}
+	got := strings.Join(rows(t, st, "SELECT id,text,media_type FROM messages ORDER BY id"), ",")
+	if got != "DOC|syllabus|document,EPH|disappearing hello|" || len(q.items) != 1 || q.items[0].MessageID != "DOC" {
+		t.Fatalf("messages=%s media=%+v", got, q.items)
+	}
+}
+
+// H5b: our own history messages are sent by our own JID, never by the contact or the group.
+func TestHistoryFromMeMessageHasOwnJIDAsSender(t *testing.T) {
+	st := testkit.Store(t)
+	p := historyPipeline(st, ingest.NewFilter(nil, nil), &queueFake{})
+	for _, hs := range []*events.HistorySync{chunk("4915111@s.whatsapp.net", webMsg("DM", "", true, text("hi"))), chunk("120363@g.us", webMsg("GRP", "", true, text("hi")))} {
+		if stored, _, err := p.ImportHistory(t.Context(), hs); err != nil || stored != 1 {
+			t.Fatalf("stored=%d err=%v", stored, err)
+		}
+	}
+	got := strings.Join(rows(t, st, "SELECT id,sender_jid FROM messages ORDER BY id"), ",")
+	participants := strings.Join(rows(t, st, "SELECT jid FROM participants ORDER BY jid"), ",")
+	if got != "DM|111@s.whatsapp.net,GRP|111@s.whatsapp.net" || participants != "111@s.whatsapp.net" {
+		t.Fatalf("senders=%s participants=%s", got, participants)
+	}
+}
+
+// H5c: the push name of a history message is stored for its sender.
+func TestHistoryPushNameIsStored(t *testing.T) {
+	st := testkit.Store(t)
+	p := historyPipeline(st, ingest.NewFilter(nil, nil), &queueFake{})
+	m := webMsg("A", "3@lid", false, text("hi"))
+	m.PushName = proto.String("Alice")
+	if _, _, err := p.ImportHistory(t.Context(), chunk("g@g.us", m)); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(rows(t, st, "SELECT jid,display_name FROM participants"), ","); got != "3@lid|Alice" {
+		t.Fatalf("participants=%s", got)
+	}
+}
+
+// H5: an edit in history stays an edit event under its target; it is not rewritten into the original message.
+func TestHistoryEditIsStillAnEvent(t *testing.T) {
+	st := testkit.Store(t)
+	p := historyPipeline(st, ingest.NewFilter(nil, nil), &queueFake{})
+	edit := &waE2E.Message{EditedMessage: &waE2E.FutureProofMessage{Message: &waE2E.Message{ProtocolMessage: &waE2E.ProtocolMessage{
+		Type: waE2E.ProtocolMessage_MESSAGE_EDIT.Enum(), Key: &waCommon.MessageKey{ID: proto.String("ORIG")}, EditedMessage: text("fixed"),
+	}}}}
+	if _, _, err := p.ImportHistory(t.Context(), chunk("g@g.us", webMsg("EDIT1", "3@lid", false, edit))); err != nil {
+		t.Fatal(err)
+	}
+	evts := strings.Join(rows(t, st, "SELECT target_id,kind,new_text FROM message_events"), ",")
+	messages := rows(t, st, "SELECT id FROM messages")
+	if evts != "ORIG|edit|fixed" || len(messages) != 0 {
+		t.Fatalf("events=%s messages=%v", evts, messages)
+	}
+}
+
+// A message the parser rejects (a group message with no sender) is skipped and logged; the chunk goes on.
+func TestHistoryUnparseableMessageIsSkippedAndLogged(t *testing.T) {
+	st := testkit.Store(t)
+	var buf bytes.Buffer
+	p := ingest.NewPipeline(st, ingest.NewFilter(nil, nil), &queueFake{}, &healthFake{}, slog.New(slog.NewTextHandler(&buf, nil))).WithHistoryParser(historyParser())
+	stored, skipped, err := p.ImportHistory(t.Context(), chunk("g@g.us", webMsg("NOSENDER", "", false, text("x")), webMsg("OK", "3@lid", false, text("y"))))
+	if err != nil || stored != 1 || skipped != 1 {
+		t.Fatalf("stored=%d skipped=%d err=%v", stored, skipped, err)
+	}
+	if out := buf.String(); !strings.Contains(out, "level=WARN") || !strings.Contains(out, "g@g.us") || !strings.Contains(out, "NOSENDER") {
+		t.Fatalf("log=%q", out)
+	}
+}
 
 func TestHistoryThenLiveNoDuplicate(t *testing.T) {
 	st := testkit.Store(t)
-	p := ingest.NewPipeline(st, ingest.NewFilter(nil, nil), &queueFake{}, &healthFake{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	p := historyPipeline(st, ingest.NewFilter(nil, nil), &queueFake{})
 	hs := history("g@g.us", "ABC", 1)
 	stored, skipped, err := p.ImportHistory(t.Context(), hs)
 	if err != nil || stored != 1 || skipped != 0 {
@@ -30,7 +173,7 @@ func TestHistoryThenLiveNoDuplicate(t *testing.T) {
 }
 func TestLateChunkAfterCompleteIsStored(t *testing.T) {
 	st := testkit.Store(t)
-	p := ingest.NewPipeline(st, ingest.NewFilter(nil, nil), &queueFake{}, &healthFake{}, slog.Default())
+	p := historyPipeline(st, ingest.NewFilter(nil, nil), &queueFake{})
 	a := history("g@g.us", "A", 100)
 	b := history("g@g.us", "B", 50)
 	_, _, _ = p.ImportHistory(t.Context(), a)
@@ -42,7 +185,7 @@ func TestLateChunkAfterCompleteIsStored(t *testing.T) {
 }
 func TestEmptyOrPartialChunkDoesNotPanic(t *testing.T) {
 	st := testkit.Store(t)
-	p := ingest.NewPipeline(st, ingest.NewFilter(nil, nil), &queueFake{}, &healthFake{}, slog.Default())
+	p := historyPipeline(st, ingest.NewFilter(nil, nil), &queueFake{})
 	stored, skipped, err := p.ImportHistory(t.Context(), &events.HistorySync{Data: &waHistorySync.HistorySync{Conversations: []*waHistorySync.Conversation{nil, {Messages: []*waHistorySync.HistorySyncMsg{{}}}}}})
 	if err != nil || stored != 0 || skipped != 1 {
 		t.Fatalf("stored=%d skipped=%d err=%v", stored, skipped, err)
@@ -54,7 +197,7 @@ func history(chat, id string, progress uint32) *events.HistorySync {
 		Conversations: []*waHistorySync.Conversation{{
 			ID: proto.String(chat),
 			Messages: []*waHistorySync.HistorySyncMsg{{Message: &waWeb.WebMessageInfo{
-				Key:              &waCommon.MessageKey{RemoteJID: proto.String(chat), ID: proto.String(id)},
+				Key:              &waCommon.MessageKey{RemoteJID: proto.String(chat), ID: proto.String(id), Participant: proto.String("2@lid")},
 				MessageTimestamp: proto.Uint64(10), Message: text(id),
 			}}},
 		}},

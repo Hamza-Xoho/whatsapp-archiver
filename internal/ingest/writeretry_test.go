@@ -98,7 +98,7 @@ func (q *flakyQueue) Enqueue(ctx context.Context, m store.Media) error {
 func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
 func newPipeline(w ingest.Writer, q ingest.MediaQueue, h *healthFake, ft *fakeTime) *ingest.Pipeline {
-	return ingest.NewPipeline(w, ingest.NewFilter(nil, nil), q, h, quiet()).WithClock(ft.clock.Now, ft.sleep)
+	return ingest.NewPipeline(w, ingest.NewFilter(nil, nil), q, h, quiet()).WithClock(ft.clock.Now, ft.sleep).WithHistoryParser(historyParser())
 }
 
 func messageCount(t *testing.T, st *store.Store) int {
