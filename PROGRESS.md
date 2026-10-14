@@ -247,3 +247,8 @@ Per the brief, only a ready-to-fill acceptance checklist will be produced.
 - Mutations killed: m2-swallow, m2-dropfired, h10-noevents-while-disc, h10-tempban-until, h10-tempban-verbatim; rf4b, h10-noevents-start, m2-sync, m2-bgctx match strings updated for the new code. Full spec file at `8585f73`: 98/98 KILLED.
 - Probe (with `Run`): 20 days disconnected → 80 disconnected, 0 no-events (was 79), 40 phone-quiet. `TestProbeNoRecoveredMessage` never sets a state, so it now sends nothing (no-events only applies while connected).
 - Open: before the first `connected` (state empty) neither no-events nor disconnected alerts.
+
+## Phase 0 fixes — H10 fix round 2 (never-connected startup)
+
+- Test commit `6483e86`; fix commit `f48e20f`. The disconnected rule also fires while the state is still empty (never connected), measured from monitor creation, and clears with one "Recovered" on the first `connected`. No-events stays connected-only.
+- Test: `TestNeverConnectedStartupAlertsDisconnected` (red: no alert). Mutation h10-neverconnected KILLED; h10-disc match string updated. Full spec file at `f48e20f`: 99/99 KILLED.
