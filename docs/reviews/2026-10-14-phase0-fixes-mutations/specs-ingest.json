@@ -1,0 +1,34 @@
+[
+ {
+  "name": "ff-open",
+  "rf": "ingest-A",
+  "file": "internal/ingest/scope.go",
+  "old": "\t\tif err != nil {\n\t\t\treturn false, fmt.Errorf(\"alias lookup for %s: %w\", chatJID, err)\n\t\t}\n",
+  "new": "\t\tif err != nil {\n\t\t\taliases = nil // error treated as \"no aliases\": fails open\n\t\t}\n",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "ff-noretry",
+  "rf": "ingest-A",
+  "file": "internal/ingest/pipeline.go",
+  "old": "\terr = p.persist(ctx, \"check exclusion of \"+chat, func() (e error) {\n\t\tkeep, e = p.filter.Keep(chat, kind)\n\t\treturn e\n\t})\n",
+  "new": "\tkeep, err = p.filter.Keep(chat, kind)\n",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h1-union",
+  "rf": "ingest-A",
+  "file": "internal/store/store.go",
+  "old": "const aliasesQuery = aliasSet + ` EXCEPT SELECT ?1 ORDER BY 1`",
+  "new": "const aliasesQuery = aliasSet + ` EXCEPT SELECT ?1 ORDER BY 1 LIMIT 1`",
+  "pkgs": "./internal/store/"
+ },
+ {
+  "name": "al-wrap",
+  "rf": "ingest-A",
+  "file": "internal/store/store.go",
+  "old": "return nil, fmt.Errorf(\"query aliases of %s: %w\", jid, err)",
+  "new": "return nil, err",
+  "pkgs": "./internal/store/"
+ }
+]
