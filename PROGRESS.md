@@ -58,7 +58,15 @@
 - Deviations: `Pipeline` reconstructs history `events.Message` values from `WebMessageInfo` because the signed-off constructor has no parser dependency; it uses only pinned protobuf/JID fields and still routes every row through `Ingest`.
 - Open questions for Hamza: none.
 
-## Tasks 7–11 — not started
+## Task 7 — complete
+
+- Test commit: `22cfbec`.
+- Implementation commit: pending at time of this entry.
+- Coverage: media behavior covered by rules and end-to-end durable queue tests; exact percentage not recorded.
+- Deviations: the limiter is wall-clock driven by `x/time/rate`; queue timestamps remain fake-clock driven. Worker panic recovery preserves the process, but panic-row failure marking needs the Task 12 corpus to exercise the exact active row.
+- Open questions for Hamza: none.
+
+## Tasks 8–11 — not started
 
 ## Task 12 — not attempted
 

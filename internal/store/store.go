@@ -170,11 +170,50 @@ func (s *Store) InsertChatEvent(ctx context.Context, e ChatEvent) (bool, error) 
 	return s.insert(ctx, `INSERT INTO chat_events(chat_jid,kind,event_id,sender_jid,ts,received_at,value,raw_proto) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING`, e.ChatJID, e.Kind, e.EventID, e.SenderJID, e.Timestamp, e.ReceivedAt, e.Value, e.RawProto)
 }
 func (s *Store) InsertMedia(ctx context.Context, m Media) error {
+	if m.RawProto == nil {
+		m.RawProto = []byte{}
+	}
 	_, err := s.write.ExecContext(ctx, `INSERT INTO media(chat_jid,message_id,sender_jid,source,type,mime,declared_size,raw_proto,path,sha256,state,reason,attempts,retry_direct_path,updated_at,message_ts) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(chat_jid,message_id) DO NOTHING`, m.ChatJID, m.MessageID, m.SenderJID, m.Source, m.Type, m.MIME, m.DeclaredSize, m.RawProto, m.Path, m.SHA256, m.State, m.Reason, m.Attempts, m.RetryDirectPath, m.UpdatedAt, m.MessageTimestamp)
 	return err
 }
 func (s *Store) SetMediaState(ctx context.Context, chat, id, state, reason string) error {
 	_, err := s.write.ExecContext(ctx, `UPDATE media SET state=?,reason=?,updated_at=? WHERE chat_jid=? AND message_id=?`, state, reason, time.Now().Unix(), chat, id)
+	return err
+}
+func (s *Store) MediaByID(ctx context.Context, chat, id string) (Media, error) {
+	var m Media
+	err := s.read.QueryRowContext(ctx, `SELECT chat_jid,message_id,sender_jid,source,type,mime,declared_size,raw_proto,path,sha256,state,reason,attempts,retry_direct_path,updated_at,message_ts FROM media WHERE chat_jid=? AND message_id=?`, chat, id).Scan(&m.ChatJID, &m.MessageID, &m.SenderJID, &m.Source, &m.Type, &m.MIME, &m.DeclaredSize, &m.RawProto, &m.Path, &m.SHA256, &m.State, &m.Reason, &m.Attempts, &m.RetryDirectPath, &m.UpdatedAt, &m.MessageTimestamp)
+	return m, err
+}
+func (s *Store) ClaimMedia(ctx context.Context) (*Media, error) {
+	tx, err := s.write.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var m Media
+	err = tx.QueryRowContext(ctx, `SELECT chat_jid,message_id,sender_jid,source,type,mime,declared_size,raw_proto,path,sha256,state,reason,attempts,retry_direct_path,updated_at,message_ts FROM media WHERE state='pending' ORDER BY CASE source WHEN 'live' THEN 0 ELSE 1 END,message_ts DESC LIMIT 1`).Scan(&m.ChatJID, &m.MessageID, &m.SenderJID, &m.Source, &m.Type, &m.MIME, &m.DeclaredSize, &m.RawProto, &m.Path, &m.SHA256, &m.State, &m.Reason, &m.Attempts, &m.RetryDirectPath, &m.UpdatedAt, &m.MessageTimestamp)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE media SET state='downloading' WHERE chat_jid=? AND message_id=? AND state='pending'`, m.ChatJID, m.MessageID); err != nil {
+		return nil, err
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+	m.State = "downloading"
+	return &m, nil
+}
+func (s *Store) UpdateMedia(ctx context.Context, m Media) error {
+	_, err := s.write.ExecContext(ctx, `UPDATE media SET path=?,sha256=?,state=?,reason=?,attempts=?,retry_direct_path=?,updated_at=? WHERE chat_jid=? AND message_id=?`, m.Path, m.SHA256, m.State, m.Reason, m.Attempts, m.RetryDirectPath, m.UpdatedAt, m.ChatJID, m.MessageID)
+	return err
+}
+func (s *Store) ResetMediaOnStart(ctx context.Context, now time.Time) error {
+	_, err := s.write.ExecContext(ctx, `UPDATE media SET state='pending',reason='' WHERE state='downloading';UPDATE media SET state='failed',reason='no re-upload' WHERE state='retry_requested' AND updated_at<?`, now.Add(-24*time.Hour).Unix())
 	return err
 }
 
