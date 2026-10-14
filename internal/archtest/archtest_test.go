@@ -249,6 +249,7 @@ func TestWAWrapperAndEscapeBypassesAreFlagged(t *testing.T) {
 		name, file, src, rule, detail string
 	}{
 		{"interface wrapper", "wrap.go", "package wa\n\ntype presence interface{ SubscribePresence() error }\n\nfunc use(p presence) { _ = p.SubscribePresence() }\n", "", "SubscribePresence"},
+		{"call on type declared elsewhere", "use.go", "package wa\n\nfunc use(p presenceAPI) { _ = p.SubscribePresence() }\n", "banned-call", "SubscribePresence"},
 		{"interface declaration only", "decl.go", "package wa\n\ntype namer interface{ SetGroupName() error }\n", "interface-method", "SetGroupName"},
 		{"generic constraint", "gen.go", "package wa\n\nfunc call[T interface{ SetGroupName() error }](t T) error { return t.SetGroupName() }\n", "", "SetGroupName"},
 		{"embedded client", "emb.go", wm + "type Raw struct{ *whatsmeow.Client }\n", "client-escape", "Client"},
@@ -302,6 +303,24 @@ func TestWAUnexportedClientFieldAndAllowedInterfaceMethodsPass(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(v) != 0 {
+		t.Fatalf("violations = %#v", v)
+	}
+}
+
+func TestRetryReceiptCallOutsideWAIsFlagged(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "internal", "media", "x.go")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("package media\n\nfunc f(c interface{ SendMediaRetryReceipt() }) { c.SendMediaRetryReceipt() }\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	v, err := archtest.Scan(root, archtest.DefaultRules())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(v) != 1 || v[0].Rule != "banned-call" {
 		t.Fatalf("violations = %#v", v)
 	}
 }
