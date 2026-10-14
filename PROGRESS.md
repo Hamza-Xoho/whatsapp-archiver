@@ -285,3 +285,8 @@ Per the brief, only a ready-to-fill acceptance checklist will be produced.
 - Mutations killed: m4-terminal, rf3a, rf3d, m4-notbefore, m4-base, m4-perm, m4-sleep, m4-requeue (8/8). rf10c and h6-classify-media match strings updated for the H4/H3 code.
 - Probe `TestProbeBackoffWindow`: before `attempts=5 spanning 153ms, then state="failed"` → after (1 s window) `attempts=2 spanning 1s, state="downloading"` (still inside the round); with a 16 s window `attempts=5 spanning 15.005s, then state="pending" attempts=5 next_attempt_at-now=900s`.
 - Open: a cancelled context during a round is treated like a transient failure; the save then fails on the cancelled context (logged) and the row stays `downloading` until the restart reset. `TestDocumentDownloads` (pre-existing, 50 ms real sleep) failed once under parallel load during the H4 green and passed on four re-runs; left unchanged per the brief.
+
+## Phase 0 fixes — media fix round 1 (I-1 bounded re-upload, I-2 reset error logged)
+
+- Test commit `5a912af`; fix commit `6663f1c`. The request pass now fails, before taking a limiter token and without sending anything, an `expired` row that already has a `RetryDirectPath` (reason `re-uploaded media expired`) or `Attempts >= 20` (reason `download attempts exhausted`); so a message gets one re-upload request, and a crash loop cannot re-request it. `ResetMediaOnStart` errors are logged at Error (`stuck media rows not reset at start`).
+- Tests (`internal/media/bound_test.go`): `TestReuploadedMediaThatExpiresAgainFailsAfterOneRequest`, `TestExpiredRowAtAttemptCapFailsWithoutRequest`, `TestResetMediaOnStartFailureIsLogged` (Run with a cancelled context so only the reset runs). Red: requests = 2; requests = 1; no Error record.
