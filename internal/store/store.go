@@ -53,6 +53,16 @@ type ChatStat struct {
 	Oldest, Newest        int64
 	MediaFailed, OpenGaps int
 }
+type HistoryChunk struct {
+	ID, SyncType                                          string
+	ChunkOrder, Progress, ConversationCount, MessageCount int
+	Oldest, Newest, ReceivedAt                            int64
+}
+type Coverage struct {
+	Chunks, LastProgress int
+	LastChunkTime        int64
+	OldestByChat         map[string]int64
+}
 
 func Open(path string) (*Store, error) {
 	if err := ensureParent(path); err != nil {
@@ -193,4 +203,31 @@ func (s *Store) SchemaVersionCount(ctx context.Context) (int, error) {
 	var n int
 	err := s.read.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_version`).Scan(&n)
 	return n, err
+}
+
+func (s *Store) InsertHistoryChunk(ctx context.Context, h HistoryChunk) error {
+	_, err := s.insert(ctx, `INSERT INTO history_sync_chunks(id,sync_type,chunk_order,progress,conversation_count,message_count,oldest_ts,newest_ts,received_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING`, h.ID, h.SyncType, h.ChunkOrder, h.Progress, h.ConversationCount, h.MessageCount, h.Oldest, h.Newest, h.ReceivedAt)
+	return err
+}
+func (s *Store) HistoryCoverage(ctx context.Context) (Coverage, error) {
+	var c Coverage
+	c.OldestByChat = map[string]int64{}
+	err := s.read.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE((SELECT progress FROM history_sync_chunks ORDER BY received_at DESC,rowid DESC LIMIT 1),0),COALESCE(MAX(received_at),0) FROM history_sync_chunks`).Scan(&c.Chunks, &c.LastProgress, &c.LastChunkTime)
+	if err != nil {
+		return c, err
+	}
+	rows, err := s.read.QueryContext(ctx, `SELECT canonical_jid,MIN(ts) FROM messages_resolved WHERE source='history' GROUP BY canonical_jid`)
+	if err != nil {
+		return c, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var jid string
+		var oldest int64
+		if err = rows.Scan(&jid, &oldest); err != nil {
+			return c, err
+		}
+		c.OldestByChat[jid] = oldest
+	}
+	return c, rows.Err()
 }

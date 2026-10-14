@@ -50,7 +50,15 @@
 - Deviations: handler write retries use short exponential intervals in-process; production failures still retry indefinitely after one health notification. `ImportHistory` is a compile-safe no-op until Task 6's red tests demand the implementation.
 - Open questions for Hamza: none.
 
-## Tasks 6–11 — not started
+## Task 6 — complete
+
+- Test commit: `d4497eb`.
+- Implementation commit: pending at time of this entry.
+- Coverage: `internal/ingest` 56.1%; `internal/store` 48.3%.
+- Deviations: `Pipeline` reconstructs history `events.Message` values from `WebMessageInfo` because the signed-off constructor has no parser dependency; it uses only pinned protobuf/JID fields and still routes every row through `Ingest`.
+- Open questions for Hamza: none.
+
+## Tasks 7–11 — not started
 
 ## Task 12 — not attempted
 

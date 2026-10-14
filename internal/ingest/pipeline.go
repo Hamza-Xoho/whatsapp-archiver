@@ -39,10 +39,6 @@ type Pipeline struct {
 	now    func() time.Time
 }
 
-func (p *Pipeline) ImportHistory(context.Context, *events.HistorySync) (int, int, error) {
-	return 0, 0, nil
-}
-
 func NewPipeline(w Writer, f *Filter, q MediaQueue, h HealthSink, log *slog.Logger) *Pipeline {
 	if log == nil {
 		log = slog.Default()
