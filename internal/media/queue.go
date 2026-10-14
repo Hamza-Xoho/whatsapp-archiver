@@ -146,7 +146,9 @@ func (q *Queue) requestPass(ctx context.Context, current **store.Media) {
 		}
 		if reason := noMoreRequests(m); reason != "" {
 			m.State, m.Reason, m.UpdatedAt = "failed", reason, now.Unix()
-			q.save(ctx, *m)
+			if !q.save(ctx, *m) {
+				return // the row is still expired; the next pass tries again
+			}
 			continue
 		}
 		if !q.limiter.AllowN(now, 1) {
@@ -190,11 +192,13 @@ func (q *Queue) request(ctx context.Context, m *store.Media, now time.Time) bool
 	return true
 }
 
-// save writes the row; a failed write is logged and the row is re-claimable after a restart.
-func (q *Queue) save(ctx context.Context, m store.Media) {
+// save writes the row; a failed write is logged, reported as false, and the row is re-claimable after a restart.
+func (q *Queue) save(ctx context.Context, m store.Media) bool {
 	if err := q.store.UpdateMedia(ctx, m); err != nil {
 		q.log.Error("media row not saved", "chat", m.ChatJID, "id", m.MessageID, "state", m.State, "err", err)
+		return false
 	}
+	return true
 }
 func (q *Queue) download(ctx context.Context, m *store.Media) {
 	var data []byte
