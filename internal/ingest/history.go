@@ -82,7 +82,13 @@ func (p *Pipeline) ImportHistory(ctx context.Context, evt *events.HistorySync) (
 			continue
 		}
 		chat := conv.GetID()
-		if chat != "" && p.filter.Keep(chat, KindMessage) {
+		keepChat := false
+		if chat != "" {
+			if keepChat, err = p.keep(ctx, chat, KindMessage); err != nil {
+				return stored, skipped, err
+			}
+		}
+		if keepChat {
 			if upErr := p.persist(ctx, "upsert history chat", func() error {
 				return p.writer.UpsertChat(ctx, store.Chat{JID: chat, Name: conv.GetName()})
 			}); upErr != nil {
@@ -101,7 +107,11 @@ func (p *Pipeline) ImportHistory(ctx context.Context, evt *events.HistorySync) (
 				continue
 			}
 			r := FromMessage(message, "history", now)
-			if !p.filter.Keep(r.Chat.JID, r.Kind) {
+			keepMessage, keepErr := p.keep(ctx, r.Chat.JID, r.Kind)
+			if keepErr != nil {
+				return stored, skipped, keepErr
+			}
+			if !keepMessage {
 				skipped++
 				continue
 			}
