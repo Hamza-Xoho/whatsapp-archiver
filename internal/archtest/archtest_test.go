@@ -157,6 +157,18 @@ func TestAllowListedFileStillRejectsSendMessage(t *testing.T) {
 	}
 }
 
+func TestRetryReceiptThroughInterfaceOutsideRerequestIsFlagged(t *testing.T) {
+	root := t.TempDir()
+	writeFixture(t, root, "internal/wa/other.go", "allowed_retry.go.txt")
+	v, err := archtest.Scan(root, archtest.DefaultRules())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(v) != 1 || v[0].Detail != "SendMediaRetryReceipt" {
+		t.Fatalf("violations = %#v", v)
+	}
+}
+
 // pinnedClientMethods lists every exported (*Client) method of the pinned
 // whatsmeow root package that has a CON-1 banned prefix.
 func pinnedClientMethods(t *testing.T) []string {
