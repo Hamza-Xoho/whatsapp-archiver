@@ -166,3 +166,27 @@ func TestScrubDeviceSuffixedJID(t *testing.T) {
 		t.Errorf("group chat %s", info.Chat)
 	}
 }
+
+// H8 M6 deferral: key shares, sender keys and message secrets are cleared from fixtures; key IDs and text stay.
+func TestScrubClearsKeyMaterial(t *testing.T) {
+	in := t.TempDir()
+	msg := &waE2E.Message{
+		ProtocolMessage: &waE2E.ProtocolMessage{Type: waE2E.ProtocolMessage_APP_STATE_SYNC_KEY_SHARE.Enum(), AppStateSyncKeyShare: &waE2E.AppStateSyncKeyShare{Keys: []*waE2E.AppStateSyncKey{{
+			KeyID: &waE2E.AppStateSyncKeyId{KeyID: []byte("key-id-kept")}, KeyData: &waE2E.AppStateSyncKeyData{KeyData: []byte("app-state-key-bytes")}}}}},
+		SenderKeyDistributionMessage: &waE2E.SenderKeyDistributionMessage{GroupID: proto.String(groupA + "@g.us"), AxolotlSenderKeyDistributionMessage: []byte("sender-key-bytes")},
+		MessageContextInfo:           &waE2E.MessageContextInfo{MessageSecret: []byte("message-secret-bytes")},
+		Conversation:                 proto.String("text kept"),
+	}
+	ingest.NewRecorder(in).Wrap(func(any) {})(messageEvent(groupA+"@g.us", "K", msg))
+	_, protos := scrubbedFiles(t, scrub(t, in))
+	for _, secret := range []string{"app-state-key-bytes", "sender-key-bytes", "message-secret-bytes", groupA} {
+		if strings.Contains(protos[0], secret) {
+			t.Errorf("%s survives Scrub", secret)
+		}
+	}
+	for _, kept := range []string{"key-id-kept", "text kept"} {
+		if !strings.Contains(protos[0], kept) {
+			t.Errorf("%s was removed", kept)
+		}
+	}
+}

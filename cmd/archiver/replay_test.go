@@ -104,3 +104,30 @@ func TestReplayCommandStoresEventsWithoutConnecting(t *testing.T) {
 		t.Fatalf("replay into an existing archive: code=%d stderr=%q, want a refusal", code, stderr.String())
 	}
 }
+
+// H14 (e): `replay --dump` prints exactly the reviewed golden dump of the synthetic scenario; without --dump the
+// same dump is written to <data>/raw.sql and its path printed.
+func TestReplayCommandDumpMatchesGolden(t *testing.T) {
+	scenario := filepath.Join("..", "..", "internal", "ingest", "testdata", "events", "synthetic")
+	golden, err := os.ReadFile(filepath.Join("..", "..", "internal", "ingest", "testdata", "golden", "synthetic.sql"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"replay", scenario, "--data", t.TempDir(), "--dump"}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, stderr.String())
+	}
+	if stdout.String() != string(golden) {
+		t.Fatalf("--dump output differs from the golden dump:\n%s", stdout.String())
+	}
+	data := t.TempDir()
+	stdout.Reset()
+	if code := run([]string{"replay", "--data", data, scenario}, &stdout, &stderr); code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, stderr.String())
+	}
+	path := filepath.Join(data, "raw.sql")
+	written, err := os.ReadFile(path)
+	if err != nil || string(written) != string(golden) || !strings.Contains(stdout.String(), path) {
+		t.Fatalf("stdout=%q, %s matches golden: %v (err %v)", stdout.String(), path, string(written) == string(golden), err)
+	}
+}
