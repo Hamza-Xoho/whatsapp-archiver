@@ -18,7 +18,15 @@
 - Deviations: current whatsmeow recommends Go 1.27.1 but requires Go 1.26.0, so the module minimum remains the planned 1.26.0 and `GOTOOLCHAIN=auto` is enabled. Current Claude Code hook and golangci-lint v2 schemas were used.
 - Open questions for Hamza: none.
 
-## Tasks 2–11 — not started
+## Task 2 — complete
+
+- Test commit: `24d1b1d`.
+- Implementation commit: pending at time of this entry.
+- Coverage: `internal/retry` 66.7%; `internal/guard` 100%; `internal/store` 57.4%.
+- Deviations: exposed `OpenGapCount` and `SchemaVersionCount` as small read helpers so tests stay on public interfaces. The read pool uses the same WAL database with read-only mode; the write pool is capped at one connection.
+- Open questions for Hamza: none.
+
+## Tasks 3–11 — not started
 
 ## Task 12 — not attempted
 

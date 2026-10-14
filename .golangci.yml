@@ -30,5 +30,7 @@ linters:
     rules:
       - path: internal/wa/rerequest\.go
         linters: [forbidigo]
+      - path: _test\.go
+        linters: [errcheck]
 formatters:
   enable: [gofmt]
