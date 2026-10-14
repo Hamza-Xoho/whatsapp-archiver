@@ -159,3 +159,12 @@ Per the brief, only a ready-to-fill acceptance checklist will be produced.
 - Mutations killed: h6-wipe, h6-excluded, h6-classify, plus h6-classify-participant, h6-classify-media, h6-loop-perm (6/6).
 - Probes (scratch copy): `TestProbeChatNameWipedByLiveMessage` before `[g@g.us|]` after history and after the live message → after `[g@g.us|Study Group]` both times; `TestProbeExcludedChatNameStoredFromHistory` before `chats = [secret@g.us|Private Therapy Group]` → after `chats = []`.
 - Deviations: none. The alias-check/commit classify paths cannot produce a constraint error with the current schema (no deferred foreign keys), so they have no test of their own. `UpsertParticipant` still overwrites `display_name` with an empty push name (not in H6's scope; noted as an open question).
+
+## Phase 0 fixes — H9 (unique history ledger identity) and missing Task 6 tests
+
+- Test commit `7ba2f46`; fix commit `01e9355`. A ledger row's ID is now a hash of the chunk's deterministic protobuf encoding instead of `(sync type, chunk order, progress, conversation count)`: two different chunks never collide (even when received in the same second, which an ID with `received_at` would not survive), an identical redelivered chunk is still ledgered once, the ledger stays insert-only and the schema is unchanged.
+- Added the Task 6 tests that were missing: `TestMappingsInChunkApplyToItsMessages`, `TestNonsensicalHistoryTimestampStoredAsGiven`, `TestCoverageReportsOldestPerChat` (store); `TestLateChunkAfterCompleteIsStored` now also checks both chunks' messages are stored. These passed when written (coverage gaps, proven by mutations rf8d, rf9c, rf9d).
+- Coverage: internal/ingest 71.2%, internal/store 59.3%, internal/wa 58.0%, cmd/archiver 22.1%.
+- Mutations killed: rf8d, rf9c, rf9d, h9-collide (4/4). Full stage-2 run of every spec at `01e9355`: 45/45 KILLED.
+- Probe `TestProbeLedgerCollision`: before 1 ledger row for two distinct chunks at progress 100 → after 2.
+- Deviations: neither review option (`received_at` in the ID, autoincrement key) was used — the content hash is one line, needs no schema change and survives same-second chunks; dedup of an identical redelivery is untested.
