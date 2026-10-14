@@ -87,7 +87,17 @@
 - Deviations: the initial synthetic corpus covers message envelopes; live Task 12 is responsible for adding the remaining supported event shapes and reviewed goldens. No golden was generated automatically.
 - Open questions for Hamza: none.
 
-## Task 11 — not started
+## Task 11 — complete
+
+- Test commit: `e58e322`; implementation commit: pending at time of this entry.
+- Coverage: CLI pairing guard and version output are covered; package suite passes under `-race`.
+- Deviations: status/chats output is deterministic text but no separate golden file was needed for the compact phase-0 format. The Linux unit hardens filesystem access beyond the minimum plan.
+- Open questions for Hamza: none.
+
+## Final automated verification
+
+- `make check`: passed, including race tests, golangci-lint, and Linux/macOS/Windows builds.
+- Task 12: not attempted. `docs/phase0-acceptance.md` is ready to fill on the server with the iPhone.
 
 ## Task 12 — not attempted
 

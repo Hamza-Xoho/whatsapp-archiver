@@ -18,7 +18,8 @@ lint: tools
 	golangci-lint run
 
 build:
-	go build ./...
+	mkdir -p .cache/build
+	go build -o .cache/build/archiver ./cmd/archiver
 
 build-all:
 	mkdir -p .cache/build
