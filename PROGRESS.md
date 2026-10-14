@@ -269,3 +269,5 @@ Per the brief, only a ready-to-fill acceptance checklist will be produced.
 - Coverage: internal/backup 81.7%.
 - Mutations (`specs-backup.json`) 6/6 KILLED: x12, x13, h16-foreign, h16-failed, h15-rwpath, backup-schedule-twice. Shared `specs.json` at `fcef416`: 112 KILLED, 1 NOMATCH (`h6-classify-media`, store.go; its match string is not in this branch's base).
 - Probe (scratch copy): `TestProbeRetentionDeletesForeignDirs` now leaves `0-keep-me`, `2023-family-photos`, `media` and the fresh snapshot; `TestProbeFailedSnapshotLeavesJunkFolder` leaves 0 folders.
+
+- H16 fix round 1: test `TestRetentionFailureKeepsNewSnapshot` (old snapshot folder chmod 0500 makes `RemoveAll` fail; skipped as root) then fix. A verified snapshot is kept when retention fails; the wrapped retention error is returned with the report. Only failures before verification remove the folder. Mutation backup-keep-on-retain-fail KILLED.
