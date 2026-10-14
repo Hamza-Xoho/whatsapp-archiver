@@ -916,8 +916,8 @@
   "name": "rf3c",
   "rf": "H4",
   "file": "internal/media/queue.go",
-  "old": "if m == nil || !q.limiter.AllowN(now, 1) {",
-  "new": "if m == nil {",
+  "old": "if !q.limiter.AllowN(now, 1) {\n\t\t\treturn\n\t\t}",
+  "new": "if false {\n\t\t\treturn\n\t\t}",
   "pkgs": "./internal/media/"
  },
  {
@@ -932,8 +932,8 @@
   "name": "h4-norevisit",
   "rf": "H4",
   "file": "internal/media/queue.go",
-  "old": "if m == nil || !q.limiter.AllowN(now, 1) {\n\t\t\treturn\n\t\t}",
-  "new": "if m == nil {\n\t\t\treturn\n\t\t}\n\t\tif !q.limiter.AllowN(now, 1) {\n\t\t\tm.State = \"skipped\"\n\t\t\tq.save(ctx, *m)\n\t\t\tcontinue\n\t\t}",
+  "old": "if !q.limiter.AllowN(now, 1) {\n\t\t\treturn\n\t\t}",
+  "new": "if !q.limiter.AllowN(now, 1) {\n\t\t\tm.State = \"skipped\"\n\t\t\tq.save(ctx, *m)\n\t\t\tcontinue\n\t\t}",
   "pkgs": "./internal/media/"
  },
  {
