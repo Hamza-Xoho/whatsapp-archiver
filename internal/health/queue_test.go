@@ -95,8 +95,17 @@ func TestFullAlertQueueDropsAndLogs(t *testing.T) {
 	var logs bytes.Buffer
 	m := NewMonitor(&config.Config{DataDir: t.TempDir()}, newStuck(t), &clock{time.Unix(1_700_000_000, 0)}, nil, func() string { return "v" }).
 		WithLogger(slog.New(slog.NewTextHandler(&logs, nil)))
-	for i := 0; i < 20; i++ { // Run is not started, so nothing leaves the queue
-		m.Panic(fmt.Sprint("worker", i))
+	returned := make(chan struct{})
+	go func() {
+		defer close(returned)
+		for i := 0; i < 20; i++ { // Run is not started, so nothing leaves the queue
+			m.Panic(fmt.Sprint("worker", i))
+		}
+	}()
+	select {
+	case <-returned:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Panic blocked on a full alert queue")
 	}
 	if got := strings.Count(logs.String(), "level=ERROR"); got != 4 {
 		t.Fatalf("want 4 dropped alerts logged at Error (queue holds 16), got %d:\n%s", got, logs.String())
