@@ -80,7 +80,14 @@
 - Deviations: periodic recovered-alert coverage is deferred to the manual acceptance drill; all immediate critical states and persisted health snapshots are implemented.
 - Open questions for Hamza: none.
 
-## Tasks 10–11 — not started
+## Task 10 — complete
+
+- Test commit: `1b59973`; implementation commit: pending at time of this entry.
+- Coverage: message record/load and stable JID scrubbing are covered.
+- Deviations: the initial synthetic corpus covers message envelopes; live Task 12 is responsible for adding the remaining supported event shapes and reviewed goldens. No golden was generated automatically.
+- Open questions for Hamza: none.
+
+## Task 11 — not started
 
 ## Task 12 — not attempted
 
