@@ -1,0 +1,41 @@
+{
+  "kind": "message",
+  "info": {
+    "Chat": "10000000100@g.us",
+    "Sender": "20000000001@lid",
+    "IsFromMe": false,
+    "IsGroup": true,
+    "AddressingMode": "lid",
+    "SenderAlt": "10000000001@s.whatsapp.net",
+    "RecipientAlt": "",
+    "BroadcastListOwner": "",
+    "BroadcastRecipients": null,
+    "ID": "SYN-EDIT-1",
+    "ServerID": 0,
+    "Type": "text",
+    "PushName": "Alice",
+    "Timestamp": "2025-10-09T08:56:20Z",
+    "Category": "",
+    "Multicast": false,
+    "MediaType": "",
+    "Edit": "1",
+    "MsgBotInfo": {
+      "EditType": "",
+      "EditTargetID": "",
+      "EditSenderTimestampMS": "0001-01-01T00:00:00Z",
+      "ClientThreadID": ""
+    },
+    "MsgMetaInfo": {
+      "TargetID": "",
+      "TargetSender": "",
+      "TargetChat": "",
+      "DeprecatedLIDSession": null,
+      "ThreadMessageID": "",
+      "ThreadMessageSenderJID": ""
+    },
+    "IsNewsletterStatus": false,
+    "VerifiedName": null,
+    "DeviceSentMeta": null
+  },
+  "proto": "0gNICkZiRAovChAxMDAwMDAwMDEwMEBnLnVzGgpTWU4tVEVYVC0xIg8yMDAwMDAwMDAwMUBsaWQQDnIPCg1IZWxsbywgZWRpdGVk"
+}

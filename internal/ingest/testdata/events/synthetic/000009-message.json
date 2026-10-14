@@ -1,0 +1,41 @@
+{
+  "kind": "message",
+  "info": {
+    "Chat": "10000000100@g.us",
+    "Sender": "20000000002@lid",
+    "IsFromMe": false,
+    "IsGroup": true,
+    "AddressingMode": "lid",
+    "SenderAlt": "10000000002@s.whatsapp.net",
+    "RecipientAlt": "",
+    "BroadcastListOwner": "",
+    "BroadcastRecipients": null,
+    "ID": "SYN-GAP-1",
+    "ServerID": 0,
+    "Type": "text",
+    "PushName": "Bob",
+    "Timestamp": "2025-10-09T09:00:20Z",
+    "Category": "",
+    "Multicast": false,
+    "MediaType": "",
+    "Edit": "",
+    "MsgBotInfo": {
+      "EditType": "",
+      "EditTargetID": "",
+      "EditSenderTimestampMS": "0001-01-01T00:00:00Z",
+      "ClientThreadID": ""
+    },
+    "MsgMetaInfo": {
+      "TargetID": "",
+      "TargetSender": "",
+      "TargetChat": "",
+      "DeprecatedLIDSession": null,
+      "ThreadMessageID": "",
+      "ThreadMessageSenderJID": ""
+    },
+    "IsNewsletterStatus": false,
+    "VerifiedName": null,
+    "DeviceSentMeta": null
+  },
+  "proto": "Ch1SZXNlbnQgYWZ0ZXIgYSBkZWNyeXB0aW9uIGdhcA=="
+}

@@ -1,0 +1,15 @@
+{
+  "kind": "media_retry",
+  "info": {
+    "Ciphertext": null,
+    "IV": null,
+    "Error": {
+      "Code": 2
+    },
+    "Timestamp": "2025-10-09T09:10:00Z",
+    "MessageID": "SYN-UNKNOWN-1",
+    "ChatID": "10000000100@g.us",
+    "SenderID": "20000000001@lid",
+    "FromMe": false
+  }
+}
