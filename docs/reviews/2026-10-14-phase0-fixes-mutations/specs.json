@@ -1,0 +1,1011 @@
+[
+ {
+  "name": "rf5a",
+  "rf": 5,
+  "file": "internal/ingest/pipeline.go",
+  "old": "\tfor ctx.Err() == nil {\n\t\tp.sleep(ctx, writeMaxWait)",
+  "new": "\treturn err\n\tfor ctx.Err() == nil {\n\t\tp.sleep(ctx, writeMaxWait)",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "rf5b",
+  "rf": 5,
+  "file": "internal/ingest/pipeline.go",
+  "old": "\tp.health.WriteFailed(err)\n",
+  "new": "\t_ = err\n",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "b1-map",
+  "rf": 1,
+  "file": "internal/ingest/pipeline.go",
+  "old": "if err := p.persist(ctx, \"insert id mapping\", func() error {\n\t\t\t_, err := p.writer.InsertIDMapping(ctx, m)\n\t\t\treturn err\n\t\t}); err != nil {",
+  "new": "if err := func() error {\n\t\t\t_, err := p.writer.InsertIDMapping(ctx, m)\n\t\t\treturn err\n\t\t}(); err != nil {",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "b1-enq",
+  "rf": 1,
+  "file": "internal/ingest/pipeline.go",
+  "old": "p.persist(ctx, fmt.Sprintf(\"enqueue media in %s\", r.Chat.JID), func() error { return p.queue.Enqueue(ctx, *r.Media) })",
+  "new": "p.queue.Enqueue(ctx, *r.Media)",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "b1-ledger",
+  "rf": 1,
+  "file": "internal/ingest/history.go",
+  "old": "p.persist(ctx, \"insert history chunk\", func() error { return ledger.InsertHistoryChunk(ctx, chunk) })",
+  "new": "ledger.InsertHistoryChunk(ctx, chunk)",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "rf1c",
+  "rf": 1,
+  "file": "internal/store/store.go",
+  "old": "VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING`, e.ChatJID, e.TargetID",
+  "new": "VALUES(?,?,?,?,?,?,?,?,?,?)`, e.ChatJID, e.TargetID",
+  "pkgs": "./internal/store/ ./internal/ingest/"
+ },
+ {
+  "name": "rf1d",
+  "rf": 1,
+  "file": "internal/store/store.go",
+  "old": "VALUES(?,?,?,?) ON CONFLICT DO NOTHING`, m.LID",
+  "new": "VALUES(?,?,?,?)`, m.LID",
+  "pkgs": "./internal/store/ ./internal/ingest/"
+ },
+ {
+  "name": "h2-sleep",
+  "rf": 2,
+  "file": "internal/ingest/pipeline.go",
+  "old": "\t\tp.sleep(ctx, writeMaxWait)\n",
+  "new": "",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h2-perm",
+  "rf": 2,
+  "file": "internal/ingest/pipeline.go",
+  "old": "func isPermanent(err error) bool { return errors.Is(err, store.ErrConstraint) }",
+  "new": "func isPermanent(err error) bool { return errors.Is(err, store.ErrConstraint) && false }",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h2-classify",
+  "rf": 2,
+  "file": "internal/store/store.go",
+  "old": "se.Code()&0xff == sqlite3.SQLITE_CONSTRAINT",
+  "new": "se.Code()&0xff == sqlite3.SQLITE_CONSTRAINT && false",
+  "pkgs": "./internal/store/"
+ },
+ {
+  "name": "h2-retry-perm",
+  "rf": 2,
+  "file": "internal/retry/retry.go",
+  "old": "policy.Permanent != nil && policy.Permanent(err)",
+  "new": "false",
+  "pkgs": "./internal/retry/"
+ },
+ {
+  "name": "b2-outdated-nowait",
+  "rf": 0,
+  "file": "internal/wa/reconnect.go",
+  "old": "return action{wait: outdatedWait, refresh: true}",
+  "new": "return action{connect: true}",
+  "pkgs": "./internal/wa/"
+ },
+ {
+  "name": "b2-ban-nopause",
+  "rf": 0,
+  "file": "internal/wa/reconnect.go",
+  "old": "return action{disconnect: true, wait: wait, connect: true}",
+  "new": "return action{disconnect: true, wait: wait * 0, connect: true}",
+  "pkgs": "./internal/wa/"
+ },
+ {
+  "name": "b2-logout-reconnects",
+  "rf": 0,
+  "file": "internal/wa/reconnect.go",
+  "old": "return action{stop: true}",
+  "new": "return action{wait: connectWaitMin, connect: true}",
+  "pkgs": "./internal/wa/"
+ },
+ {
+  "name": "b2-replace-nobackoff",
+  "rf": 0,
+  "file": "internal/wa/reconnect.go",
+  "old": "p.replaceWait = doubled(p.replaceWait, replaceWaitMin, replaceWaitMax)",
+  "new": "p.replaceWait = replaceWaitMin",
+  "pkgs": "./internal/wa/"
+ },
+ {
+  "name": "b2-replace-noreset",
+  "rf": 0,
+  "file": "internal/wa/reconnect.go",
+  "old": "p.lastReplace.IsZero() || now.Sub(p.lastReplace) > replaceQuietGap",
+  "new": "p.lastReplace.IsZero()",
+  "pkgs": "./internal/wa/"
+ },
+ {
+  "name": "b2-connect-nobackoff",
+  "rf": 0,
+  "file": "internal/wa/reconnect.go",
+  "old": "p.connectWait = doubled(p.connectWait, connectWaitMin, connectWaitMax)",
+  "new": "p.connectWait = connectWaitMin",
+  "pkgs": "./internal/wa/"
+ },
+ {
+  "name": "b2-stop-listening",
+  "rf": 0,
+  "file": "internal/wa/wa.go",
+  "old": "\t\t\tcase in = <-ctl:\n",
+  "new": "\t\t\tcase in = <-ctl:\n\t\t\t\tif _, ok := in.(*events.Connected); ok {\n\t\t\t\t\t<-ctx.Done()\n\t\t\t\t\treturn nil\n\t\t\t\t}\n",
+  "pkgs": "./internal/wa/"
+ },
+ {
+  "name": "rf6a",
+  "rf": 6,
+  "file": "internal/wa/reconnect.go",
+  "old": "\t\tp.outdatedWaited = false\n\t\treturn action{disconnect: true, refresh: true}\n",
+  "new": "\t\tp.outdatedWaited = false\n",
+  "pkgs": "./internal/wa/"
+ },
+ {
+  "name": "m3-nolog",
+  "rf": 0,
+  "file": "internal/wa/wa.go",
+  "old": "whatsmeow.NewClient(device, wal.Sub(\"Client\"))",
+  "new": "whatsmeow.NewClient(device, nil)",
+  "pkgs": "./internal/wa/"
+ },
+ {
+  "name": "m3-nomodule",
+  "rf": 0,
+  "file": "internal/wa/walog.go",
+  "old": "module = l.module + \"/\" + module",
+  "new": "_ = l.module",
+  "pkgs": "./internal/wa/"
+ },
+ {
+  "name": "x10",
+  "rf": 4,
+  "file": "cmd/archiver/main.go",
+  "old": "const notPairedHint = \"not paired: run `archiver pair` in a terminal first\"",
+  "new": "const notPairedHint = \"not paired\"",
+  "pkgs": "./cmd/..."
+ },
+ {
+  "name": "h18-exit",
+  "rf": 4,
+  "file": "cmd/archiver/main.go",
+  "old": "const exitNotPaired = 3",
+  "new": "const exitNotPaired = 1",
+  "pkgs": "./cmd/..."
+ },
+ {
+  "name": "h18-paircheck",
+  "rf": 4,
+  "file": "internal/wa/pair.go",
+  "old": "return device.ID != nil, nil",
+  "new": "return device != nil, nil",
+  "pkgs": "./cmd/... ./internal/wa/"
+ },
+ {
+  "name": "h18-ntfy",
+  "rf": 4,
+  "file": "cmd/archiver/main.go",
+  "old": "\tif cfg.Alerts.Ntfy == nil {\n\t\treturn\n\t}\n\tctx, cancel",
+  "new": "\tif true {\n\t\treturn\n\t}\n\tctx, cancel",
+  "pkgs": "./cmd/..."
+ },
+ {
+  "name": "m13-early",
+  "rf": 6,
+  "file": "internal/wa/pair.go",
+  "old": "return \"Paired. Capture is running.\"",
+  "new": "return \"\"",
+  "pkgs": "./internal/wa/"
+ },
+ {
+  "name": "b2-logout-returns",
+  "rf": 6,
+  "file": "internal/wa/wa.go",
+  "old": "\t\t\t<-ctx.Done()\n\t\t\treturn nil\n\t\t}\n\t\tif a.disconnect",
+  "new": "\t\t\treturn nil\n\t\t}\n\t\tif a.disconnect",
+  "pkgs": "./internal/wa/"
+ },
+ {
+  "name": "b2-forward-ban",
+  "rf": 6,
+  "file": "internal/wa/wa.go",
+  "old": "*events.TemporaryBan, *events.LoggedOut",
+  "new": "*events.LoggedOut",
+  "pkgs": "./internal/wa/"
+ },
+ {
+  "name": "cf-idle",
+  "rf": 6,
+  "file": "internal/wa/wa.go",
+  "old": "\t\t*events.ConnectFailure, *events.CATRefreshError:",
+  "new": "\t\t*events.CATRefreshError:",
+  "pkgs": "./internal/wa/"
+ },
+ {
+  "name": "cf-policy",
+  "rf": 6,
+  "file": "internal/wa/reconnect.go",
+  "old": "\t\treturn action{disconnect: true, wait: failureWait, connect: true}\n",
+  "new": "",
+  "pkgs": "./internal/wa/"
+ },
+ {
+  "name": "cf-ingest",
+  "rf": 6,
+  "file": "internal/ingest/pipeline.go",
+  "old": "\t\t\tp.health.SetState(\"disconnected\", fmt.Sprintf(\"%v %s\", e.Reason, e.Message))",
+  "new": "\t\t\t_ = e",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h5-nounwrap",
+  "rf": "H5",
+  "file": "internal/wa/history.go",
+  "old": "\t\tif edit.GetProtocolMessage().GetType() == waE2E.ProtocolMessage_MESSAGE_EDIT {\n",
+  "new": "\t\tevt.Message = web.GetMessage()\n\t\tif edit.GetProtocolMessage().GetType() == waE2E.ProtocolMessage_MESSAGE_EDIT {\n",
+  "pkgs": "./internal/ingest/ ./internal/wa/"
+ },
+ {
+  "name": "h5-sender",
+  "rf": "H5",
+  "file": "internal/wa/history.go",
+  "old": "\t\tif edit.GetProtocolMessage().GetType() == waE2E.ProtocolMessage_MESSAGE_EDIT {\n",
+  "new": "\t\tif evt.Info.IsFromMe {\n\t\t\tevt.Info.Sender = evt.Info.Chat\n\t\t}\n\t\tif edit.GetProtocolMessage().GetType() == waE2E.ProtocolMessage_MESSAGE_EDIT {\n",
+  "pkgs": "./internal/ingest/ ./internal/wa/"
+ },
+ {
+  "name": "h5-pushname",
+  "rf": "H5",
+  "file": "internal/wa/history.go",
+  "old": "\t\tif edit.GetProtocolMessage().GetType() == waE2E.ProtocolMessage_MESSAGE_EDIT {\n",
+  "new": "\t\tevt.Info.PushName = \"\"\n\t\tif edit.GetProtocolMessage().GetType() == waE2E.ProtocolMessage_MESSAGE_EDIT {\n",
+  "pkgs": "./internal/ingest/ ./internal/wa/"
+ },
+ {
+  "name": "h5-edit",
+  "rf": "H5",
+  "file": "internal/wa/history.go",
+  "old": "\t\t\tevt.Info.ID, evt.Message = web.GetKey().GetID(), edit\n",
+  "new": "\t\t\t_ = edit\n",
+  "pkgs": "./internal/ingest/ ./internal/wa/"
+ },
+ {
+  "name": "h6-wipe",
+  "rf": "H6",
+  "file": "internal/store/store.go",
+  "old": "name=COALESCE(NULLIF(excluded.name,''),name)",
+  "new": "name=excluded.name",
+  "pkgs": "./internal/ingest/ ./internal/store/"
+ },
+ {
+  "name": "h6-excluded",
+  "rf": "H6",
+  "file": "internal/ingest/history.go",
+  "old": "if chat != \"\" && p.filter.Keep(chat, KindMessage) {",
+  "new": "if chat != \"\" {",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h6-classify",
+  "rf": "H6",
+  "file": "internal/store/store.go",
+  "old": "c.JID, c.Name, c.Type, c.ParentJID)\n\treturn classify(err)",
+  "new": "c.JID, c.Name, c.Type, c.ParentJID)\n\treturn err",
+  "pkgs": "./internal/store/"
+ },
+ {
+  "name": "h6-classify-participant",
+  "rf": "H6",
+  "file": "internal/store/store.go",
+  "old": "p.JID, p.DisplayName)\n\treturn classify(err)",
+  "new": "p.JID, p.DisplayName)\n\treturn err",
+  "pkgs": "./internal/store/"
+ },
+ {
+  "name": "h6-classify-media",
+  "rf": "H6",
+  "file": "internal/store/store.go",
+  "old": "m.UpdatedAt, m.MessageTimestamp, m.FromMe)\n\treturn classify(err)",
+  "new": "m.UpdatedAt, m.MessageTimestamp, m.FromMe)\n\treturn err",
+  "pkgs": "./internal/store/"
+ },
+ {
+  "name": "h6-loop-perm",
+  "rf": "H6",
+  "file": "internal/ingest/pipeline.go",
+  "old": "\t\t\treturn nil\n\t\t}\n\t\tif isPermanent(err) {\n\t\t\treturn p.rejected(what, err)\n\t\t}\n",
+  "new": "\t\t\treturn nil\n\t\t}\n",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "rf8d",
+  "rf": 8,
+  "file": "internal/ingest/history.go",
+  "old": "range hs.GetPhoneNumberToLidMappings() {",
+  "new": "range hs.GetPhoneNumberToLidMappings()[:0] {",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "rf9c",
+  "rf": 9,
+  "file": "internal/ingest/history.go",
+  "old": "\t\t\tmessage, parseErr := p.parse(chatJID, item.GetMessage())\n",
+  "new": "\t\t\tif chunk.Progress < 100 {\n\t\t\t\tcontinue\n\t\t\t}\n\t\t\tmessage, parseErr := p.parse(chatJID, item.GetMessage())\n",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "rf9d",
+  "rf": 9,
+  "file": "internal/ingest/history.go",
+  "old": "\t\t\tr := FromMessage(message, \"history\", now)\n",
+  "new": "\t\t\tif message.Info.Timestamp.After(now) || message.Info.Timestamp.Unix() <= 0 {\n\t\t\t\tmessage.Info.Timestamp = now\n\t\t\t}\n\t\t\tr := FromMessage(message, \"history\", now)\n",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h9-collide",
+  "rf": "H9",
+  "file": "internal/ingest/history.go",
+  "old": "ID: stableID(string(raw)),",
+  "new": "ID: stableID(fmt.Sprint(hs.GetSyncType()), fmt.Sprint(hs.GetChunkOrder()), fmt.Sprint(hs.GetProgress()), fmt.Sprint(len(hs.GetConversations())), string(raw[:0])),",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h6b-participant",
+  "rf": "H6",
+  "file": "internal/store/store.go",
+  "old": "display_name=COALESCE(NULLIF(excluded.display_name,''),display_name)",
+  "new": "display_name=excluded.display_name",
+  "pkgs": "./internal/ingest/ ./internal/store/"
+ },
+ {
+  "name": "h9-dedup",
+  "rf": "H9",
+  "file": "internal/ingest/history.go",
+  "old": "ID: stableID(string(raw)),",
+  "new": "ID: stableID(string(raw), fmt.Sprint(now.UnixNano())),",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h1-view",
+  "rf": "H1",
+  "file": "internal/store/store.go",
+  "old": "const dedupeQuery = `SELECT EXISTS(SELECT 1 FROM messages WHERE id=?2 AND chat_jid IN (` + aliasSet + `))`",
+  "new": "const dedupeQuery = `SELECT EXISTS(SELECT 1 FROM messages x LEFT JOIN chat_aliases xa ON xa.alias_jid=x.chat_jid LEFT JOIN chat_aliases ma ON ma.alias_jid=?1 WHERE x.id=?2 AND COALESCE(xa.canonical_jid,x.chat_jid)=COALESCE(ma.canonical_jid,?1))`",
+  "pkgs": "./internal/store/"
+ },
+ {
+  "name": "rf1b",
+  "rf": "H1",
+  "file": "internal/store/store.go",
+  "old": "err = tx.QueryRowContext(ctx, dedupeQuery, m.ChatJID, m.ID).Scan(&exists)",
+  "new": "err = nil",
+  "pkgs": "./internal/store/"
+ },
+ {
+  "name": "h1-noalias",
+  "rf": "H1",
+  "file": "internal/store/store.go",
+  "old": "const aliasSet = `SELECT ?1\n UNION SELECT lid FROM id_mappings WHERE pn=?1\n UNION SELECT pn FROM id_mappings WHERE lid=?1\n UNION SELECT pn FROM id_mappings WHERE lid IN (SELECT lid FROM id_mappings WHERE pn=?1)`",
+  "new": "const aliasSet = `SELECT ?1`",
+  "pkgs": "./internal/store/"
+ },
+ {
+  "name": "h1-aliases-view",
+  "rf": "H1",
+  "file": "internal/store/store.go",
+  "old": "const aliasesQuery = aliasSet + ` EXCEPT SELECT ?1 ORDER BY 1`",
+  "new": "const aliasesQuery = `SELECT alias_jid FROM chat_aliases WHERE canonical_jid=(SELECT canonical_jid FROM chat_aliases WHERE alias_jid=?1 LIMIT 1) AND alias_jid<>?1 ORDER BY alias_jid`",
+  "pkgs": "./internal/store/"
+ },
+ {
+  "name": "rf2a",
+  "rf": "H8",
+  "file": "internal/ingest/normalize.go",
+  "old": "case x.GetType() == waE2E.ProtocolMessage_MESSAGE_EDIT:",
+  "new": "case false:",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "rf2b",
+  "rf": "H8",
+  "file": "internal/ingest/normalize.go",
+  "old": "\t\t\tr.Kind = KindRevoke\n\t\t\tr.Event = event(r, target, \"revoke\", \"\")\n",
+  "new": "\t\t\tr.Kind = KindRevoke\n",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "rf2c",
+  "rf": "H8",
+  "file": "internal/ingest/normalize.go",
+  "old": "r.Event = event(r, x.GetKey().GetID(), \"reaction\", x.GetText())",
+  "new": "r.Event = nil",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h8-anyrevoke",
+  "rf": "H8",
+  "file": "internal/ingest/normalize.go",
+  "old": "\t\t\tr.Kind = KindProtocol\n\t\t\tr.Event = event(r, target, string(KindProtocol), x.GetType().String())\n",
+  "new": "\t\t\tr.Kind = KindRevoke\n\t\t\tr.Event = event(r, target, \"revoke\", \"\")\n",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h8-untyped",
+  "rf": "H8",
+  "file": "internal/ingest/normalize.go",
+  "old": "case x.Type == nil:",
+  "new": "case false:",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h8-newedit",
+  "rf": "H8",
+  "file": "internal/ingest/normalize.go",
+  "old": "msg = inner // the EditedMessage",
+  "new": "_ = inner // the EditedMessage",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "y3",
+  "rf": "H7",
+  "file": "internal/ingest/pipeline.go",
+  "old": "case *events.GroupInfo, *events.JoinedGroup, *events.Archive, *events.Mute, *events.Pin:\n\t\t\tif r, ok := FromChatEvent(e, now); ok {\n\t\t\t\tlogErr(p.Ingest(ctx, r))\n\t\t\t}",
+  "new": "case *events.GroupInfo, *events.JoinedGroup, *events.Archive, *events.Mute, *events.Pin:",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h7-ptr",
+  "rf": "H7",
+  "file": "internal/ingest/chatevents.go",
+  "old": "strconv.FormatInt(ms, 10))",
+  "new": "strconv.FormatInt(ms, 10), strconv.FormatInt(time.Now().UnixNano(), 10))",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h7-value",
+  "rf": "H7",
+  "file": "internal/ingest/chatevents.go",
+  "old": "Value: string(value), RawProto: raw}",
+  "new": "Value: string(kind), RawProto: raw}",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h7-ts",
+  "rf": "H7",
+  "file": "internal/ingest/chatevents.go",
+  "old": "unix, ms = ts.Unix(), ts.UnixMilli()",
+  "new": "_ = ts",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h7-participants",
+  "rf": "H7",
+  "file": "internal/ingest/chatevents.go",
+  "old": "\t\t\tkind = KindParticipants\n",
+  "new": "",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h7-sender",
+  "rf": "H7",
+  "file": "internal/ingest/chatevents.go",
+  "old": "SenderJID: jidString(sender), Timestamp: unix",
+  "new": "Timestamp: unix",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h7-raw",
+  "rf": "H7",
+  "file": "internal/ingest/chatevents.go",
+  "old": "Value: string(value), RawProto: raw}",
+  "new": "Value: string(value), RawProto: raw[:0]}",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h7-nilaction",
+  "rf": "H7",
+  "file": "internal/ingest/chatevents.go",
+  "old": "a := cmp.Or(e.Action, &waSyncAction.ArchiveChatAction{})",
+  "new": "a := e.Action",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h7-zerots",
+  "rf": "H7",
+  "file": "internal/ingest/chatevents.go",
+  "old": "\tif !ts.IsZero() {\n\t\tunix, ms = ts.Unix(), ts.UnixMilli() // the ID uses milliseconds so toggles within one second stay distinct\n\t}",
+  "new": "\tunix, ms = ts.Unix(), ts.UnixMilli()",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "rf4a",
+  "rf": "RF4/H10",
+  "file": "internal/health/health.go",
+  "old": "case \"logged_out\", \"stream_replaced\":",
+  "new": "case \"stream_replaced\":",
+  "pkgs": "./internal/health/"
+ },
+ {
+  "name": "rf4b",
+  "rf": "RF4/H10",
+  "file": "internal/health/health.go",
+  "old": "m.gate.fire(state, stateTitles[state], m.banBody(detail))",
+  "new": "_ = detail",
+  "pkgs": "./internal/health/"
+ },
+ {
+  "name": "rf4c",
+  "rf": "RF4/H10",
+  "file": "internal/ingest/pipeline.go",
+  "old": "p.health.SetState(\"logged_out\", fmt.Sprint(e.Reason))",
+  "new": "p.health.SetState(\"disconnected\", fmt.Sprint(e.Reason))",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "rf4d",
+  "rf": "RF4/H10",
+  "file": "internal/health/health.go",
+  "old": "if ok && now.Sub(last) < alertEvery {",
+  "new": "if false && ok && now.Sub(last) < alertEvery {",
+  "pkgs": "./internal/health/"
+ },
+ {
+  "name": "rf5b-health",
+  "rf": "RF5/H10",
+  "file": "internal/health/health.go",
+  "old": "m.gate.fire(\"write_failed\", \"Archive write failed\", err.Error())",
+  "new": "_ = err",
+  "pkgs": "./internal/health/"
+ },
+ {
+  "name": "rf5c",
+  "rf": "RF5/H10",
+  "file": "internal/health/health.go",
+  "old": "if m.diskFree != nil && a.DiskFreeMinGB > 0 {",
+  "new": "if false && m.diskFree != nil && a.DiskFreeMinGB > 0 {",
+  "pkgs": "./internal/health/"
+ },
+ {
+  "name": "rf6b",
+  "rf": "RF6/H10",
+  "file": "internal/health/health.go",
+  "old": "\"Version \"+m.version()+\" was rejected; update the archiver\"",
+  "new": "\"Version was rejected; update the archiver\"",
+  "pkgs": "./internal/health/"
+ },
+ {
+  "name": "rf10d",
+  "rf": "RF10/H10",
+  "file": "internal/health/health.go",
+  "old": "\tm.snapshot.Panics++\n",
+  "new": "",
+  "pkgs": "./internal/health/"
+ },
+ {
+  "name": "rf10e",
+  "rf": "RF10/H10",
+  "file": "internal/health/health.go",
+  "old": "m.gate.fire(\"panic:\"+where, \"Recovered panic\", where)",
+  "new": "_ = where",
+  "pkgs": "./internal/health/"
+ },
+ {
+  "name": "h10-disc",
+  "rf": "H10",
+  "file": "internal/health/health.go",
+  "old": "a.DisconnectedAfter > 0 && (s.State",
+  "new": "false && a.DisconnectedAfter > 0 && (s.State",
+  "pkgs": "./internal/health/"
+ },
+ {
+  "name": "h10-quiet",
+  "rf": "H10",
+  "file": "internal/health/health.go",
+  "old": "a.PhoneQuietAfter > 0 {",
+  "new": "false && a.PhoneQuietAfter > 0 {",
+  "pkgs": "./internal/health/"
+ },
+ {
+  "name": "h10-recovered",
+  "rf": "H10",
+  "file": "internal/health/health.go",
+  "old": "\tif ok {\n\t\tg.send(",
+  "new": "\tif false && ok {\n\t\tg.send(",
+  "pkgs": "./internal/health/"
+ },
+ {
+  "name": "h10-downstart",
+  "rf": "H10",
+  "file": "internal/health/health.go",
+  "old": "started: now, downSince: now,",
+  "new": "started: now,",
+  "pkgs": "./internal/health/"
+ },
+ {
+  "name": "h10-noevents-start",
+  "rf": "H10",
+  "file": "internal/health/health.go",
+  "old": "a.NoEventsAfter > 0 && s.State == \"connected\" {",
+  "new": "a.NoEventsAfter > 0 && s.State == \"connected\" && !s.LastEvent.IsZero() {",
+  "pkgs": "./internal/health/"
+ },
+ {
+  "name": "m2-sync",
+  "rf": "M2",
+  "file": "internal/health/health.go",
+  "old": "\tif m.n == nil {\n\t\treturn true\n\t}\n\tselect {\n",
+  "new": "\tif m.n == nil {\n\t\treturn true\n\t}\n\t_ = m.n.Notify(context.Background(), title, body)\n\tif true {\n\t\treturn true\n\t}\n\tselect {\n",
+  "pkgs": "./internal/health/"
+ },
+ {
+  "name": "m2-nojoin",
+  "rf": "M2",
+  "file": "internal/health/health.go",
+  "old": "\tdefer func() { <-sent }()\n",
+  "new": "",
+  "pkgs": "./internal/health/"
+ },
+ {
+  "name": "m2-bgctx",
+  "rf": "M2",
+  "file": "internal/health/health.go",
+  "old": "m.send(ctx, a)",
+  "new": "m.send(context.Background(), a)",
+  "count": 2,
+  "pkgs": "./internal/health/"
+ },
+ {
+  "name": "m2-block",
+  "rf": "M2",
+  "file": "internal/health/health.go",
+  "old": "\tdefault:\n\t\tm.log.Error(\"alert dropped: queue full\", \"title\", title, \"body\", body)",
+  "new": "\tdefault:\n\t\tm.queue <- alert{title, body}",
+  "pkgs": "./internal/health/"
+ },
+ {
+  "name": "m2-nolog",
+  "rf": "M2",
+  "file": "internal/health/health.go",
+  "old": "\t\tm.log.Error(\"alert dropped: queue full\", \"title\", title, \"body\", body)\n",
+  "new": "",
+  "pkgs": "./internal/health/"
+ },
+ {
+  "name": "h7-groupfields",
+  "rf": "H7",
+  "file": "internal/ingest/chatevents.go",
+  "old": "Delete: e.Delete, Link: e.Link, Unlink: e.Unlink, InviteLink: e.NewInviteLink, Suspended: e.Suspended, Unsuspended: e.Unsuspended,\n\t\t\tJoinReason: e.JoinReason, Version: e.ParticipantVersionID}",
+  "new": "}",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h7-approval",
+  "rf": "H7",
+  "file": "internal/ingest/chatevents.go",
+  "old": "c.MembershipApproval = &e.MembershipApprovalMode.IsJoinApprovalRequired",
+  "new": "_ = 0",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h7-unknown",
+  "rf": "H7",
+  "file": "internal/ingest/chatevents.go",
+  "old": "c.Unknown = append(c.Unknown, n.String())",
+  "new": "_ = n",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h7-joinversion",
+  "rf": "H7",
+  "file": "internal/ingest/chatevents.go",
+  "old": ", Version: e.ParticipantVersionID, CreateKey: string(e.CreateKey)}",
+  "new": "}",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h7-secretedit",
+  "rf": "H7",
+  "file": "internal/ingest/normalize.go",
+  "old": "x.GetSecretEncType() == waE2E.SecretEncryptedMessage_MESSAGE_EDIT",
+  "new": "x.GetSecretEncType() == waE2E.SecretEncryptedMessage_EVENT_EDIT",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h7-ms",
+  "rf": "H7",
+  "file": "internal/ingest/chatevents.go",
+  "old": "unix, ms = ts.Unix(), ts.UnixMilli()",
+  "new": "unix, ms = ts.Unix(), ts.Unix()",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h7-caption",
+  "rf": "H7",
+  "file": "internal/ingest/normalize.go",
+  "old": "return m.GetDocumentMessage().GetCaption()",
+  "new": "return \"\"",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h8-keyraw",
+  "rf": "H8",
+  "file": "internal/ingest/normalize.go",
+  "old": "if keyMaterial[x.GetType()] {",
+  "new": "if false && keyMaterial[x.GetType()] {",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "m2-swallow",
+  "rf": "M2",
+  "file": "internal/health/health.go",
+  "old": "\t\tm.log.Error(\"alert not sent\", \"title\", a.title, \"err\", err)\n",
+  "new": "\t\t_ = err\n",
+  "pkgs": "./internal/health/"
+ },
+ {
+  "name": "m2-dropfired",
+  "rf": "M2",
+  "file": "internal/health/health.go",
+  "old": "\tif g.send(title, body) { // only a queued alert counts as fired, so a dropped one fires again\n\t\tg.fired[key] = now\n\t}\n",
+  "new": "\tg.send(title, body)\n\tg.fired[key] = now\n",
+  "pkgs": "./internal/health/"
+ },
+ {
+  "name": "h10-noevents-while-disc",
+  "rf": "H10",
+  "file": "internal/health/health.go",
+  "old": "a.NoEventsAfter > 0 && s.State == \"connected\" {",
+  "new": "a.NoEventsAfter > 0 {",
+  "pkgs": "./internal/health/"
+ },
+ {
+  "name": "h10-tempban-until",
+  "rf": "H10",
+  "file": "internal/health/health.go",
+  "old": "m.clock.Now().Add(d).UTC()",
+  "new": "m.clock.Now().UTC()",
+  "pkgs": "./internal/health/"
+ },
+ {
+  "name": "h10-tempban-verbatim",
+  "rf": "H10",
+  "file": "internal/health/health.go",
+  "old": "return \"Temporarily banned: \" + detail + \"; capture is paused\"",
+  "new": "return \"Temporarily banned; capture is paused\"",
+  "pkgs": "./internal/health/"
+ },
+ {
+  "name": "h10-neverconnected",
+  "rf": "H10",
+  "file": "internal/health/health.go",
+  "old": "(s.State == \"disconnected\" || s.State == \"\")",
+  "new": "(s.State == \"disconnected\")",
+  "pkgs": "./internal/health/"
+ },
+ {
+  "name": "rf10c",
+  "rf": "H11",
+  "file": "internal/media/queue.go",
+  "old": "guard.Run(q.log, \"media worker\", onPanic, func() {\n\t\t\t\t\tq.work(ctx, &current)\n\t\t\t\t\tq.requestPass(ctx, &current)\n\t\t\t\t})",
+  "new": "_, _ = onPanic, guard.Run\n\t\t\t\tq.work(ctx, &current)\n\t\t\t\tq.requestPass(ctx, &current)",
+  "pkgs": "./internal/media/"
+ },
+ {
+  "name": "rf10d-media",
+  "rf": "H11",
+  "file": "internal/media/queue.go",
+  "old": "q.onPanic(\"media\")",
+  "new": "_ = \"media\"",
+  "pkgs": "./internal/media/"
+ },
+ {
+  "name": "h11-row",
+  "rf": "H11",
+  "file": "internal/media/queue.go",
+  "old": "q.save(ctx, *current)",
+  "new": "_ = current",
+  "pkgs": "./internal/media/"
+ },
+ {
+  "name": "x4",
+  "rf": "H11",
+  "file": "internal/store/store.go",
+  "old": "`CASE source WHEN 'live' THEN 0 ELSE 1 END,message_ts DESC`",
+  "new": "`message_ts DESC`",
+  "pkgs": "./internal/media/ ./internal/store/"
+ },
+ {
+  "name": "x5",
+  "rf": "H11",
+  "file": "internal/store/store.go",
+  "old": "UPDATE media SET state='downloading' WHERE",
+  "new": "UPDATE media SET state=state WHERE",
+  "pkgs": "./internal/media/ ./internal/store/"
+ },
+ {
+  "name": "x6",
+  "rf": "H11",
+  "file": "internal/store/store.go",
+  "old": "UPDATE media SET state='pending',reason='' WHERE state='downloading';",
+  "new": "UPDATE media SET state='pending',reason='' WHERE state='never';",
+  "pkgs": "./internal/media/ ./internal/store/"
+ },
+ {
+  "name": "x7",
+  "rf": "H11",
+  "file": "internal/media/queue.go",
+  "old": "m.SHA256 = hex.EncodeToString(sum[:])",
+  "new": "m.SHA256 = \"\"\n\t\t_, _ = sum, hex.EncodeToString",
+  "pkgs": "./internal/media/"
+ },
+ {
+  "name": "h3-emptyref",
+  "rf": "H3",
+  "file": "internal/media/queue.go",
+  "old": "ref := wa.MediaRef{Chat: m.ChatJID, Sender: m.SenderJID, ID: m.MessageID, FromMe: m.FromMe}",
+  "new": "ref := wa.MediaRef{}",
+  "pkgs": "./internal/media/"
+ },
+ {
+  "name": "h3-key",
+  "rf": "H3",
+  "file": "internal/wa/rerequest.go",
+  "old": "return info, media.GetMediaKey(), nil",
+  "new": "return info, nil, nil",
+  "pkgs": "./internal/wa/"
+ },
+ {
+  "name": "h3-isgroup",
+  "rf": "H3",
+  "file": "internal/wa/rerequest.go",
+  "old": "IsGroup: chat.Server == types.GroupServer",
+  "new": "IsGroup: false",
+  "pkgs": "./internal/wa/"
+ },
+ {
+  "name": "h3-unwrap",
+  "rf": "H3",
+  "file": "internal/wa/download.go",
+  "old": "return mediaMessage((&events.Message{RawMessage: &msg}).UnwrapRaw().Message, path), nil",
+  "new": "_ = events.Message{}\n\treturn mediaMessage(&msg, path), nil",
+  "pkgs": "./internal/wa/"
+ },
+ {
+  "name": "h3-fromme",
+  "rf": "H3",
+  "file": "internal/ingest/normalize.go",
+  "old": "MessageTimestamp: r.Message.Timestamp, FromMe: r.FromMe}",
+  "new": "MessageTimestamp: r.Message.Timestamp}",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h3-fromme-store",
+  "rf": "H3",
+  "file": "internal/store/store.go",
+  "old": "m.UpdatedAt, m.MessageTimestamp, m.FromMe)",
+  "new": "m.UpdatedAt, m.MessageTimestamp, false)",
+  "pkgs": "./internal/media/ ./internal/store/"
+ },
+ {
+  "name": "h3-nokey",
+  "rf": "H3",
+  "file": "internal/media/queue.go",
+  "old": "m.State, m.Reason = \"failed\", wa.ErrNoMediaKey.Error()",
+  "new": "m.Reason = wa.ErrNoMediaKey.Error()",
+  "pkgs": "./internal/media/"
+ },
+ {
+  "name": "rf3b",
+  "rf": "H4",
+  "file": "internal/media/queue.go",
+  "old": "q.requestPass(ctx, &current)",
+  "new": "_ = q.requestPass",
+  "pkgs": "./internal/media/"
+ },
+ {
+  "name": "rf3c",
+  "rf": "H4",
+  "file": "internal/media/queue.go",
+  "old": "if m == nil || !q.limiter.AllowN(now, 1) {",
+  "new": "if m == nil {",
+  "pkgs": "./internal/media/"
+ },
+ {
+  "name": "h4-wallclock",
+  "rf": "H4",
+  "file": "internal/media/queue.go",
+  "old": "q.limiter.AllowN(now, 1)",
+  "new": "q.limiter.AllowN(time.Now(), 1)",
+  "pkgs": "./internal/media/"
+ },
+ {
+  "name": "h4-norevisit",
+  "rf": "H4",
+  "file": "internal/media/queue.go",
+  "old": "if m == nil || !q.limiter.AllowN(now, 1) {\n\t\t\treturn\n\t\t}",
+  "new": "if m == nil {\n\t\t\treturn\n\t\t}\n\t\tif !q.limiter.AllowN(now, 1) {\n\t\t\tm.State = \"skipped\"\n\t\t\tq.save(ctx, *m)\n\t\t\tcontinue\n\t\t}",
+  "pkgs": "./internal/media/"
+ },
+ {
+  "name": "h4-stale",
+  "rf": "H4",
+  "file": "internal/media/queue.go",
+  "old": "if err := q.store.FailStaleRetries(ctx, now); err != nil {",
+  "new": "if err := error(nil); err != nil {",
+  "pkgs": "./internal/media/"
+ },
+ {
+  "name": "m4-terminal",
+  "rf": "M4",
+  "file": "internal/media/queue.go",
+  "old": "if m.Attempts < maxAttempts {",
+  "new": "if false {",
+  "pkgs": "./internal/media/"
+ },
+ {
+  "name": "rf3a",
+  "rf": "M4",
+  "file": "internal/media/queue.go",
+  "old": "\t\tq.save(ctx, *m)\n\t\treturn\n\t}\n\tpath := q.path(*m)",
+  "new": "\t}\n\tpath := q.path(*m)",
+  "pkgs": "./internal/media/"
+ },
+ {
+  "name": "rf3d",
+  "rf": "M4",
+  "file": "internal/media/queue.go",
+  "old": "m.Attempts += attempts",
+  "new": "m.Attempts += 0 * attempts",
+  "pkgs": "./internal/media/"
+ },
+ {
+  "name": "m4-notbefore",
+  "rf": "M4",
+  "file": "internal/store/store.go",
+  "old": "AND next_attempt_at<=?",
+  "new": "AND ? IS NOT NULL",
+  "pkgs": "./internal/media/ ./internal/store/"
+ },
+ {
+  "name": "m4-base",
+  "rf": "M4",
+  "file": "internal/media/queue.go",
+  "old": "Base: time.Second",
+  "new": "Base: 10 * time.Millisecond",
+  "pkgs": "./internal/media/"
+ },
+ {
+  "name": "m4-perm",
+  "rf": "M4",
+  "file": "internal/media/queue.go",
+  "old": "Permanent: func(e error) bool { return errors.Is(e, wa.ErrMediaExpired) }",
+  "new": "Permanent: nil",
+  "pkgs": "./internal/media/"
+ },
+ {
+  "name": "m4-sleep",
+  "rf": "M4",
+  "file": "internal/media/queue.go",
+  "old": "Sleep: q.sleep",
+  "new": "Sleep: nil",
+  "pkgs": "./internal/media/"
+ },
+ {
+  "name": "m4-requeue",
+  "rf": "M4",
+  "file": "internal/media/queue.go",
+  "old": "m.NextAttemptAt = now.Add(requeueAfter).Unix()",
+  "new": "m.NextAttemptAt = now.Unix()",
+  "pkgs": "./internal/media/"
+ }
+]

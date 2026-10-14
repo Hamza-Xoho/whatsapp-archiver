@@ -1,0 +1,74 @@
+[
+ {
+  "name": "h12-prefix",
+  "rf": "H12",
+  "file": "internal/archtest/scan.go",
+  "old": "for _, p := range r.BannedPrefixes {",
+  "new": "for _, p := range []string(nil) {",
+  "pkgs": "./internal/archtest/"
+ },
+ {
+  "name": "h12-allowfile",
+  "rf": "H12",
+  "file": "internal/archtest/scan.go",
+  "old": "if exempt(name) {",
+  "new": "if len(fileAllowed) > 0 {",
+  "pkgs": "./internal/archtest/"
+ },
+ {
+  "name": "h12-allowlist-extra",
+  "rf": "H12",
+  "file": "internal/archtest/scan.go",
+  "old": "\"SetProxy\", \"SetProxyAddress\"",
+  "new": "\"SetStatusMessage\", \"SetProxy\", \"SetProxyAddress\"",
+  "pkgs": "./internal/archtest/"
+ },
+ {
+  "name": "h12-boundary",
+  "rf": "H12",
+  "file": "internal/archtest/scan.go",
+  "old": "(rest == \"\" || (rest[0] >= 'A' && rest[0] <= 'Z'))",
+  "new": "(len(rest) >= 0)",
+  "pkgs": "./internal/archtest/"
+ },
+ {
+  "name": "h12-nosendmedia",
+  "rf": "H12",
+  "file": "internal/archtest/scan.go",
+  "old": ", \"SendMediaRetryReceipt\"}\n\tbanned",
+  "new": "}\n\tbanned",
+  "pkgs": "./internal/archtest/"
+ },
+ {
+  "name": "h12-iface",
+  "rf": "H12",
+  "file": "internal/archtest/scan.go",
+  "old": "if (banned || rules.bannedPrefix(name.Name)) && !exempt(name.Name) {",
+  "new": "if false && banned {",
+  "pkgs": "./internal/archtest/"
+ },
+ {
+  "name": "h12-embed",
+  "rf": "H12",
+  "file": "internal/archtest/scan.go",
+  "old": "if len(f.Names) == 0 || exported {",
+  "new": "if exported {",
+  "pkgs": "./internal/archtest/"
+ },
+ {
+  "name": "h12-wa-scope",
+  "rf": "H12",
+  "file": "internal/archtest/scan.go",
+  "old": "prefixRule := importsClient || waProd",
+  "new": "prefixRule := importsClient",
+  "pkgs": "./internal/archtest/"
+ },
+ {
+  "name": "h12-escape-func",
+  "rf": "H12",
+  "file": "internal/archtest/scan.go",
+  "old": "if n.Name.IsExported() && n.Type.Results != nil {",
+  "new": "if false {",
+  "pkgs": "./internal/archtest/"
+ }
+]

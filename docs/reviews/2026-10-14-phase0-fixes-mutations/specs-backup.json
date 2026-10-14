@@ -1,0 +1,51 @@
+[
+ {
+  "name": "x12",
+  "file": "internal/backup/backup.go",
+  "old": "if result != \"ok\" {",
+  "new": "if false {",
+  "pkgs": "./internal/backup/"
+ },
+ {
+  "name": "x13",
+  "file": "internal/backup/backup.go",
+  "old": "\tfor len(snaps) > keep {",
+  "new": "\tfor len(snaps) > keep+99 {",
+  "pkgs": "./internal/backup/"
+ },
+ {
+  "name": "h16-foreign",
+  "file": "internal/backup/backup.go",
+  "old": "if at, err := time.Parse(snapshotLayout, e.Name()); err == nil {",
+  "new": "if at, err := time.Parse(snapshotLayout, e.Name()); err == nil || true {",
+  "pkgs": "./internal/backup/"
+ },
+ {
+  "name": "h16-failed",
+  "file": "internal/backup/backup.go",
+  "old": "\t\t\t_ = os.RemoveAll(folder)\n",
+  "new": "\t\t\t_ = folder\n",
+  "pkgs": "./internal/backup/"
+ },
+ {
+  "name": "h15-rwpath",
+  "file": "deploy/archiver.service",
+  "old": " /srv/backups/whatsapp-archiver",
+  "new": "",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "backup-schedule-twice",
+  "file": "internal/backup/backup.go",
+  "old": "\t\t\treport, runErr := Run(ctx, cfg)\n",
+  "new": "\t\t\t_, _ = Run(ctx, cfg)\n\t\t\treport, runErr := Run(ctx, cfg)\n",
+  "pkgs": "./internal/backup/"
+ },
+ {
+  "name": "backup-keep-on-retain-fail",
+  "file": "internal/backup/backup.go",
+  "old": "err != nil && report.Snapshot == \"\"",
+  "new": "err != nil",
+  "pkgs": "./internal/backup/"
+ }
+]

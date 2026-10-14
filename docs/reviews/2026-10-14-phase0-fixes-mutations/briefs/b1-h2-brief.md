@@ -1,0 +1,41 @@
+# Brief: findings B1 (never drop an event) and H2 (retry back-off) — two red/green cycles
+
+Repo: /Users/hamza/Code/whatsapp-archiver/archiver, branch `phase0-fixes` (already checked out; do not switch). Go module `whatsapp-archiver`.
+Read first: `AGENTS.md` (rules), `internal/ingest/pipeline.go`, `internal/ingest/history.go`, `internal/retry/retry.go`, `internal/store/store.go` (insert helper), existing tests in `internal/ingest/*_test.go`, `internal/retry/retry_test.go`, `internal/store/store_test.go`.
+Review rows: `docs/reviews/2026-10-14-phase0-review.md` lines for B1 and H2 (section 3 table) and section 7 items 1–2.
+Plan text (binding): `docs/plans/2026-10-14-phase0-capture-logger.md` line ~417-423:
+> `Ingest` — the single ingestion path: store mappings first (so the filter and dedup see them) → filter → write (wrapped in `retry.Do`) → media enqueue → `h.Seen`.
+> Write failures never drop an event: after `retry.Do` gives up (Max 5), call `h.WriteFailed` once and keep retrying at the maximum interval until the write succeeds or the context ends. Returning from the handler lets whatsmeow ack the message, so returning early would lose it.
+> `TestHandleWriteFailureRetriesUntilStored`: the writer fails 7 times then succeeds → one row, exactly one `WriteFailed` (Review Focus 5).
+
+## B1 (verbatim evidence)
+Not every write is inside the retry-forever loop, and `Handle` throws away every error from `Ingest` and `ImportHistory` (`pipeline.go:55,57,59,62` `_ =`). The ID-mapping insert (`:85-89`), the media `Enqueue` (`:128-132`) and all history ledger/mapping/chat writes (`history.go:49-69`) run exactly once. One transient error (`database is locked`) drops the event; the handler returns so whatsmeow acks it, no alert fires. Probe: one failed mapping insert → `messages stored=0, WriteFailed alerts=0`.
+Red tests (names fixed by the review): `TestHandleWriteFailureRetriesUntilStored`, `TestMappingWriteFailureIsRetried`, `TestEnqueueFailureIsRetried`, `TestImportHistoryRetriesLedgerWrite`. Also `Handle` must stop discarding errors (log them at Error level with event identity; health was already told).
+
+## H2 (verbatim evidence)
+After 5 attempts `Ingest` retries with `retry.Policy{Max: 1, …}`; with `Max: 1` `retry.Do` never sleeps, so the loop spins: 35,760 insert attempts in one second during a simulated disk failure. A permanent error (e.g. primary-key violation) spins forever too. Mutation `rf1c` (drop `ON CONFLICT` on `message_events`) survives: no test inserts an event twice.
+Red tests: `TestWriteRetryBacksOff` (assert attempts per fake-clock minute are bounded, i.e. sleeps actually happen at the max interval), `TestDuplicateEventIsNotARetryableError`; plus in `internal/store/store_test.go` a test that inserts the same `message_events` row twice and asserts the second returns inserted=false and NO error (kills rf1c), and the same for `id_mappings` asserting the error (kills rf1d — the existing `TestIDMappingIsIdempotent` ignores the error).
+
+## Controller decisions (rulings — follow them)
+1. One persistence wrapper in the pipeline: a private method (e.g. `p.persist(ctx, what string, fn func() error) error`) implementing: `retry.Do(Policy{Max:5, Base:10ms, Sleep:p.sleep})`; on give-up call `h.WriteFailed(err)` exactly once, then keep calling fn with `p.sleep(160ms)` (the max interval of that policy, `Base<<4`) between attempts until success or `ctx.Err()`. Every raw write goes through it: mapping inserts, the chat/participant/message/event write closure, media `Enqueue`, and in `ImportHistory` the ledger insert, every chunk mapping insert, every chat upsert. No second backoff implementation; `internal/retry` stays the one helper (you may add to it if cleaner, e.g. a `Forever` variant, but then the pipeline uses it — not both).
+2. Injectable time: add one exported way for tests to inject `now` and `sleep` into the pipeline (e.g. `func (p *Pipeline) WithClock(now func() time.Time, sleep func(time.Duration)) *Pipeline`); default sleep is a context-aware real timer sleep. Tests are in package `ingest_test`, so it must be exported. Later findings (H5 history, health) will reuse it.
+3. Permanent errors: a constraint violation is not retryable. In `internal/store`, wrap SQLite constraint errors (modernc.org/sqlite error code class SQLITE_CONSTRAINT; look up the exact API in `.cache/gomod/modernc.org/sqlite@v1.60.1/` — never guess) so callers can test `errors.Is(err, store.ErrConstraint)`. `persist` treats such an error as permanent: `h.WriteFailed(err)`, log at Error with what failed, return the wrapped error immediately — no retry loop. Cost if wrong: that one event is not stored but is alerted, instead of blocking all ingestion forever.
+4. `Handle`: log every non-nil error from `Ingest`/`ImportHistory` (`p.log.Error(..., "err", err, "type", ...)`); context-cancelled errors at shutdown may be Debug/Info. No new behaviour beyond that.
+5. Errors are wrapped with context (`fmt.Errorf("insert mapping: %w", err)` style).
+6. Fakes only at external boundaries: use a writer fake that wraps the real `testkit.Store(t)` and fails the first N calls of one method; fake sleep records durations and advances a fake clock; never real-sleep in tests.
+
+## Process (strict, per finding: B1 first, then H2)
+For each finding:
+1. Write the red tests. Run them: `.tools/go/bin/go test -count=1 -run '<names>' ./internal/...` via the Makefile env, or simply `make test` (Makefile sets env). Confirm each fails for the expected behavioural reason (not a compile error — if new API is needed for compilation, add the minimal stub signature in the test commit? NO: test commits may only touch _test.go files. Instead, if a test needs new exported API (e.g. WithClock), the red commit may fail at compile time ONLY for the new API; say so explicitly in the report and paste the compile error, then show the behavioural failure after the green API stub exists. Prefer writing tests against existing API where possible).
+2. Commit tests only: `git commit -m "test: …"` (only `_test.go` files).
+3. `touch .claude/green.lock`; implement the least code; run `make check` (it must pass completely: race tests, lint, 5 cross-builds); `rm .claude/green.lock`; commit `fix: …` (no `_test.go` files — the pre-commit hook enforces it).
+4. Mutations: append specs to `.superpowers/sdd/claude-code-phase0-fixes/mutations/specs.json` (format documented in `mutations/run.py`; existing entries rf5a/rf5b may need their `old` text updated to match the new code — keep the same intent: rf5a = "Ingest returns early on write error", rf5b = "WriteFailed never reported"). Add: rf1c (drop ON CONFLICT on message_events), rf1d (drop ON CONFLICT on id_mappings), b1-map (mapping insert not retried), b1-enq (enqueue not retried), b1-ledger (history ledger insert not retried), h2-sleep (no sleep between retry rounds), h2-perm (constraint error treated as retryable). Run `python3 .superpowers/sdd/claude-code-phase0-fixes/mutations/run.py .superpowers/sdd/claude-code-phase0-fixes/mutations/specs.json <names>` — every one must be KILLED. Mutants are applied to committed HEAD, so commit first.
+5. Probes: copy `docs/reviews/2026-10-14-phase0-review-evidence/probes/internal/ingest/zz_probe*_test.go.txt` (rename to `.go`) into a scratch copy (`git archive HEAD | tar -x -C <scratch>`, scratch under /private/tmp/claude-501/-Users-hamza-Code-whatsapp-archiver/72e68cf8-5108-4658-ac30-bd9d214af7fa/scratchpad), run `TestProbeMappingWriteFailureDropsEvent` and `TestProbeWriteFailureRetryRate`; show they no longer reproduce (the probe may need minimal adaptation to new API; say what you changed). Never add probes to the repo.
+6. Append to `PROGRESS.md` a short entry per finding: commit hashes, coverage of touched packages (`go test -cover ./internal/ingest/ ./internal/store/ ./internal/retry/`), mutations killed, deviations. Commit `docs: …`.
+
+## Hard rules
+- Never connect to WhatsApp; never run `archiver pair`/`run`.
+- Never weaken, skip or delete an existing test. Don't change existing test assertions.
+- No `Co-Authored-By` trailer. Do not push.
+- Least code, no dead code; keep files < 500 lines.
+- If something is ambiguous, stop and report NEEDS_CONTEXT.
