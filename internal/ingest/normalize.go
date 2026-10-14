@@ -94,6 +94,12 @@ func normalizeContent(msg *waE2E.Message, r *Result) {
 		r.Message = nil
 		r.Media = nil
 	}
+	if x := msg.GetSecretEncryptedMessage(); x.GetSecretEncType() == waE2E.SecretEncryptedMessage_MESSAGE_EDIT {
+		r.Kind = KindEdit // the new content is encrypted with the message secret; target and raw proto are kept
+		r.Event = event(r, x.GetTargetMessageKey().GetID(), "edit", "")
+		r.Message = nil
+		r.Media = nil
+	}
 	if x := msg.GetProtocolMessage(); x != nil {
 		target := x.GetKey().GetID()
 		switch {
@@ -110,6 +116,9 @@ func normalizeContent(msg *waE2E.Message, r *Result) {
 			r.Kind = KindProtocol
 			r.Event = event(r, target, string(KindProtocol), x.GetType().String())
 			r.Event.NewText = ""
+			if keyMaterial[x.GetType()] {
+				r.Event.RawProto = nil
+			}
 		}
 		r.Message = nil
 		r.Media = nil
@@ -140,7 +149,23 @@ func messageText(m *waE2E.Message) string {
 	if x := m.GetExtendedTextMessage(); x != nil {
 		return x.GetText()
 	}
-	return ""
+	if x := m.GetImageMessage(); x != nil {
+		return x.GetCaption()
+	}
+	if x := m.GetVideoMessage(); x != nil {
+		return x.GetCaption()
+	}
+	return m.GetDocumentMessage().GetCaption()
+}
+
+// keyMaterial lists the protocol message types whose payload holds keys: app-state sync keys, contact hash keys,
+// and the media key of a history blob or of a peer-data response. They are stored without raw proto, because
+// archive.db is backed up and keys must never be.
+var keyMaterial = map[waE2E.ProtocolMessage_Type]bool{
+	waE2E.ProtocolMessage_APP_STATE_SYNC_KEY_SHARE:                     true,
+	waE2E.ProtocolMessage_SHARED_DEVICE_CONTACT_HASH_KEY_SHARE:         true,
+	waE2E.ProtocolMessage_HISTORY_SYNC_NOTIFICATION:                    true,
+	waE2E.ProtocolMessage_PEER_DATA_OPERATION_REQUEST_RESPONSE_MESSAGE: true,
 }
 
 func FromUndecryptable(evt *events.UndecryptableMessage, received time.Time) Result {

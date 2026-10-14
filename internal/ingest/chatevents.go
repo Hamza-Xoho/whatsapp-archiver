@@ -29,6 +29,19 @@ type groupChange struct {
 	Leave     []string `json:"leave,omitempty"`
 	Promote   []string `json:"promote,omitempty"`
 	Demote    []string `json:"demote,omitempty"`
+
+	Delete             *types.GroupDelete     `json:"delete,omitempty"`
+	Link               *types.GroupLinkChange `json:"link,omitempty"`
+	Unlink             *types.GroupLinkChange `json:"unlink,omitempty"`
+	InviteLink         *string                `json:"invite_link,omitempty"`
+	MembershipApproval *bool                  `json:"membership_approval,omitempty"`
+	Suspended          bool                   `json:"suspended,omitempty"`
+	Unsuspended        bool                   `json:"unsuspended,omitempty"`
+	JoinReason         string                 `json:"join_reason,omitempty"`
+	Version            string                 `json:"version,omitempty"` // participant version ID
+	CreateKey          string                 `json:"create_key,omitempty"`
+	Created            int64                  `json:"created,omitempty"` // group creation time, unix seconds
+	Unknown            []string               `json:"unknown,omitempty"` // unparsed change nodes, as XML
 }
 
 // stateChange is the stored Value of an archive, mute or pin app-state event: the chat's state after it.
@@ -53,7 +66,17 @@ func FromChatEvent(evt any, received time.Time) (Result, bool) {
 	switch e := evt.(type) {
 	case *events.GroupInfo:
 		chat, sender, ts, kind = e.JID, e.Sender, e.Timestamp, KindGroupInfo
-		c := groupChange{Notify: e.Notify, Join: jids(e.Join), Leave: jids(e.Leave), Promote: jids(e.Promote), Demote: jids(e.Demote)}
+		c := groupChange{Notify: e.Notify, Join: jids(e.Join), Leave: jids(e.Leave), Promote: jids(e.Promote), Demote: jids(e.Demote),
+			Delete: e.Delete, Link: e.Link, Unlink: e.Unlink, InviteLink: e.NewInviteLink, Suspended: e.Suspended, Unsuspended: e.Unsuspended,
+			JoinReason: e.JoinReason, Version: e.ParticipantVersionID}
+		if e.MembershipApprovalMode != nil {
+			c.MembershipApproval = &e.MembershipApprovalMode.IsJoinApprovalRequired
+		}
+		for _, n := range e.UnknownChanges {
+			if n != nil {
+				c.Unknown = append(c.Unknown, n.String()) // attributes are sorted, so the text is deterministic
+			}
+		}
 		if e.Name != nil {
 			c.Name = &e.Name.Name
 		}
@@ -76,7 +99,11 @@ func FromChatEvent(evt any, received time.Time) (Result, bool) {
 		payload = c
 	case *events.JoinedGroup: // carries no WhatsApp timestamp
 		chat, sender, kind = e.JID, e.Sender, KindGroupInfo
-		payload = groupChange{Notify: e.Notify, Sender: jidString(sender), Reason: e.Reason, Type: e.Type, Name: &e.Name}
+		c := groupChange{Notify: e.Notify, Sender: jidString(sender), Reason: e.Reason, Type: e.Type, Name: &e.Name, Version: e.ParticipantVersionID, CreateKey: string(e.CreateKey)}
+		if !e.GroupCreated.IsZero() {
+			c.Created = e.GroupCreated.Unix()
+		}
+		payload = c
 	case *events.Archive:
 		chat, ts = e.JID, e.Timestamp
 		a := cmp.Or(e.Action, &waSyncAction.ArchiveChatAction{}) // the dispatched action may be missing
@@ -96,12 +123,12 @@ func FromChatEvent(evt any, received time.Time) (Result, bool) {
 		return Result{}, false
 	}
 	value, _ := json.Marshal(payload) // plain strings, bools and numbers: cannot fail
-	var unix int64
+	var unix, ms int64
 	if !ts.IsZero() {
-		unix = ts.Unix()
+		unix, ms = ts.Unix(), ts.UnixMilli() // the ID uses milliseconds so toggles within one second stay distinct
 	}
 	c := chat.String()
-	ce := store.ChatEvent{ChatJID: c, Kind: string(kind), EventID: stableID(c, string(kind), string(value), strconv.FormatInt(unix, 10)), SenderJID: jidString(sender), Timestamp: unix, ReceivedAt: received.Unix(), Value: string(value), RawProto: raw}
+	ce := store.ChatEvent{ChatJID: c, Kind: string(kind), EventID: stableID(c, string(kind), string(value), strconv.FormatInt(ms, 10)), SenderJID: jidString(sender), Timestamp: unix, ReceivedAt: received.Unix(), Value: string(value), RawProto: raw}
 	return Result{Kind: kind, Chat: store.Chat{JID: c}, ChatEvent: &ce, Received: received}, true
 }
 
