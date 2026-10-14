@@ -1007,5 +1007,29 @@
   "old": "m.NextAttemptAt = now.Add(requeueAfter).Unix()",
   "new": "m.NextAttemptAt = now.Unix()",
   "pkgs": "./internal/media/"
+ },
+ {
+  "name": "mf1a",
+  "rf": "media-fix1",
+  "file": "internal/media/queue.go",
+  "old": "case m.RetryDirectPath != \"\":",
+  "new": "case false:",
+  "pkgs": "./internal/media/"
+ },
+ {
+  "name": "mf1b",
+  "rf": "media-fix1",
+  "file": "internal/media/queue.go",
+  "old": "case m.Attempts >= maxAttempts:",
+  "new": "case false:",
+  "pkgs": "./internal/media/"
+ },
+ {
+  "name": "mf2",
+  "rf": "media-fix1",
+  "file": "internal/media/queue.go",
+  "old": "if err := q.store.ResetMediaOnStart(ctx, q.clock.Now()); err != nil {\n\t\tq.log.Error(\"stuck media rows not reset at start\", \"err\", err)\n\t}",
+  "new": "_ = q.store.ResetMediaOnStart(ctx, q.clock.Now())",
+  "pkgs": "./internal/media/"
  }
 ]
