@@ -37,6 +37,9 @@ func normalizeContent(msg *waE2E.Message, r *Result) {
 	if msg == nil {
 		return
 	}
+	if inner := msg.GetEditedMessage().GetMessage(); inner != nil {
+		msg = inner // the EditedMessage wrapper (whatsmeow's BuildEdit) holds the MESSAGE_EDIT protocol message
+	}
 	if text := msg.GetConversation(); text != "" {
 		r.Message.Text = text
 	}
@@ -93,12 +96,20 @@ func normalizeContent(msg *waE2E.Message, r *Result) {
 	}
 	if x := msg.GetProtocolMessage(); x != nil {
 		target := x.GetKey().GetID()
-		if x.GetEditedMessage() != nil {
+		switch {
+		case x.Type == nil: // the proto2 default is REVOKE; an untyped protocol message deletes nothing
+			r.Kind = KindProtocol
+			r.Event = event(r, target, string(KindProtocol), "")
+		case x.GetType() == waE2E.ProtocolMessage_MESSAGE_EDIT:
 			r.Kind = KindEdit
 			r.Event = event(r, target, "edit", messageText(x.GetEditedMessage()))
-		} else {
+		case x.GetType() == waE2E.ProtocolMessage_REVOKE:
 			r.Kind = KindRevoke
 			r.Event = event(r, target, "revoke", "")
+		default:
+			r.Kind = KindProtocol
+			r.Event = event(r, target, string(KindProtocol), x.GetType().String())
+			r.Event.NewText = ""
 		}
 		r.Message = nil
 		r.Media = nil

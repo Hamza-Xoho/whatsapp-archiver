@@ -11,6 +11,7 @@ const (
 	KindMessage       Kind = "message"
 	KindEdit          Kind = "edit"
 	KindRevoke        Kind = "revoke"
+	KindProtocol      Kind = "protocol" // any other protocol message, Value = its type name
 	KindReaction      Kind = "reaction"
 	KindPin           Kind = "pin"
 	KindPollVote      Kind = "poll_vote"
