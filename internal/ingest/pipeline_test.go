@@ -98,3 +98,13 @@ func TestConnectionEventsReportHealthStates(t *testing.T) {
 		}
 	}
 }
+
+// H3: the media row keeps whether the message was our own; a re-upload request needs it.
+func TestMediaRowKeepsFromMe(t *testing.T) {
+	e := messageEvent("g@g.us", "IMG", &waE2E.Message{ImageMessage: &waE2E.ImageMessage{Mimetype: proto.String("image/jpeg")}})
+	e.Info.IsFromMe = true
+	r := ingest.FromMessage(e, "live", time.Unix(20, 0))
+	if r.Media == nil || !r.Media.FromMe {
+		t.Fatalf("media=%+v", r.Media)
+	}
+}
