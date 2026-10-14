@@ -145,15 +145,21 @@ func (s *Store) InsertIDMapping(ctx context.Context, m IDMapping) (bool, error) 
 	return s.insert(ctx, `INSERT INTO id_mappings(lid,pn,source,first_seen) VALUES(?,?,?,?) ON CONFLICT DO NOTHING`, m.LID, m.PN, m.Source, m.FirstSeen.Unix())
 }
 
-// dedupeQuery reports whether message ?2 already exists under any alias of chat ?1. It first resolves the one chat's
-// aliases (the chat, the lids of a phone number, the phone numbers of those lids) from id_mappings, then probes
-// messages by its (chat_jid, id) primary key, so its cost does not depend on the size of messages. The chat_aliases
-// view stays for read paths; it must not be used here because it scans messages.
-const dedupeQuery = `SELECT EXISTS(SELECT 1 FROM messages WHERE id=?2 AND chat_jid IN (
- SELECT ?1
+// aliasSet selects the aliases of chat ?1: the chat itself, the lids of a phone number, the phone numbers of a lid and
+// the other phone numbers of those lids. It uses only id_mappings primary-key and (pn, lid) index lookups, so its cost
+// does not depend on the size of messages or chats. The chat_aliases view stays for report paths; it must not be used
+// per message or per event because building it scans the archive.
+const aliasSet = `SELECT ?1
  UNION SELECT lid FROM id_mappings WHERE pn=?1
  UNION SELECT pn FROM id_mappings WHERE lid=?1
- UNION SELECT pn FROM id_mappings WHERE lid IN (SELECT lid FROM id_mappings WHERE pn=?1)))`
+ UNION SELECT pn FROM id_mappings WHERE lid IN (SELECT lid FROM id_mappings WHERE pn=?1)`
+
+// dedupeQuery reports whether message ?2 already exists under any alias of chat ?1, probing messages by its
+// (chat_jid, id) primary key.
+const dedupeQuery = `SELECT EXISTS(SELECT 1 FROM messages WHERE id=?2 AND chat_jid IN (` + aliasSet + `))`
+
+// aliasesQuery lists the aliases of chat ?1 other than itself.
+const aliasesQuery = aliasSet + ` EXCEPT SELECT ?1 ORDER BY 1`
 
 func (s *Store) InsertMessage(ctx context.Context, m Message) (bool, error) {
 	tx, err := s.write.BeginTx(ctx, nil)
@@ -241,7 +247,7 @@ func (s *Store) ResetMediaOnStart(ctx context.Context, now time.Time) error {
 }
 
 func (s *Store) Aliases(ctx context.Context, jid string) ([]string, error) {
-	rows, err := s.read.QueryContext(ctx, `SELECT alias_jid FROM chat_aliases WHERE canonical_jid=(SELECT canonical_jid FROM chat_aliases WHERE alias_jid=? LIMIT 1) AND alias_jid<>? ORDER BY alias_jid`, jid, jid)
+	rows, err := s.read.QueryContext(ctx, aliasesQuery, jid)
 	if err != nil {
 		return nil, err
 	}
