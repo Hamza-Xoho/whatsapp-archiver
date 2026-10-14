@@ -1039,5 +1039,126 @@
   "old": "if !q.save(ctx, *m) {\n\t\t\t\treturn // the row is still expired; the next pass tries again\n\t\t\t}",
   "new": "q.save(ctx, *m)",
   "pkgs": "./internal/media/"
+ },
+ {
+  "name": "x12",
+  "file": "internal/backup/backup.go",
+  "old": "if result != \"ok\" {",
+  "new": "if false {",
+  "pkgs": "./internal/backup/"
+ },
+ {
+  "name": "x13",
+  "file": "internal/backup/backup.go",
+  "old": "\tfor len(snaps) > keep {",
+  "new": "\tfor len(snaps) > keep+99 {",
+  "pkgs": "./internal/backup/"
+ },
+ {
+  "name": "h16-foreign",
+  "file": "internal/backup/backup.go",
+  "old": "if at, err := time.Parse(snapshotLayout, e.Name()); err == nil {",
+  "new": "if at, err := time.Parse(snapshotLayout, e.Name()); err == nil || true {",
+  "pkgs": "./internal/backup/"
+ },
+ {
+  "name": "h16-failed",
+  "file": "internal/backup/backup.go",
+  "old": "\t\t\t_ = os.RemoveAll(folder)\n",
+  "new": "\t\t\t_ = folder\n",
+  "pkgs": "./internal/backup/"
+ },
+ {
+  "name": "h15-rwpath",
+  "file": "deploy/archiver.service",
+  "old": " /srv/backups/whatsapp-archiver",
+  "new": "",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "backup-schedule-twice",
+  "file": "internal/backup/backup.go",
+  "old": "\t\t\treport, runErr := Run(ctx, cfg)\n",
+  "new": "\t\t\t_, _ = Run(ctx, cfg)\n\t\t\treport, runErr := Run(ctx, cfg)\n",
+  "pkgs": "./internal/backup/"
+ },
+ {
+  "name": "backup-keep-on-retain-fail",
+  "file": "internal/backup/backup.go",
+  "old": "err != nil && report.Snapshot == \"\"",
+  "new": "err != nil",
+  "pkgs": "./internal/backup/"
+ },
+ {
+  "name": "h12-prefix",
+  "rf": "H12",
+  "file": "internal/archtest/scan.go",
+  "old": "for _, p := range r.BannedPrefixes {",
+  "new": "for _, p := range []string(nil) {",
+  "pkgs": "./internal/archtest/"
+ },
+ {
+  "name": "h12-allowfile",
+  "rf": "H12",
+  "file": "internal/archtest/scan.go",
+  "old": "if exempt(name) {",
+  "new": "if len(fileAllowed) > 0 {",
+  "pkgs": "./internal/archtest/"
+ },
+ {
+  "name": "h12-allowlist-extra",
+  "rf": "H12",
+  "file": "internal/archtest/scan.go",
+  "old": "\"SetProxy\", \"SetProxyAddress\"",
+  "new": "\"SetStatusMessage\", \"SetProxy\", \"SetProxyAddress\"",
+  "pkgs": "./internal/archtest/"
+ },
+ {
+  "name": "h12-boundary",
+  "rf": "H12",
+  "file": "internal/archtest/scan.go",
+  "old": "(rest == \"\" || (rest[0] >= 'A' && rest[0] <= 'Z'))",
+  "new": "(len(rest) >= 0)",
+  "pkgs": "./internal/archtest/"
+ },
+ {
+  "name": "h12-nosendmedia",
+  "rf": "H12",
+  "file": "internal/archtest/scan.go",
+  "old": ", \"SendMediaRetryReceipt\"}\n\tbanned",
+  "new": "}\n\tbanned",
+  "pkgs": "./internal/archtest/"
+ },
+ {
+  "name": "h12-iface",
+  "rf": "H12",
+  "file": "internal/archtest/scan.go",
+  "old": "if (banned || rules.bannedPrefix(name.Name)) && !exempt(name.Name) {",
+  "new": "if false && banned {",
+  "pkgs": "./internal/archtest/"
+ },
+ {
+  "name": "h12-embed",
+  "rf": "H12",
+  "file": "internal/archtest/scan.go",
+  "old": "if len(f.Names) == 0 || exported {",
+  "new": "if exported {",
+  "pkgs": "./internal/archtest/"
+ },
+ {
+  "name": "h12-wa-scope",
+  "rf": "H12",
+  "file": "internal/archtest/scan.go",
+  "old": "prefixRule := importsClient || waProd",
+  "new": "prefixRule := importsClient",
+  "pkgs": "./internal/archtest/"
+ },
+ {
+  "name": "h12-escape-func",
+  "rf": "H12",
+  "file": "internal/archtest/scan.go",
+  "old": "if n.Name.IsExported() && n.Type.Results != nil {",
+  "new": "if false {",
+  "pkgs": "./internal/archtest/"
  }
 ]
