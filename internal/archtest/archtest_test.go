@@ -234,3 +234,66 @@ func pinnedClientMethods(t *testing.T) []string {
 	sort.Strings(names)
 	return names
 }
+
+func TestWAWrapperAndEscapeBypassesAreFlagged(t *testing.T) {
+	const wm = "package wa\n\nimport \"go.mau.fi/whatsmeow\"\n\n"
+	cases := []struct {
+		name, file, src, rule, detail string
+	}{
+		{"interface wrapper", "wrap.go", "package wa\n\ntype presence interface{ SubscribePresence() error }\n\nfunc use(p presence) { _ = p.SubscribePresence() }\n", "", "SubscribePresence"},
+		{"interface declaration only", "decl.go", "package wa\n\ntype namer interface{ SetGroupName() error }\n", "interface-method", "SetGroupName"},
+		{"generic constraint", "gen.go", "package wa\n\nfunc call[T interface{ SetGroupName() error }](t T) error { return t.SetGroupName() }\n", "", "SetGroupName"},
+		{"embedded client", "emb.go", wm + "type Raw struct{ *whatsmeow.Client }\n", "client-escape", "Client"},
+		{"embedded client value", "emb2.go", wm + "type Raw struct{ whatsmeow.Client }\n", "client-escape", "Client"},
+		{"type alias", "alias.go", wm + "type raw = whatsmeow.Client\n", "client-escape", "Client"},
+		{"exported func result", "fn.go", wm + "type c struct{ client *whatsmeow.Client }\n\nfunc (x *c) Raw() *whatsmeow.Client { return x.client }\n", "client-escape", "Client"},
+		{"exported func result in tuple", "fn2.go", wm + "func Raw() (int, *whatsmeow.Client) { return 0, nil }\n", "client-escape", "Client"},
+		{"exported field", "field.go", wm + "type S struct{ C *whatsmeow.Client }\n", "client-escape", "Client"},
+		{"exported var", "var.go", wm + "var C *whatsmeow.Client\n", "client-escape", "Client"},
+		{"exported var of slice", "var2.go", wm + "var Cs []*whatsmeow.Client\n", "client-escape", "Client"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			root := t.TempDir()
+			path := filepath.Join(root, "internal", "wa", c.file)
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(c.src), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			v, err := archtest.Scan(root, archtest.DefaultRules())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(v) == 0 {
+				t.Fatal("not flagged")
+			}
+			for _, x := range v {
+				if x.Detail == c.detail && (c.rule == "" || x.Rule == c.rule) {
+					return
+				}
+			}
+			t.Fatalf("no %s/%s violation in %#v", c.rule, c.detail, v)
+		})
+	}
+}
+
+func TestWAUnexportedClientFieldAndAllowedInterfaceMethodsPass(t *testing.T) {
+	const src = "package wa\n\nimport \"go.mau.fi/whatsmeow\"\n\ntype c struct{ client *whatsmeow.Client }\n\nfunc (x *c) get() *whatsmeow.Client { return x.client }\n\ntype proxy interface{ SetProxyAddress(string) error }\n"
+	root := t.TempDir()
+	path := filepath.Join(root, "internal", "wa", "ok.go")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(src), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	v, err := archtest.Scan(root, archtest.DefaultRules())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(v) != 0 {
+		t.Fatalf("violations = %#v", v)
+	}
+}
