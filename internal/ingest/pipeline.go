@@ -37,29 +37,77 @@ type Pipeline struct {
 	health HealthSink
 	log    *slog.Logger
 	now    func() time.Time
+	sleep  func(context.Context, time.Duration)
 }
+
+const (
+	writeAttempts = 5
+	writeBase     = 10 * time.Millisecond
+	// writeMaxWait is the longest interval of the retry policy; after the policy gives up the write is retried at this pace.
+	writeMaxWait = writeBase << (writeAttempts - 1)
+)
 
 func NewPipeline(w Writer, f *Filter, q MediaQueue, h HealthSink, log *slog.Logger) *Pipeline {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Pipeline{writer: w, filter: f, queue: q, health: h, log: log, now: time.Now}
+	return &Pipeline{writer: w, filter: f, queue: q, health: h, log: log, now: time.Now, sleep: sleepContext}
+}
+
+// WithClock replaces the time source and the back-off sleep; tests use it to run retries on a fake clock.
+func (p *Pipeline) WithClock(now func() time.Time, sleep func(time.Duration)) *Pipeline {
+	p.now = now
+	p.sleep = func(_ context.Context, d time.Duration) { sleep(d) }
+	return p
+}
+
+func sleepContext(ctx context.Context, d time.Duration) {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+	case <-timer.C:
+	}
+}
+
+// persist runs one write so that it is never dropped: it retries with back-off, reports WriteFailed once when the
+// policy gives up, then keeps retrying at the longest interval until the write succeeds or ctx ends.
+func (p *Pipeline) persist(ctx context.Context, what string, fn func() error) error {
+	policy := retry.Policy{Max: writeAttempts, Base: writeBase, Sleep: func(d time.Duration) { p.sleep(ctx, d) }}
+	_, err := retry.Do(ctx, policy, fn)
+	if err == nil {
+		return nil
+	}
+	p.health.WriteFailed(err)
+	for ctx.Err() == nil {
+		p.sleep(ctx, writeMaxWait)
+		if err = fn(); err == nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("%s: %w", what, err)
 }
 
 func (p *Pipeline) Handle(evt any) {
 	guard.Run(p.log, "handler", func(string, any) { p.health.Panic("handler") }, func() {
 		ctx := context.Background()
 		now := p.now()
+		logErr := func(err error) {
+			if err != nil {
+				p.log.Error("event not stored", "type", fmt.Sprintf("%T", evt), "err", err)
+			}
+		}
 		switch e := evt.(type) {
 		case *events.Message:
-			_ = p.Ingest(ctx, FromMessage(e, "live", now))
+			logErr(p.Ingest(ctx, FromMessage(e, "live", now)))
 		case *events.UndecryptableMessage:
-			_ = p.Ingest(ctx, FromUndecryptable(e, now))
+			logErr(p.Ingest(ctx, FromUndecryptable(e, now)))
 		case *events.HistorySync:
-			_, _, _ = p.ImportHistory(ctx, e)
+			_, _, err := p.ImportHistory(ctx, e)
+			logErr(err)
 		case *events.GroupInfo, *events.JoinedGroup, *events.Archive, *events.Mute, *events.Pin:
 			if r, ok := FromChatEvent(e, now); ok {
-				_ = p.Ingest(ctx, r)
+				logErr(p.Ingest(ctx, r))
 			}
 		case *events.MediaRetry:
 			p.queue.OnRetry(ctx, e)
@@ -83,7 +131,10 @@ func (p *Pipeline) Handle(evt any) {
 
 func (p *Pipeline) Ingest(ctx context.Context, r Result) error {
 	for _, m := range r.Mappings {
-		if _, err := p.writer.InsertIDMapping(ctx, m); err != nil {
+		if err := p.persist(ctx, "insert id mapping", func() error {
+			_, err := p.writer.InsertIDMapping(ctx, m)
+			return err
+		}); err != nil {
 			return err
 		}
 	}
@@ -115,18 +166,11 @@ func (p *Pipeline) Ingest(ctx context.Context, r Result) error {
 		}
 		return nil
 	}
-	_, err := retry.Do(ctx, retry.Policy{Max: 5, Base: 10 * time.Millisecond}, write)
-	if err != nil {
-		p.health.WriteFailed(err)
-		for err != nil && ctx.Err() == nil {
-			_, err = retry.Do(ctx, retry.Policy{Max: 1, Base: 160 * time.Millisecond}, write)
-		}
-	}
-	if err != nil {
+	if err := p.persist(ctx, fmt.Sprintf("write %s in %s", r.Kind, r.Chat.JID), write); err != nil {
 		return err
 	}
 	if r.Media != nil {
-		if err = p.queue.Enqueue(ctx, *r.Media); err != nil {
+		if err := p.persist(ctx, fmt.Sprintf("enqueue media in %s", r.Chat.JID), func() error { return p.queue.Enqueue(ctx, *r.Media) }); err != nil {
 			return err
 		}
 	}

@@ -46,15 +46,18 @@ func (p *Pipeline) ImportHistory(ctx context.Context, evt *events.HistorySync) (
 			}
 		}
 	}
-	if err = ledger.InsertHistoryChunk(ctx, chunk); err != nil {
+	if err = p.persist(ctx, "insert history chunk", func() error { return ledger.InsertHistoryChunk(ctx, chunk) }); err != nil {
 		return
 	}
 	for _, mapping := range hs.GetPhoneNumberToLidMappings() {
 		if mapping == nil {
 			continue
 		}
-		_, err = p.writer.InsertIDMapping(ctx, store.IDMapping{LID: mapping.GetLidJID(), PN: mapping.GetPnJID(), Source: "history", FirstSeen: now})
-		if err != nil {
+		m := store.IDMapping{LID: mapping.GetLidJID(), PN: mapping.GetPnJID(), Source: "history", FirstSeen: now}
+		if err = p.persist(ctx, "insert history id mapping", func() error {
+			_, mapErr := p.writer.InsertIDMapping(ctx, m)
+			return mapErr
+		}); err != nil {
 			return
 		}
 	}
@@ -64,7 +67,9 @@ func (p *Pipeline) ImportHistory(ctx context.Context, evt *events.HistorySync) (
 		}
 		chat := conv.GetID()
 		if chat != "" {
-			if upErr := p.writer.UpsertChat(ctx, store.Chat{JID: chat, Name: conv.GetName()}); upErr != nil {
+			if upErr := p.persist(ctx, "upsert history chat", func() error {
+				return p.writer.UpsertChat(ctx, store.Chat{JID: chat, Name: conv.GetName()})
+			}); upErr != nil {
 				return stored, skipped, upErr
 			}
 		}
