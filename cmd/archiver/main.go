@@ -111,7 +111,7 @@ func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) er
 	if cfg.Alerts.Ntfy != nil {
 		notifier = health.NewNtfy(cfg.Alerts.Ntfy)
 	}
-	mon := health.NewMonitor(cfg, notifier, systemClock{}, health.DiskFree, client.VersionInUse)
+	mon := health.NewMonitor(cfg, notifier, systemClock{}, health.DiskFree, client.VersionInUse).WithLogger(log)
 	aliases := func(jid string) []string { v, _ := st.Aliases(context.Background(), jid); return v }
 	queue := media.NewQueue(cfg.DataDir, cfg.Media, st, client, systemClock{}, log)
 	pipeline := ingest.NewPipeline(st, ingest.NewFilter(cfg.Exclude, aliases), queue, mon, log).WithHistoryParser(client.HistoryParser())

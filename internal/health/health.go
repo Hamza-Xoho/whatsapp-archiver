@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -32,7 +33,10 @@ type Monitor struct {
 	gate      *alertGate
 	started   time.Time // baseline for rules whose event has not been seen yet
 	downSince time.Time // when the connection was last lost; zero while connected
+	queue     chan alert
+	log       *slog.Logger
 }
+type alert struct{ title, body string }
 
 // stateTitles are the alerts that clear when the connection is back.
 var stateTitles = map[string]string{
@@ -45,10 +49,13 @@ var stateTitles = map[string]string{
 
 func NewMonitor(cfg *config.Config, n Notifier, c Clock, disk func(string) (uint64, error), version func() string) *Monitor {
 	now := c.Now()
-	m := &Monitor{cfg: cfg, n: n, clock: c, diskFree: disk, version: version, started: now, downSince: now}
+	m := &Monitor{cfg: cfg, n: n, clock: c, diskFree: disk, version: version, started: now, downSince: now, queue: make(chan alert, 16), log: slog.Default()}
 	m.gate = &alertGate{now: c.Now, send: m.notify, fired: map[string]time.Time{}}
 	return m
 }
+
+// WithLogger sets where dropped alerts are reported (default slog.Default()).
+func (m *Monitor) WithLogger(l *slog.Logger) *Monitor { m.log = l; return m }
 func (m *Monitor) Seen(t time.Time, fromMe bool) {
 	m.mu.Lock()
 	m.snapshot.LastEvent = t
@@ -105,7 +112,12 @@ func (m *Monitor) BackupResult(_ backup.Report, err error) {
 	m.gate.clear("backup", "Backup failed")
 }
 func (m *Monitor) Status() Snapshot { m.mu.Lock(); defer m.mu.Unlock(); return m.snapshot }
+
+// Run checks the rules every minute and owns the goroutine that sends alerts; it returns after that goroutine has.
 func (m *Monitor) Run(ctx context.Context) {
+	sent := make(chan struct{})
+	go func() { defer close(sent); m.sendAlerts(ctx) }()
+	defer func() { <-sent }()
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	for {
@@ -158,9 +170,36 @@ func orStart(t, start time.Time) time.Time {
 	}
 	return t
 }
+
+// notify queues an alert for Run's sender without blocking; when the queue is full the alert is dropped.
 func (m *Monitor) notify(title, body string) {
-	if m.n != nil {
-		_ = m.n.Notify(context.Background(), title, body)
+	if m.n == nil {
+		return
+	}
+	select {
+	case m.queue <- alert{title, body}:
+	default:
+		m.log.Error("alert dropped: queue full", "title", title, "body", body)
+	}
+}
+
+// sendAlerts hands queued alerts to the notifier with Run's context. Once ctx ends it passes on what is
+// still queued with the ended context (a real send then fails at once) and returns.
+func (m *Monitor) sendAlerts(ctx context.Context) {
+	for {
+		select {
+		case a := <-m.queue:
+			_ = m.n.Notify(ctx, a.title, a.body)
+		case <-ctx.Done():
+			for {
+				select {
+				case a := <-m.queue:
+					_ = m.n.Notify(ctx, a.title, a.body)
+				default:
+					return
+				}
+			}
+		}
 	}
 }
 
