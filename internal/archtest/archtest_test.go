@@ -4,7 +4,6 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -162,11 +161,9 @@ func TestAllowListedFileStillRejectsSendMessage(t *testing.T) {
 // whatsmeow root package that has a CON-1 banned prefix.
 func pinnedClientMethods(t *testing.T) []string {
 	t.Helper()
-	goBin := "go"
-	if p, err := exec.LookPath("go"); err == nil {
-		goBin = p
-	} else {
-		goBin = filepath.Join(runtime.GOROOT(), "bin", "go")
+	goBin, err := exec.LookPath("go")
+	if err != nil {
+		t.Fatalf("go not on PATH (run through make): %v", err)
 	}
 	out, err := exec.Command(goBin, "list", "-m", "-f", "{{.Dir}}", "go.mau.fi/whatsmeow").Output()
 	if err != nil {
@@ -176,17 +173,29 @@ func pinnedClientMethods(t *testing.T) []string {
 	if dir == "" {
 		t.Fatal("whatsmeow module directory is empty")
 	}
-	set := token.NewFileSet()
-	pkgs, err := parser.ParseDir(set, dir, func(fi fs.FileInfo) bool { return !strings.HasSuffix(fi.Name(), "_test.go") }, 0)
+	entries, err := os.ReadDir(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pkg, ok := pkgs["whatsmeow"]
-	if !ok {
+	set := token.NewFileSet()
+	var files []*ast.File
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(set, filepath.Join(dir, e.Name()), nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if f.Name.Name == "whatsmeow" {
+			files = append(files, f)
+		}
+	}
+	if len(files) == 0 {
 		t.Fatalf("package whatsmeow not found in %s", dir)
 	}
 	seen := map[string]bool{}
-	for _, f := range pkg.Files {
+	for _, f := range files {
 		for _, d := range f.Decls {
 			fn, ok := d.(*ast.FuncDecl)
 			if !ok || fn.Recv == nil || len(fn.Recv.List) != 1 || !fn.Name.IsExported() {
