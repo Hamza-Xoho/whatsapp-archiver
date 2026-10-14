@@ -164,7 +164,15 @@ func TestRetryReceiptThroughInterfaceOutsideRerequestIsFlagged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(v) != 1 || v[0].Detail != "SendMediaRetryReceipt" {
+	// The fixture's interface declares the method (interface-method) and calls it (banned-call).
+	rules := map[string]bool{}
+	for _, x := range v {
+		if x.Detail != "SendMediaRetryReceipt" {
+			t.Fatalf("violations = %#v", v)
+		}
+		rules[x.Rule] = true
+	}
+	if len(v) != 2 || !rules["banned-call"] || !rules["interface-method"] {
 		t.Fatalf("violations = %#v", v)
 	}
 }
