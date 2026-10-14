@@ -1,6 +1,6 @@
 # Phase 0 setup
 
-Build on the Mac from this repository:
+Build on the Mac from this repository (the first `make` run downloads the pinned Go and golangci-lint into `.tools/`, verifying their SHA-256):
 
 ```sh
 make tools
