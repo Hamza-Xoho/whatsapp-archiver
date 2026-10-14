@@ -138,7 +138,7 @@ func (s *Store) UpsertChat(ctx context.Context, c Chat) error {
 	return classify(err)
 }
 func (s *Store) UpsertParticipant(ctx context.Context, p Participant) error {
-	_, err := s.write.ExecContext(ctx, `INSERT INTO participants(jid,display_name) VALUES(?,?) ON CONFLICT(jid) DO UPDATE SET display_name=excluded.display_name`, p.JID, p.DisplayName)
+	_, err := s.write.ExecContext(ctx, `INSERT INTO participants(jid,display_name) VALUES(?,?) ON CONFLICT(jid) DO UPDATE SET display_name=COALESCE(NULLIF(excluded.display_name,''),display_name)`, p.JID, p.DisplayName)
 	return classify(err)
 }
 func (s *Store) InsertIDMapping(ctx context.Context, m IDMapping) (bool, error) {

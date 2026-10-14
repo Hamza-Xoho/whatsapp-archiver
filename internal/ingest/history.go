@@ -38,7 +38,10 @@ func (p *Pipeline) ImportHistory(ctx context.Context, evt *events.HistorySync) (
 		return 0, 0, fmt.Errorf("pipeline has no history parser")
 	}
 	// The chunk's content is its identity: distinct chunks never collide and a redelivered chunk is ledgered once.
-	raw, _ := proto.MarshalOptions{Deterministic: true}.Marshal(hs)
+	raw, err := proto.MarshalOptions{Deterministic: true, AllowPartial: true}.Marshal(hs)
+	if err != nil {
+		return 0, 0, fmt.Errorf("encode history chunk: %w", err)
+	}
 	chunk := store.HistoryChunk{ID: stableID(string(raw)), SyncType: hs.GetSyncType().String(), ChunkOrder: int(hs.GetChunkOrder()), Progress: int(hs.GetProgress()), ConversationCount: len(hs.GetConversations()), ReceivedAt: now.Unix()}
 	for _, conv := range hs.GetConversations() {
 		if conv == nil {
