@@ -33,3 +33,13 @@ func TestRetryGivesUpAtMax(t *testing.T) {
 		t.Fatalf("attempts=%d err=%v", attempts, err)
 	}
 }
+
+func TestRetryStopsOnPermanentError(t *testing.T) {
+	permanent := errors.New("constraint")
+	var sleeps int
+	policy := retry.Policy{Max: 5, Sleep: func(time.Duration) { sleeps++ }, Permanent: func(err error) bool { return errors.Is(err, permanent) }}
+	attempts, err := retry.Do(context.Background(), policy, func() error { return permanent })
+	if attempts != 1 || !errors.Is(err, permanent) || sleeps != 0 {
+		t.Fatalf("attempts=%d err=%v sleeps=%d", attempts, err, sleeps)
+	}
+}

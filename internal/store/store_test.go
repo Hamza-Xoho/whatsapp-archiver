@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -146,4 +147,48 @@ func open(t *testing.T) *store.Store {
 }
 func message(chat, id string, ts time.Time) store.Message {
 	return store.Message{ChatJID: chat, ID: id, SenderJID: "sender@lid", Timestamp: ts.Unix(), ReceivedAt: ts.Unix(), Source: "live", Text: id, RawProto: []byte(id)}
+}
+
+func TestInsertEventTwiceIsNotAnError(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	e := store.MessageEvent{ChatJID: "g@g.us", TargetID: "A", Kind: "reaction", EventID: "E1", Timestamp: 1, ReceivedAt: 1}
+	first, err := s.InsertEvent(ctx, e)
+	if err != nil || !first {
+		t.Fatalf("first inserted=%v err=%v", first, err)
+	}
+	second, err := s.InsertEvent(ctx, e)
+	if err != nil || second {
+		t.Fatalf("second inserted=%v err=%v", second, err)
+	}
+}
+
+func TestInsertIDMappingTwiceIsNotAnError(t *testing.T) {
+	s := open(t)
+	m := store.IDMapping{LID: "1@lid", PN: "1@s.whatsapp.net"}
+	if ok, err := s.InsertIDMapping(context.Background(), m); err != nil || !ok {
+		t.Fatalf("first inserted=%v err=%v", ok, err)
+	}
+	if ok, err := s.InsertIDMapping(context.Background(), m); err != nil || ok {
+		t.Fatalf("second inserted=%v err=%v", ok, err)
+	}
+}
+
+func TestConstraintViolationIsClassified(t *testing.T) {
+	s := open(t)
+	m := message("g@g.us", "A", time.Unix(1, 0))
+	m.Source = "not-a-source" // violates the CHECK on messages.source
+	_, err := s.InsertMessage(context.Background(), m)
+	if !errors.Is(err, store.ErrConstraint) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestOtherErrorsAreNotConstraintErrors(t *testing.T) {
+	s := open(t)
+	_ = s.Close()
+	_, err := s.InsertEvent(context.Background(), store.MessageEvent{ChatJID: "g@g.us", TargetID: "A", Kind: "reaction", EventID: "E1"})
+	if err == nil || errors.Is(err, store.ErrConstraint) {
+		t.Fatalf("err=%v", err)
+	}
 }
