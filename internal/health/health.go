@@ -148,7 +148,7 @@ func (m *Monitor) check() {
 	m.writeLocked()
 	m.mu.Unlock()
 	a := m.cfg.Alerts
-	if d := now.Sub(down); a.DisconnectedAfter > 0 && s.State == "disconnected" && d > a.DisconnectedAfter {
+	if d := now.Sub(down); a.DisconnectedAfter > 0 && (s.State == "disconnected" || s.State == "") && d > a.DisconnectedAfter { // "" = never connected yet
 		m.gate.fire("disconnected", stateTitles["disconnected"], fmt.Sprintf("Disconnected for %s %s", d.Round(time.Minute), s.Detail))
 	}
 	if d := now.Sub(orStart(s.LastEvent, m.started)); a.NoEventsAfter > 0 && s.State == "connected" {
