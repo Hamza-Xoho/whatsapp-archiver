@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/proto/waAdv"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -40,6 +41,7 @@ func TestIsPairedReadsTheDevice(t *testing.T) {
 	}
 	d := c.NewDevice()
 	d.ID = &types.JID{User: "15550001111", Device: 7, Server: types.DefaultUserServer}
+	d.Account = &waAdv.ADVSignedDeviceIdentity{Details: []byte{1}, AccountSignature: make([]byte, 64), AccountSignatureKey: make([]byte, 32), DeviceSignature: make([]byte, 64)}
 	if err := c.PutDevice(ctx, d); err != nil {
 		t.Fatal(err)
 	}
