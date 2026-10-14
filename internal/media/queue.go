@@ -77,7 +77,9 @@ func (q *Queue) Enqueue(ctx context.Context, m store.Media) error {
 	return nil
 }
 func (q *Queue) Run(ctx context.Context) {
-	_ = q.store.ResetMediaOnStart(ctx, q.clock.Now())
+	if err := q.store.ResetMediaOnStart(ctx, q.clock.Now()); err != nil {
+		q.log.Error("stuck media rows not reset at start", "err", err)
+	}
 	for i := 0; i < q.rules.Workers; i++ {
 		q.wg.Add(1)
 		go func() {
@@ -139,7 +141,15 @@ func (q *Queue) requestPass(ctx context.Context, current **store.Media) {
 			q.log.Error("expired media not read", "err", err)
 			return
 		}
-		if m == nil || !q.limiter.AllowN(now, 1) {
+		if m == nil {
+			return
+		}
+		if reason := noMoreRequests(m); reason != "" {
+			m.State, m.Reason, m.UpdatedAt = "failed", reason, now.Unix()
+			q.save(ctx, *m)
+			continue
+		}
+		if !q.limiter.AllowN(now, 1) {
 			return
 		}
 		*current = m
@@ -149,6 +159,18 @@ func (q *Queue) requestPass(ctx context.Context, current **store.Media) {
 			return // likely not connected; the next pass tries again
 		}
 	}
+}
+
+// noMoreRequests says why m must not be asked for a (further) re-upload, or "" when it may: a re-upload was
+// already applied and expired again, or its attempts are used up.
+func noMoreRequests(m *store.Media) string {
+	switch {
+	case m.RetryDirectPath != "":
+		return "re-uploaded media expired"
+	case m.Attempts >= maxAttempts:
+		return "download attempts exhausted"
+	}
+	return ""
 }
 
 // request asks for a re-upload of m; it reports false when the request failed and m is still expired.
