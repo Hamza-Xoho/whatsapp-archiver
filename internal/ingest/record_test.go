@@ -47,8 +47,8 @@ func everyKind() []any {
 		Conversations: []*waHistorySync.Conversation{{ID: proto.String("20000000001@lid"), Name: proto.String("Alice"), Messages: []*waHistorySync.HistorySyncMsg{{
 			Message: &waWeb.WebMessageInfo{Key: &waCommon.MessageKey{RemoteJID: proto.String("20000000001@lid"), ID: proto.String("H1")}, MessageTimestamp: proto.Uint64(99), Message: text("old")}}}}}}
 	gi := &events.GroupInfo{JID: g, Notify: "subject", Sender: jidPtr("20000000001@lid"), SenderPN: jidPtr("10000000001@s.whatsapp.net"), Timestamp: ts,
-		Name:  &types.GroupName{Name: "Renamed", NameSetAt: ts, NameSetBy: jid("20000000001@lid"), NameSetByPN: jid("10000000001@s.whatsapp.net")},
-		Topic: &types.GroupTopic{Topic: "About", TopicID: "TID", TopicSetAt: ts, TopicSetBy: jid("20000000001@lid"), TopicDeleted: true},
+		Name:   &types.GroupName{Name: "Renamed", NameSetAt: ts, NameSetBy: jid("20000000001@lid"), NameSetByPN: jid("10000000001@s.whatsapp.net")},
+		Topic:  &types.GroupTopic{Topic: "About", TopicID: "TID", TopicSetAt: ts, TopicSetBy: jid("20000000001@lid"), TopicDeleted: true},
 		Locked: &types.GroupLocked{IsLocked: true}, Announce: &types.GroupAnnounce{IsAnnounce: true, AnnounceVersionID: "AV"},
 		Ephemeral: &types.GroupEphemeral{IsEphemeral: true, DisappearingTimer: 86400}, MembershipApprovalMode: &types.GroupMembershipApprovalMode{IsJoinApprovalRequired: true},
 		Delete: &types.GroupDelete{Deleted: true, DeleteReason: "admin"},
