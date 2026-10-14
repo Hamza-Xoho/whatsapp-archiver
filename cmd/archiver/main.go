@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -111,7 +110,7 @@ func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) er
 	if cfg.Alerts.Ntfy != nil {
 		notifier = health.NewNtfy(cfg.Alerts.Ntfy)
 	}
-	mon := health.NewMonitor(cfg, notifier, systemClock{}, health.DiskFree, client.VersionInUse).WithLogger(log)
+	mon := health.NewMonitor(cfg, notifier, systemClock{}, health.DiskFree, client.VersionInUse).WithVersionReason(client.VersionReason).WithLogger(log)
 	aliases := func(jid string) []string { v, _ := st.Aliases(context.Background(), jid); return v }
 	queue := media.NewQueue(cfg.DataDir, cfg.Media, st, client, systemClock{}, log, mon.Panic)
 	pipeline := ingest.NewPipeline(st, ingest.NewFilter(cfg.Exclude, aliases), queue, mon, log).WithHistoryParser(client.HistoryParser())
@@ -140,44 +139,4 @@ func alertNotPaired(cfg *config.Config, errOut io.Writer) {
 	if err := health.NewNtfy(cfg.Alerts.Ntfy).Notify(ctx, "WhatsApp Archiver is not paired", notPairedHint); err != nil {
 		_, _ = fmt.Fprintln(errOut, "ntfy alert failed:", err)
 	}
-}
-func printStatus(cfg *config.Config, out io.Writer) error {
-	st, err := store.Open(filepath.Join(cfg.DataDir, "archive.db"))
-	if err != nil {
-		return err
-	}
-	defer func() { _ = st.Close() }()
-	var snap health.Snapshot
-	if data, e := os.ReadFile(filepath.Join(cfg.DataDir, "health.json")); e == nil {
-		_ = json.Unmarshal(data, &snap)
-	}
-	coverage, _ := st.HistoryCoverage(context.Background())
-	stats, err := st.ChatStats(context.Background())
-	if err != nil {
-		return err
-	}
-	_, _ = fmt.Fprintf(out, "state: %s\nlast event: %s\nhistory chunks: %d (progress %d)\n", snap.State, snap.LastEvent, coverage.Chunks, coverage.LastProgress)
-	for _, s := range stats {
-		_, _ = fmt.Fprintf(out, "%s\t%s\t%d messages\toldest %d\tnewest %d\tmedia failed %d\topen gaps %d\n", s.CanonicalJID, s.Name, s.MessageCount, s.Oldest, s.Newest, s.MediaFailed, s.OpenGaps)
-	}
-	return nil
-}
-func printChats(cfg *config.Config, out io.Writer) error {
-	st, err := store.Open(filepath.Join(cfg.DataDir, "archive.db"))
-	if err != nil {
-		return err
-	}
-	defer func() { _ = st.Close() }()
-	stats, err := st.ChatStats(context.Background())
-	if err != nil {
-		return err
-	}
-	excluded := map[string]bool{}
-	for _, v := range cfg.Exclude {
-		excluded[v] = true
-	}
-	for _, s := range stats {
-		_, _ = fmt.Fprintf(out, "%s\t%s\t%d\texcluded=%v\n", s.CanonicalJID, s.Name, s.MessageCount, excluded[s.CanonicalJID])
-	}
-	return nil
 }

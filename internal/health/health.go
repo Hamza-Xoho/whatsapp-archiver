@@ -21,6 +21,8 @@ type Snapshot struct {
 	PhoneLastActive time.Time `json:"phone_last_active"`
 	Panics          int       `json:"panics"`
 	UpdatedAt       time.Time `json:"updated_at"`
+	Version         string    `json:"version"`        // WhatsApp client version in use
+	VersionReason   string    `json:"version_reason"` // why: latest, built-in or override
 }
 type Monitor struct {
 	mu        sync.Mutex
@@ -29,6 +31,7 @@ type Monitor struct {
 	clock     Clock
 	diskFree  func(string) (uint64, error)
 	version   func() string
+	reason    func() string
 	snapshot  Snapshot
 	gate      *alertGate
 	started   time.Time // baseline for rules whose event has not been seen yet
@@ -53,6 +56,9 @@ func NewMonitor(cfg *config.Config, n Notifier, c Clock, disk func(string) (uint
 	m.gate = &alertGate{now: c.Now, send: m.notify, fired: map[string]time.Time{}}
 	return m
 }
+
+// WithVersionReason sets where the reason for the version in use comes from; health.json records it with the version.
+func (m *Monitor) WithVersionReason(f func() string) *Monitor { m.reason = f; return m }
 
 // WithLogger sets where dropped alerts are reported (default slog.Default()).
 func (m *Monitor) WithLogger(l *slog.Logger) *Monitor { m.log = l; return m }
@@ -255,6 +261,10 @@ func (g *alertGate) clear(key, title string) {
 }
 func (m *Monitor) writeLocked() {
 	m.snapshot.UpdatedAt = m.clock.Now()
+	m.snapshot.Version = m.version()
+	if m.reason != nil {
+		m.snapshot.VersionReason = m.reason()
+	}
 	data, err := json.MarshalIndent(m.snapshot, "", "  ")
 	if err != nil {
 		return
