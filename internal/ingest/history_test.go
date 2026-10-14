@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waE2E"
@@ -277,6 +278,66 @@ func TestNonsensicalHistoryTimestampStoredAsGiven(t *testing.T) {
 		t.Fatalf("stored=%d err=%v", stored, err)
 	}
 	if got := strings.Join(rows(t, st, "SELECT id,ts FROM messages ORDER BY id"), ","); got != "FUTURE|4070908800,NORMAL|10,ZERO|0" {
+		t.Fatalf("messages=%s", got)
+	}
+}
+
+// H6b: a push name learned from history survives the next message from that sender, which carries none.
+func TestEmptyPushNameKeepsKnownDisplayName(t *testing.T) {
+	st := testkit.Store(t)
+	p := historyPipeline(st, ingest.NewFilter(nil, nil), &queueFake{})
+	m := webMsg("H1", "2@lid", false, text("hi"))
+	m.PushName = proto.String("Alice")
+	if _, _, err := p.ImportHistory(t.Context(), chunk("g@g.us", m)); err != nil {
+		t.Fatal(err)
+	}
+	p.Handle(messageEvent("g@g.us", "L1", text("live")))
+	if got := strings.Join(rows(t, st, "SELECT jid,display_name FROM participants"), ","); got != "2@lid|Alice" {
+		t.Fatalf("participants=%s", got)
+	}
+}
+
+// H9: the same chunk delivered twice, at different times, is one ledger row and its messages are stored once.
+func TestIdenticalChunkTwiceIsOneLedgerRow(t *testing.T) {
+	st := testkit.Store(t)
+	ft := newFakeTime()
+	p := newPipeline(st, &queueFake{}, &healthFake{}, ft)
+	for i := 0; i < 2; i++ {
+		if _, _, err := p.ImportHistory(t.Context(), history("g@g.us", "A", 100)); err != nil {
+			t.Fatal(err)
+		}
+		ft.clock.Advance(time.Hour)
+	}
+	coverage, err := st.HistoryCoverage(t.Context())
+	if err != nil || coverage.Chunks != 1 || messageCount(t, st) != 1 {
+		t.Fatalf("coverage=%+v err=%v messages=%d", coverage, err, messageCount(t, st))
+	}
+}
+
+// H6b: an excluded chat's history leaves no sender in participants and no media row.
+func TestExcludedHistoryChatLeavesNoParticipantsOrMedia(t *testing.T) {
+	st := testkit.Store(t)
+	q := &queueFake{}
+	p := historyPipeline(st, ingest.NewFilter([]string{"secret@g.us"}, nil), q)
+	img := webMsg("IMG", "3@lid", false, &waE2E.Message{ImageMessage: &waE2E.ImageMessage{Mimetype: proto.String("image/jpeg"), FileLength: proto.Uint64(10)}})
+	img.PushName = proto.String("Therapist")
+	if _, skipped, err := p.ImportHistory(t.Context(), chunk("secret@g.us", img, webMsg("TXT", "4@lid", false, text("x")))); err != nil || skipped != 2 {
+		t.Fatalf("skipped=%d err=%v", skipped, err)
+	}
+	participants, media := rows(t, st, "SELECT jid FROM participants"), rows(t, st, "SELECT message_id FROM media")
+	if len(participants)+len(media)+len(q.items) != 0 {
+		t.Fatalf("participants=%v media=%v queued=%v", participants, media, q.items)
+	}
+}
+
+// H5: our own message in a LID-addressed DM is sent by our own LID.
+func TestHistoryFromMeInLIDChatHasOwnLIDAsSender(t *testing.T) {
+	st := testkit.Store(t)
+	p := historyPipeline(st, ingest.NewFilter(nil, nil), &queueFake{})
+	if stored, _, err := p.ImportHistory(t.Context(), chunk("4444@lid", webMsg("DM", "", true, text("hi")))); err != nil || stored != 1 {
+		t.Fatalf("stored=%d err=%v", stored, err)
+	}
+	if got := strings.Join(rows(t, st, "SELECT id,sender_jid FROM messages"), ","); got != "DM|222@lid" {
 		t.Fatalf("messages=%s", got)
 	}
 }
