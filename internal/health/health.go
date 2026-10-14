@@ -22,18 +22,32 @@ type Snapshot struct {
 	UpdatedAt       time.Time `json:"updated_at"`
 }
 type Monitor struct {
-	mu       sync.Mutex
-	cfg      *config.Config
-	n        Notifier
-	clock    Clock
-	diskFree func(string) (uint64, error)
-	version  func() string
-	snapshot Snapshot
-	alerts   map[string]time.Time
+	mu        sync.Mutex
+	cfg       *config.Config
+	n         Notifier
+	clock     Clock
+	diskFree  func(string) (uint64, error)
+	version   func() string
+	snapshot  Snapshot
+	gate      *alertGate
+	started   time.Time // baseline for rules whose event has not been seen yet
+	downSince time.Time // when the connection was last lost; zero while connected
+}
+
+// stateTitles are the alerts that clear when the connection is back.
+var stateTitles = map[string]string{
+	"disconnected":    "WhatsApp disconnected",
+	"logged_out":      "WhatsApp logged out",
+	"temp_banned":     "WhatsApp temporarily banned",
+	"stream_replaced": "WhatsApp session replaced",
+	"client_outdated": "WhatsApp client outdated",
 }
 
 func NewMonitor(cfg *config.Config, n Notifier, c Clock, disk func(string) (uint64, error), version func() string) *Monitor {
-	return &Monitor{cfg: cfg, n: n, clock: c, diskFree: disk, version: version, alerts: map[string]time.Time{}}
+	now := c.Now()
+	m := &Monitor{cfg: cfg, n: n, clock: c, diskFree: disk, version: version, started: now, downSince: now}
+	m.gate = &alertGate{now: c.Now, send: m.notify, fired: map[string]time.Time{}}
+	return m
 }
 func (m *Monitor) Seen(t time.Time, fromMe bool) {
 	m.mu.Lock()
@@ -43,34 +57,52 @@ func (m *Monitor) Seen(t time.Time, fromMe bool) {
 	}
 	m.writeLocked()
 	m.mu.Unlock()
+	m.gate.clear("no_events", "No WhatsApp events")
+	if fromMe {
+		m.gate.clear("phone_quiet", "Phone inactive")
+	}
 }
 func (m *Monitor) SetState(state, detail string) {
 	m.mu.Lock()
 	m.snapshot.State = state
 	m.snapshot.Detail = detail
+	switch {
+	case state == "connected":
+		m.downSince = time.Time{}
+	case state == "disconnected" && m.downSince.IsZero():
+		m.downSince = m.clock.Now()
+	}
 	m.writeLocked()
 	m.mu.Unlock()
 	switch state {
-	case "logged_out", "temp_banned", "stream_replaced":
-		m.alert(state, "WhatsApp Archiver", state+": "+detail)
+	case "connected":
+		for key, title := range stateTitles {
+			m.gate.clear(key, title)
+		}
+	case "logged_out", "stream_replaced":
+		m.gate.fire(state, stateTitles[state], state+": "+detail)
+	case "temp_banned":
+		m.gate.fire(state, stateTitles[state], "Temporarily banned until "+detail+"; capture is paused")
 	case "client_outdated":
-		m.alert(state, "WhatsApp client outdated", "Version "+m.version()+" was rejected; update the archiver")
+		m.gate.fire(state, stateTitles[state], "Version "+m.version()+" was rejected; update the archiver")
 	}
 }
 func (m *Monitor) WriteFailed(err error) {
-	m.alert("write_failed", "Archive write failed", err.Error())
+	m.gate.fire("write_failed", "Archive write failed", err.Error())
 }
 func (m *Monitor) Panic(where string) {
 	m.mu.Lock()
 	m.snapshot.Panics++
 	m.writeLocked()
 	m.mu.Unlock()
-	m.alert("panic:"+where, "Recovered panic", where)
+	m.gate.fire("panic:"+where, "Recovered panic", where)
 }
 func (m *Monitor) BackupResult(_ backup.Report, err error) {
 	if err != nil {
-		m.alert("backup", "Backup failed", err.Error())
+		m.gate.fire("backup", "Backup failed", err.Error())
+		return
 	}
+	m.gate.clear("backup", "Backup failed")
 }
 func (m *Monitor) Status() Snapshot { m.mu.Lock(); defer m.mu.Unlock(); return m.snapshot }
 func (m *Monitor) Run(ctx context.Context) {
@@ -89,31 +121,78 @@ func (m *Monitor) check() {
 	m.mu.Lock()
 	now := m.clock.Now()
 	s := m.snapshot
+	down := m.downSince
 	m.snapshot.UpdatedAt = now
 	m.writeLocked()
 	m.mu.Unlock()
-	if m.cfg.Alerts.NoEventsAfter > 0 && !s.LastEvent.IsZero() && now.Sub(s.LastEvent) > m.cfg.Alerts.NoEventsAfter {
-		m.alert("no_events", "No WhatsApp events", "Capture may be stalled")
+	a := m.cfg.Alerts
+	if d := now.Sub(down); a.DisconnectedAfter > 0 && s.State == "disconnected" && d > a.DisconnectedAfter {
+		m.gate.fire("disconnected", stateTitles["disconnected"], fmt.Sprintf("Disconnected for %s %s", d.Round(time.Minute), s.Detail))
 	}
-	if m.diskFree != nil && m.cfg.Alerts.DiskFreeMinGB > 0 {
+	if d := now.Sub(orStart(s.LastEvent, m.started)); a.NoEventsAfter > 0 {
+		m.condition(d > a.NoEventsAfter, "no_events", "No WhatsApp events", fmt.Sprintf("No events for %s; capture may be stalled", d.Round(time.Minute)))
+	}
+	if d := now.Sub(orStart(s.PhoneLastActive, m.started)); a.PhoneQuietAfter > 0 {
+		m.condition(d > a.PhoneQuietAfter, "phone_quiet", "Phone inactive",
+			fmt.Sprintf("No activity from your phone for %s: open WhatsApp on your phone to avoid the 14-day unlink", d.Round(time.Hour)))
+	}
+	if m.diskFree != nil && a.DiskFreeMinGB > 0 {
 		free, err := m.diskFree(m.cfg.DataDir)
-		if err == nil && free < uint64(m.cfg.Alerts.DiskFreeMinGB)<<30 {
-			m.alert("disk", "Disk space low", fmt.Sprintf("%d bytes free", free))
+		if err == nil {
+			m.condition(free < uint64(a.DiskFreeMinGB)<<30, "disk", "Disk space low", fmt.Sprintf("%d bytes free", free))
 		}
 	}
 }
-func (m *Monitor) alert(key, title, body string) {
-	m.mu.Lock()
-	now := m.clock.Now()
-	last := m.alerts[key]
-	if !last.IsZero() && now.Sub(last) < 6*time.Hour {
-		m.mu.Unlock()
-		return
+
+// condition fires key while holds is true and clears it once it is not.
+func (m *Monitor) condition(holds bool, key, title, body string) {
+	if holds {
+		m.gate.fire(key, title, body)
+	} else {
+		m.gate.clear(key, title)
 	}
-	m.alerts[key] = now
-	m.mu.Unlock()
+}
+func orStart(t, start time.Time) time.Time {
+	if t.IsZero() {
+		return start
+	}
+	return t
+}
+func (m *Monitor) notify(title, body string) {
 	if m.n != nil {
 		_ = m.n.Notify(context.Background(), title, body)
+	}
+}
+
+const alertEvery = 6 * time.Hour
+
+// alertGate sends each alert at most once per alertEvery while it is active and one "recovered" message when it clears.
+type alertGate struct {
+	mu    sync.Mutex
+	now   func() time.Time
+	send  func(title, body string)
+	fired map[string]time.Time
+}
+
+func (g *alertGate) fire(key, title, body string) {
+	g.mu.Lock()
+	now := g.now()
+	last, ok := g.fired[key]
+	if ok && now.Sub(last) < alertEvery {
+		g.mu.Unlock()
+		return
+	}
+	g.fired[key] = now
+	g.mu.Unlock()
+	g.send(title, body)
+}
+func (g *alertGate) clear(key, title string) {
+	g.mu.Lock()
+	_, ok := g.fired[key]
+	delete(g.fired, key)
+	g.mu.Unlock()
+	if ok {
+		g.send(title+": recovered", "Recovered: "+title)
 	}
 }
 func (m *Monitor) writeLocked() {
