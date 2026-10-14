@@ -1031,5 +1031,13 @@
   "old": "if err := q.store.ResetMediaOnStart(ctx, q.clock.Now()); err != nil {\n\t\tq.log.Error(\"stuck media rows not reset at start\", \"err\", err)\n\t}",
   "new": "_ = q.store.ResetMediaOnStart(ctx, q.clock.Now())",
   "pkgs": "./internal/media/"
+ },
+ {
+  "name": "mf3",
+  "rf": "media-fix2",
+  "file": "internal/media/queue.go",
+  "old": "if !q.save(ctx, *m) {\n\t\t\t\treturn // the row is still expired; the next pass tries again\n\t\t\t}",
+  "new": "q.save(ctx, *m)",
+  "pkgs": "./internal/media/"
  }
 ]
