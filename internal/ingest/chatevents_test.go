@@ -94,3 +94,19 @@ func TestArchiveOnAndOffAreDistinct(t *testing.T) {
 		t.Fatalf("chat_events:\n got %q\nwant %q", got, want)
 	}
 }
+
+// H7: whatsmeow dispatches app-state events with the mutation's action, which may be missing; the event is still stored.
+func TestAppStateEventWithoutActionIsStored(t *testing.T) {
+	p, st := chatEventPipeline(t)
+	p.Handle(&events.Archive{JID: jid("g@g.us"), Timestamp: time.Unix(600, 0)})
+	p.Handle(&events.Mute{JID: jid("g@g.us"), Timestamp: time.Unix(601, 0)})
+	p.Handle(&events.Pin{JID: jid("g@g.us"), Timestamp: time.Unix(602, 0)})
+	want := []string{
+		`app_state||600|{"action":"archive","from_full_sync":false}|`,
+		`app_state||601|{"action":"mute","from_full_sync":false}|`,
+		`app_state||602|{"action":"pin","from_full_sync":false}|`,
+	}
+	if got := rows(t, st, chatEventCols); !slices.Equal(got, want) {
+		t.Fatalf("chat_events:\n got %q\nwant %q", got, want)
+	}
+}
