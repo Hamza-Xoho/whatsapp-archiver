@@ -89,10 +89,20 @@ func (m *Monitor) SetState(state, detail string) {
 	case "logged_out", "stream_replaced":
 		m.gate.fire(state, stateTitles[state], state+": "+detail)
 	case "temp_banned":
-		m.gate.fire(state, stateTitles[state], "Temporarily banned until "+detail+"; capture is paused")
+		m.gate.fire(state, stateTitles[state], m.banBody(detail))
 	case "client_outdated":
 		m.gate.fire(state, stateTitles[state], "Version "+m.version()+" was rejected; update the archiver")
 	}
+}
+
+// banBody reads detail as the ban's duration (ingest passes TemporaryBan.Expire); anything else is quoted as is.
+func (m *Monitor) banBody(detail string) string {
+	d, err := time.ParseDuration(detail)
+	if err != nil {
+		return "Temporarily banned: " + detail + "; capture is paused"
+	}
+	until := m.clock.Now().Add(d).UTC().Format(time.RFC3339)
+	return "Temporarily banned for " + d.String() + " (until " + until + "); capture is paused"
 }
 func (m *Monitor) WriteFailed(err error) {
 	m.gate.fire("write_failed", "Archive write failed", err.Error())
@@ -141,7 +151,7 @@ func (m *Monitor) check() {
 	if d := now.Sub(down); a.DisconnectedAfter > 0 && s.State == "disconnected" && d > a.DisconnectedAfter {
 		m.gate.fire("disconnected", stateTitles["disconnected"], fmt.Sprintf("Disconnected for %s %s", d.Round(time.Minute), s.Detail))
 	}
-	if d := now.Sub(orStart(s.LastEvent, m.started)); a.NoEventsAfter > 0 {
+	if d := now.Sub(orStart(s.LastEvent, m.started)); a.NoEventsAfter > 0 && s.State == "connected" {
 		m.condition(d > a.NoEventsAfter, "no_events", "No WhatsApp events", fmt.Sprintf("No events for %s; capture may be stalled", d.Round(time.Minute)))
 	}
 	if d := now.Sub(orStart(s.PhoneLastActive, m.started)); a.PhoneQuietAfter > 0 {
@@ -171,15 +181,18 @@ func orStart(t, start time.Time) time.Time {
 	return t
 }
 
-// notify queues an alert for Run's sender without blocking; when the queue is full the alert is dropped.
-func (m *Monitor) notify(title, body string) {
+// notify queues an alert for Run's sender without blocking and reports whether it was queued;
+// when the queue is full the alert is dropped.
+func (m *Monitor) notify(title, body string) bool {
 	if m.n == nil {
-		return
+		return true
 	}
 	select {
 	case m.queue <- alert{title, body}:
+		return true
 	default:
 		m.log.Error("alert dropped: queue full", "title", title, "body", body)
+		return false
 	}
 }
 
@@ -189,17 +202,22 @@ func (m *Monitor) sendAlerts(ctx context.Context) {
 	for {
 		select {
 		case a := <-m.queue:
-			_ = m.n.Notify(ctx, a.title, a.body)
+			m.send(ctx, a)
 		case <-ctx.Done():
 			for {
 				select {
 				case a := <-m.queue:
-					_ = m.n.Notify(ctx, a.title, a.body)
+					m.send(ctx, a)
 				default:
 					return
 				}
 			}
 		}
+	}
+}
+func (m *Monitor) send(ctx context.Context, a alert) {
+	if err := m.n.Notify(ctx, a.title, a.body); err != nil {
+		m.log.Error("alert not sent", "title", a.title, "err", err)
 	}
 }
 
@@ -209,7 +227,7 @@ const alertEvery = 6 * time.Hour
 type alertGate struct {
 	mu    sync.Mutex
 	now   func() time.Time
-	send  func(title, body string)
+	send  func(title, body string) bool // false when the alert was dropped
 	fired map[string]time.Time
 }
 
@@ -221,9 +239,10 @@ func (g *alertGate) fire(key, title, body string) {
 		g.mu.Unlock()
 		return
 	}
-	g.fired[key] = now
+	if g.send(title, body) { // only a queued alert counts as fired, so a dropped one fires again
+		g.fired[key] = now
+	}
 	g.mu.Unlock()
-	g.send(title, body)
 }
 func (g *alertGate) clear(key, title string) {
 	g.mu.Lock()
