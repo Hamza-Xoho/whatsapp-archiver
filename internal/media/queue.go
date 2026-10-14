@@ -37,10 +37,12 @@ type Queue struct {
 	log     *slog.Logger
 	wake    chan struct{}
 	limiter *rate.Limiter
+	onPanic func(string)
 	wg      sync.WaitGroup
 }
 
-func NewQueue(dir string, r config.MediaRules, st *store.Store, d Downloader, c Clock, l *slog.Logger) *Queue {
+// NewQueue builds the queue; onPanic (may be nil) is told "media" for every recovered worker panic.
+func NewQueue(dir string, r config.MediaRules, st *store.Store, d Downloader, c Clock, l *slog.Logger, onPanic func(string)) *Queue {
 	workers := r.Workers
 	if workers < 1 {
 		workers = 1
@@ -50,7 +52,7 @@ func NewQueue(dir string, r config.MediaRules, st *store.Store, d Downloader, c 
 	if rpm < 1 {
 		rpm = 10
 	}
-	return &Queue{dir: dir, rules: r, store: st, down: d, clock: c, log: l, wake: make(chan struct{}, 1), limiter: rate.NewLimiter(rate.Every(time.Minute/time.Duration(rpm)), rpm)}
+	return &Queue{dir: dir, rules: r, store: st, down: d, clock: c, log: l, wake: make(chan struct{}, 1), limiter: rate.NewLimiter(rate.Every(time.Minute/time.Duration(rpm)), rpm), onPanic: onPanic}
 }
 func (q *Queue) Enqueue(ctx context.Context, m store.Media) error {
 	m.State, m.Reason = decide(m, q.rules)
@@ -70,6 +72,17 @@ func (q *Queue) Run(ctx context.Context) {
 		q.wg.Add(1)
 		go func() {
 			defer q.wg.Done()
+			var current *store.Media // the row this worker is on; a panic marks it failed
+			onPanic := func(string, any) {
+				if current != nil {
+					current.State, current.Reason, current.UpdatedAt = "failed", "panic", q.clock.Now().Unix()
+					q.save(ctx, *current)
+					current = nil
+				}
+				if q.onPanic != nil {
+					q.onPanic("media")
+				}
+			}
 			for {
 				select {
 				case <-ctx.Done():
@@ -77,20 +90,29 @@ func (q *Queue) Run(ctx context.Context) {
 				case <-q.wake:
 				case <-time.After(100 * time.Millisecond):
 				}
-				guard.Run(q.log, "media worker", nil, func() { q.work(ctx) })
+				guard.Run(q.log, "media worker", onPanic, func() { q.work(ctx, &current) })
 			}
 		}()
 	}
 	<-ctx.Done()
 	q.wg.Wait()
 }
-func (q *Queue) work(ctx context.Context) {
+func (q *Queue) work(ctx context.Context, current **store.Media) {
 	for {
 		job, err := q.store.ClaimMedia(ctx)
 		if err != nil || job == nil {
 			return
 		}
+		*current = job
 		q.download(ctx, job)
+		*current = nil
+	}
+}
+
+// save writes the row; a failed write is logged and the row is re-claimable after a restart.
+func (q *Queue) save(ctx context.Context, m store.Media) {
+	if err := q.store.UpdateMedia(ctx, m); err != nil {
+		q.log.Error("media row not saved", "chat", m.ChatJID, "id", m.MessageID, "state", m.State, "err", err)
 	}
 }
 func (q *Queue) download(ctx context.Context, m *store.Media) {
@@ -106,13 +128,13 @@ func (q *Queue) download(ctx context.Context, m *store.Media) {
 				m.State = "retry_requested"
 			}
 		}
-		_ = q.store.UpdateMedia(ctx, *m)
+		q.save(ctx, *m)
 		return
 	}
 	if err != nil {
 		m.State = "failed"
 		m.Reason = err.Error()
-		_ = q.store.UpdateMedia(ctx, *m)
+		q.save(ctx, *m)
 		return
 	}
 	path := q.path(*m)
@@ -133,7 +155,7 @@ func (q *Queue) download(ctx context.Context, m *store.Media) {
 		m.SHA256 = hex.EncodeToString(sum[:])
 		m.Reason = ""
 	}
-	_ = q.store.UpdateMedia(ctx, *m)
+	q.save(ctx, *m)
 }
 func (q *Queue) OnRetry(ctx context.Context, e *events.MediaRetry) {
 	m, err := q.store.MediaByID(ctx, e.ChatID.String(), string(e.MessageID))
@@ -147,7 +169,7 @@ func (q *Queue) OnRetry(ctx context.Context, e *events.MediaRetry) {
 	m.RetryDirectPath = path
 	m.State = "pending"
 	m.UpdatedAt = q.clock.Now().Unix()
-	_ = q.store.UpdateMedia(ctx, m)
+	q.save(ctx, m)
 	select {
 	case q.wake <- struct{}{}:
 	default:
