@@ -238,3 +238,12 @@ Per the brief, only a ready-to-fill acceptance checklist will be produced.
 - Tests (all red first): `TestApprovalModeChangesAreDistinct`, `TestGroupDeleteStoredWithReason`, `TestGroupInfoKeepsEveryChangeKind`, `TestRepeatJoinedGroupIsDistinct`, `TestArchiveToggleWithinOneSecondIsThreeRows`, `TestKeyShareProtocolMessageKeepsNoRawProto`, `TestSecretEncryptedEditIsAnEdit`, `TestEditedMediaCaptionIsNewText`.
 - Coverage: internal/ingest 86.2%.
 - Mutations: added h7-groupfields, h7-approval, h7-unknown, h7-joinversion, h7-secretedit, h7-ms, h7-caption and h8-keyraw. The h7-ptr, h7-ts and h7-zerots spec text was updated to the millisecond code. Full spec file at `e8aa845`: 93/93 KILLED.
+
+## Phase 0 fixes — H10/M2 fix round 1
+
+- Test commit `aaa4d74`; fix commit `8585f73`. Every failed `Notify` is logged at Error ("alert not sent", title, err). `notify` returns whether the alert was queued and `alertGate.fire` records the key only then (under the gate lock; queuing never blocks), so a dropped alert fires again on its next trigger. `no_events` is skipped (neither fired nor cleared) while the state is not `connected`; the disconnected rule covers that time. The temp-ban body reads the detail as a duration: "Temporarily banned for 24h0m0s (until 2023-11-15T22:13:20Z); capture is paused" (clock + duration, RFC3339 UTC); an unparseable detail is quoted verbatim ("Temporarily banned: <detail>; capture is paused").
+- Tests: `TestFailedNotifyIsLoggedOncePerSend`, `TestDroppedAlertFiresAgainOnNextTrigger`, `TestNoEventsSilentWhileDisconnected`, `TestTempBanAlertSaysUntilWhen` (all red). `TestRecoveredMessageAfterEventsResume` now starts `connected` (ruling); assertions unchanged.
+- Coverage: internal/health 93.0%.
+- Mutations killed: m2-swallow, m2-dropfired, h10-noevents-while-disc, h10-tempban-until, h10-tempban-verbatim; rf4b, h10-noevents-start, m2-sync, m2-bgctx match strings updated for the new code. Full spec file at `8585f73`: 98/98 KILLED.
+- Probe (with `Run`): 20 days disconnected → 80 disconnected, 0 no-events (was 79), 40 phone-quiet. `TestProbeNoRecoveredMessage` never sets a state, so it now sends nothing (no-events only applies while connected).
+- Open: before the first `connected` (state empty) neither no-events nor disconnected alerts.
