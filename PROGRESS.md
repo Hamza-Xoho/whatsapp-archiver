@@ -176,3 +176,12 @@ Per the brief, only a ready-to-fill acceptance checklist will be produced.
 - Coverage: internal/ingest 71.1%, internal/store 59.3%.
 - Mutations killed: h6b-participant, h9-dedup (2/2). Full run of all specs at `6495743`: 47/47 KILLED.
 - Deviations: the encoding-error branch has no test. `HistorySync` is proto2, so with `AllowPartial` there are no required-field checks and no UTF-8 validation, and no cheap input makes `Marshal` fail.
+
+## Phase 0 fixes — H1 (message insert cost independent of table size)
+
+- Test commit `d678734`; fix commit `2d879f6`. `InsertMessage`'s duplicate check is the unexported const `dedupeQuery`: it resolves the one chat's aliases from `id_mappings` ({chat} ∪ lids of that phone number ∪ phone numbers of that lid ∪ other phone numbers of those lids, same set `chat_aliases` implies) and probes `messages` by `(chat_jid IN (…), id)` on the primary key, in the same write transaction. The `chat_aliases` view stays for read paths. Added `CREATE INDEX IF NOT EXISTS id_mappings_pn ON id_mappings(pn, lid)` to `0001_raw.sql`; M11 migrations are deferred and no deployed DB exists, so editing the baseline schema is safe.
+- Tests (in-package, `insert_cost_test.go`): `TestInsertMessageCostDoesNotGrowWithTableSize` (EXPLAIN QUERY PLAN of `dedupeQuery` has no `SCAN messages`/`MATERIALIZE`; last 1,000 of 20,000 inserts take < 4x the first 1,000), `TestInsertMessageDuplicateAcrossSiblingPhoneNumbers` (pn→lid→other pn).
+- Mutations killed: h1-view, rf1b, h1-noalias (3/3).
+- Probe (scratch copy, 30k rows, inserts/s per 5k batch): before 2080, 1173, 807, 605, 493, 410 → after 5865, 6160, 6197, 6063, 6184, 6196.
+- Other write paths: `UpsertChat`, `UpsertParticipant`, `InsertEvent`, `InsertChatEvent`, `InsertMedia`, `InsertIDMapping` are PK upserts/inserts, no view. `open_gaps` is read-only. Open item: `store.Aliases` (view-based) runs on every event through `ingest.Filter.Keep` (`cmd/archiver/main.go` wiring) and still materialises `chat_aliases` per event.
+- Deviation: the new scaling test takes ~66 s under `-race` (3.6 s without); the 20,000-insert size from the ruling exceeds the 10 s budget under `-race`.
