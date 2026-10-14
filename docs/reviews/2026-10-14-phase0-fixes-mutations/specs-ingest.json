@@ -30,5 +30,53 @@
   "old": "return nil, fmt.Errorf(\"query aliases of %s: %w\", jid, err)",
   "new": "return nil, err",
   "pkgs": "./internal/store/"
+ },
+ {
+  "name": "se-asmessage",
+  "rf": "ingest-B",
+  "file": "internal/ingest/normalize.go",
+  "old": "if x := msg.GetSecretEncryptedMessage(); x != nil {",
+  "new": "if x := msg.GetSecretEncryptedMessage(); x != nil && x.GetSecretEncType() == waE2E.SecretEncryptedMessage_MESSAGE_EDIT {",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "se-keepmessage",
+  "rf": "ingest-B",
+  "file": "internal/ingest/normalize.go",
+  "old": "\t\tr.Message = nil\n\t\tr.Media = nil\n\t}\n\tif x := msg.GetProtocolMessage()",
+  "new": "\t\tr.Media = nil\n\t}\n\tif x := msg.GetProtocolMessage()",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "se-value",
+  "rf": "ingest-B",
+  "file": "internal/ingest/normalize.go",
+  "old": "string(KindSecretEncrypted), x.GetSecretEncType().String())",
+  "new": "string(KindSecretEncrypted), \"\")",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "se-target",
+  "rf": "ingest-B",
+  "file": "internal/ingest/normalize.go",
+  "old": "event(r, target, string(KindSecretEncrypted)",
+  "new": "event(r, \"\", string(KindSecretEncrypted)",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "se-newtext",
+  "rf": "ingest-B",
+  "file": "internal/ingest/normalize.go",
+  "old": "\t\t\tr.Event.NewText = \"\"\n\t\t}\n\t\tr.Message = nil",
+  "new": "\t\t}\n\t\tr.Message = nil",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "se-edit-regress",
+  "rf": "ingest-B",
+  "file": "internal/ingest/normalize.go",
+  "old": "if x.GetSecretEncType() == waE2E.SecretEncryptedMessage_MESSAGE_EDIT {\n\t\t\tr.Kind = KindEdit",
+  "new": "if x.GetSecretEncType() == waE2E.SecretEncryptedMessage_UNKNOWN {\n\t\t\tr.Kind = KindEdit",
+  "pkgs": "./internal/ingest/"
  }
 ]
