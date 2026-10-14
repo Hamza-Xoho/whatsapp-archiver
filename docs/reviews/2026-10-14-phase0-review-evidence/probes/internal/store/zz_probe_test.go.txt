@@ -1,0 +1,77 @@
+package store_test
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"testing"
+	"time"
+
+	"whatsapp-archiver/internal/store"
+)
+
+// Does InsertMessage cost grow with table size? (alias check filters on x.id, which is not the PK prefix)
+func TestProbeInsertScaling(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	total := 0
+	for batch := 0; batch < 6; batch++ {
+		start := time.Now()
+		for i := 0; i < 5000; i++ {
+			total++
+			chat := fmt.Sprintf("chat%d@g.us", total%50)
+			if _, err := s.InsertMessage(ctx, store.Message{ChatJID: chat, ID: fmt.Sprintf("M%07d", total), Source: "history", Timestamp: int64(total), ReceivedAt: 1, RawProto: []byte("x")}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		d := time.Since(start)
+		t.Logf("rows %6d -> %6d : %v  (%.0f inserts/s)", total-5000, total, d.Round(time.Millisecond), 5000/d.Seconds())
+	}
+}
+
+func TestProbeQueryPlan(t *testing.T) {
+	s := open(t)
+	db, _ := sql.Open("sqlite", "file:"+s.Path()+"?mode=ro")
+	defer db.Close()
+	rows, err := db.Query(`EXPLAIN QUERY PLAN SELECT EXISTS(SELECT 1 FROM messages x LEFT JOIN chat_aliases xa ON xa.alias_jid=x.chat_jid LEFT JOIN chat_aliases ma ON ma.alias_jid=? WHERE x.id=? AND COALESCE(xa.canonical_jid,x.chat_jid)=COALESCE(ma.canonical_jid,?))`, "a@g.us", "ID", "a@g.us")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var a, b, c int
+		var d string
+		_ = rows.Scan(&a, &b, &c, &d)
+		t.Logf("plan: %s", d)
+	}
+}
+
+// Raw tables are not protected at the database level.
+func TestProbeRawTableUpdateDeleteAllowed(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	_, _ = s.InsertMessage(ctx, message("g@g.us", "A", time.Unix(1, 0)))
+	db, _ := sql.Open("sqlite", "file:"+s.Path())
+	defer db.Close()
+	r1, err1 := db.Exec(`UPDATE messages SET text='tampered'`)
+	r2, err2 := db.Exec(`DELETE FROM messages`)
+	n1, _ := r1.RowsAffected()
+	n2, _ := r2.RowsAffected()
+	t.Logf("UPDATE messages -> rows=%d err=%v ; DELETE FROM messages -> rows=%d err=%v", n1, err1, n2, err2)
+}
+
+func TestProbeResetMediaOnStartMultiStatement(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	now := time.Unix(10_000_000, 0)
+	_ = s.InsertMedia(ctx, store.Media{ChatJID: "g", MessageID: "dl", State: "downloading", UpdatedAt: now.Unix()})
+	_ = s.InsertMedia(ctx, store.Media{ChatJID: "g", MessageID: "oldretry", State: "retry_requested", UpdatedAt: now.Add(-48 * time.Hour).Unix()})
+	_ = s.InsertMedia(ctx, store.Media{ChatJID: "g", MessageID: "newretry", State: "retry_requested", UpdatedAt: now.Add(-1 * time.Hour).Unix()})
+	if err := s.ResetMediaOnStart(ctx, now); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"dl", "oldretry", "newretry"} {
+		m, _ := s.MediaByID(ctx, "g", id)
+		t.Logf("%-9s -> state=%s reason=%q", id, m.State, m.Reason)
+	}
+}

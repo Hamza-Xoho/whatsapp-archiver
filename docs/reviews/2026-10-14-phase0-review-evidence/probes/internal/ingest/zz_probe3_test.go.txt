@@ -1,0 +1,49 @@
+package ingest_test
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"io"
+	"log/slog"
+	"sync/atomic"
+	"testing"
+
+	_ "modernc.org/sqlite"
+
+	"go.mau.fi/whatsmeow/proto/waE2E"
+	"google.golang.org/protobuf/proto"
+
+	"whatsapp-archiver/internal/ingest"
+	"whatsapp-archiver/internal/store"
+	"whatsapp-archiver/internal/testkit"
+)
+
+type mapFail struct {
+	*store.Store
+	failMapping atomic.Bool
+}
+
+func (w *mapFail) InsertIDMapping(ctx context.Context, m store.IDMapping) (bool, error) {
+	if w.failMapping.Load() {
+		return false, errors.New("database is locked")
+	}
+	return w.Store.InsertIDMapping(ctx, m)
+}
+
+// B1: one transient error on the mapping insert loses the message, silently.
+func TestProbeMappingWriteFailureDropsEvent(t *testing.T) {
+	st := testkit.Store(t)
+	w := &mapFail{Store: st}
+	w.failMapping.Store(true)
+	h := &healthFake{}
+	p := ingest.NewPipeline(w, ingest.NewFilter(nil, nil), &queueFake{}, h, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	e := messageEvent("123@lid", "A", &waE2E.Message{Conversation: proto.String("important")})
+	e.Info.RecipientAlt = jid("9665@s.whatsapp.net")
+	p.Handle(e) // returns => whatsmeow acks the message
+	db, _ := sql.Open("sqlite", "file:"+st.Path()+"?mode=ro")
+	defer db.Close()
+	var n int
+	_ = db.QueryRow("SELECT count(*) FROM messages").Scan(&n)
+	t.Logf("messages stored=%d, WriteFailed alerts=%d (event gone, nobody told)", n, h.failed)
+}

@@ -1,0 +1,58 @@
+package main
+
+import (
+	"bytes"
+	"database/sql"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	_ "modernc.org/sqlite"
+
+	"whatsapp-archiver/internal/store"
+)
+
+// `archiver status` is documented as read-only.  Does it write the archive?
+func TestProbeStatusWritesArchive(t *testing.T) {
+	data := t.TempDir()
+	p := filepath.Join(data, "archive.db")
+	st, _ := store.Open(p)
+	_, _ = st.InsertMessage(t.Context(), store.Message{ChatJID: "g@g.us", ID: "A", Source: "live", Timestamp: 1700000000, ReceivedAt: 1700000001, RawProto: []byte("x")})
+	_ = st.Close()
+	// make it look like a VACUUM INTO snapshot (rollback journal, no -wal)
+	db, _ := sql.Open("sqlite", "file:"+p)
+	_, _ = db.Exec("PRAGMA journal_mode=DELETE")
+	db.Close()
+	before, _ := os.Stat(p)
+	time.Sleep(1100 * time.Millisecond)
+	var out, errOut bytes.Buffer
+	code := run([]string{"status", "--data", data}, &out, &errOut)
+	after, _ := os.Stat(p)
+	files, _ := os.ReadDir(data)
+	var names []string
+	for _, f := range files {
+		names = append(names, f.Name())
+	}
+	t.Logf("exit=%d\nstatus output:\n%s", code, out.String())
+	t.Logf("archive.db mtime changed by `status`: %v ; files now in folder: %v", !before.ModTime().Equal(after.ModTime()), names)
+	var d2 bytes.Buffer
+	_ = run([]string{"status", "--data", filepath.Join(data, "typo-dir")}, &d2, &errOut)
+	_, err := os.Stat(filepath.Join(data, "typo-dir", "archive.db"))
+	t.Logf("`status --data <typo>` created a new archive.db: %v", err == nil)
+}
+
+// session.db exists but device never paired (pair interrupted before scanning)
+func TestProbeRunWithEmptySessionFile(t *testing.T) {
+	data := t.TempDir()
+	_ = os.WriteFile(filepath.Join(data, "session.db"), nil, 0o600)
+	var out, errOut bytes.Buffer
+	done := make(chan int, 1)
+	go func() { done <- run([]string{"run", "--data", data}, &out, &errOut) }()
+	select {
+	case c := <-done:
+		t.Logf("exit=%d stderr=%q", c, errOut.String())
+	case <-time.After(20 * time.Second):
+		t.Logf("still running after 20s; stderr=%q", errOut.String())
+	}
+}

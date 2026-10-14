@@ -1,0 +1,127 @@
+package media
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"sync"
+	"testing"
+	"time"
+
+	"go.mau.fi/whatsmeow/types/events"
+	"whatsapp-archiver/internal/config"
+	"whatsapp-archiver/internal/store"
+	"whatsapp-archiver/internal/testkit"
+	"whatsapp-archiver/internal/wa"
+)
+
+type probeDown struct {
+	mu       sync.Mutex
+	calls    int
+	requests []wa.MediaRef
+	dlErr    error
+	panicOn  string
+	data     []byte
+	dlTimes  []time.Time
+}
+
+func (d *probeDown) Download(_ context.Context, raw []byte, _ string) ([]byte, error) {
+	d.mu.Lock()
+	d.calls++
+	d.dlTimes = append(d.dlTimes, time.Now())
+	d.mu.Unlock()
+	if d.panicOn != "" && string(raw) == d.panicOn {
+		panic("boom in download")
+	}
+	return d.data, d.dlErr
+}
+func (d *probeDown) RequestMediaRetry(_ context.Context, ref wa.MediaRef, _ []byte) error {
+	d.mu.Lock()
+	d.requests = append(d.requests, ref)
+	d.mu.Unlock()
+	return nil
+}
+func (d *probeDown) ApplyMediaRetry(*events.MediaRetry, []byte) (string, error) { return "/new", nil }
+
+func newQ(t *testing.T, d Downloader, rules config.MediaRules) (*Queue, *store.Store) {
+	st := testkit.Store(t)
+	return NewQueue(t.TempDir(), rules, st, d, fakeClock{time.Unix(1_700_000_000, 0)}, slog.New(slog.NewTextHandler(io.Discard, nil))), st
+}
+
+// 30 expired items inside one minute, limit 10/min.
+func TestProbeExpiredRateLimit(t *testing.T) {
+	d := &probeDown{dlErr: wa.ErrMediaExpired}
+	q, st := newQ(t, d, config.MediaRules{Download: []string{"image"}, Workers: 2, RetryRequestsPerMinute: 10})
+	for i := 0; i < 30; i++ {
+		_ = q.Enqueue(t.Context(), store.Media{ChatJID: "g@g.us", MessageID: fmt.Sprintf("M%02d", i), SenderJID: "s@lid", Type: "image", RawProto: []byte("raw"), State: "pending"})
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { q.Run(ctx); close(done) }()
+	time.Sleep(3 * time.Second)
+	cancel()
+	<-done
+	counts := map[string]int{}
+	for i := 0; i < 30; i++ {
+		m, _ := st.MediaByID(t.Context(), "g@g.us", fmt.Sprintf("M%02d", i))
+		counts[m.State]++
+	}
+	t.Logf("re-upload requests sent=%d ; final states=%v", len(d.requests), counts)
+	if len(d.requests) > 0 {
+		r := d.requests[0]
+		t.Logf("first MediaRef passed to RequestMediaRetry: Info.ID=%q Info.Chat=%q MediaKey=%d bytes", r.Info.ID, r.Info.Chat, len(r.MediaKey))
+	}
+	// would the 20 rate-limited rows ever be re-requested? simulate a restart one minute later
+	d2 := &probeDown{dlErr: wa.ErrMediaExpired}
+	q2 := NewQueue(t.TempDir(), config.MediaRules{Download: []string{"image"}, Workers: 1, RetryRequestsPerMinute: 10}, st, d2, fakeClock{time.Unix(1_700_000_100, 0)}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ctx2, cancel2 := context.WithCancel(t.Context())
+	done2 := make(chan struct{})
+	go func() { q2.Run(ctx2); close(done2) }()
+	time.Sleep(1 * time.Second)
+	cancel2()
+	<-done2
+	t.Logf("after a restart, downloads attempted on 'expired' rows=%d (0 = they are never revisited)", d2.calls)
+}
+
+// Panic in a worker: row state, counting, siblings.
+func TestProbeWorkerPanic(t *testing.T) {
+	d := &probeDown{panicOn: "poison", data: []byte("ok")}
+	q, st := newQ(t, d, config.MediaRules{Download: []string{"image"}, Workers: 1})
+	_ = q.Enqueue(t.Context(), store.Media{ChatJID: "g@g.us", MessageID: "P", Type: "image", MIME: "image/jpeg", RawProto: []byte("poison"), State: "pending", MessageTimestamp: 100})
+	_ = q.Enqueue(t.Context(), store.Media{ChatJID: "g@g.us", MessageID: "OK", Type: "image", MIME: "image/jpeg", RawProto: []byte("fine"), State: "pending", MessageTimestamp: 50})
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { q.Run(ctx); close(done) }()
+	time.Sleep(1500 * time.Millisecond)
+	cancel()
+	<-done
+	p, _ := st.MediaByID(t.Context(), "g@g.us", "P")
+	o, _ := st.MediaByID(t.Context(), "g@g.us", "OK")
+	t.Logf("poison row state=%q reason=%q ; sibling row state=%q ; downloader calls=%d", p.State, p.Reason, o.State, d.calls)
+}
+
+// Transient network drop: how long do the 5 attempts span?
+func TestProbeBackoffWindow(t *testing.T) {
+	d := &probeDown{dlErr: errors.New("connection reset")}
+	q, st := newQ(t, d, config.MediaRules{Download: []string{"image"}, Workers: 1})
+	_ = q.Enqueue(t.Context(), store.Media{ChatJID: "g@g.us", MessageID: "N", Type: "image", RawProto: []byte("x"), State: "pending"})
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { q.Run(ctx); close(done) }()
+	time.Sleep(1 * time.Second)
+	cancel()
+	<-done
+	m, _ := st.MediaByID(t.Context(), "g@g.us", "N")
+	span := d.dlTimes[len(d.dlTimes)-1].Sub(d.dlTimes[0])
+	t.Logf("attempts=%d spanning %v, then state=%q (terminal; never retried again)", d.calls, span.Round(time.Millisecond), m.State)
+}
+
+func TestProbeFileExtensions(t *testing.T) {
+	q, _ := newQ(t, &probeDown{}, config.MediaRules{})
+	for _, mt := range []string{"image/jpeg", "audio/ogg; codecs=opus", "application/pdf", "video/mp4", "image/webp", "audio/mpeg", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"} {
+		p := q.path(store.Media{ChatJID: "120363@g.us", MessageID: "ID1", MIME: mt, MessageTimestamp: 1_700_000_000})
+		t.Logf("%-70s -> %s", mt, p[len(q.dir):])
+	}
+}

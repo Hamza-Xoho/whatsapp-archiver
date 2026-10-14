@@ -1,0 +1,221 @@
+package ingest_test
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"io"
+	"log/slog"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	_ "modernc.org/sqlite"
+
+	"go.mau.fi/whatsmeow/proto/waCommon"
+	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/proto/waHistorySync"
+	"go.mau.fi/whatsmeow/proto/waSyncAction"
+	"go.mau.fi/whatsmeow/proto/waWeb"
+	"go.mau.fi/whatsmeow/types"
+	"go.mau.fi/whatsmeow/types/events"
+	"google.golang.org/protobuf/proto"
+
+	"whatsapp-archiver/internal/ingest"
+	"whatsapp-archiver/internal/store"
+	"whatsapp-archiver/internal/testkit"
+)
+
+func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
+
+func rawQuery(t *testing.T, st *store.Store, q string, args ...any) []string {
+	t.Helper()
+	db, err := sql.Open("sqlite", "file:"+st.Path()+"?mode=ro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	rows, err := db.Query(q, args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []string
+	cols, _ := rows.Columns()
+	for rows.Next() {
+		vals := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		_ = rows.Scan(ptrs...)
+		s := ""
+		for i, v := range vals {
+			if i > 0 {
+				s += "|"
+			}
+			switch x := v.(type) {
+			case []byte:
+				s += string(x)
+			default:
+				s += toStr(x)
+			}
+		}
+		out = append(out, s)
+	}
+	return out
+}
+func toStr(v any) string {
+	if v == nil {
+		return "NULL"
+	}
+	return sprint(v)
+}
+
+// E1: a known chat name is wiped by the next live message.
+func TestProbeChatNameWipedByLiveMessage(t *testing.T) {
+	st := testkit.Store(t)
+	p := ingest.NewPipeline(st, ingest.NewFilter(nil, nil), &queueFake{}, &healthFake{}, quiet())
+	hs := history("g@g.us", "H1", 100)
+	hs.Data.Conversations[0].Name = proto.String("Study Group")
+	if _, _, err := p.ImportHistory(t.Context(), hs); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("after history : chats = %v", rawQuery(t, st, "SELECT jid,name FROM chats"))
+	p.Handle(messageEvent("g@g.us", "L1", text("live")))
+	t.Logf("after live msg: chats = %v", rawQuery(t, st, "SELECT jid,name FROM chats"))
+}
+
+// E2: an EXCLUDED chat still gets a chats row (with its name) from history.
+func TestProbeExcludedChatNameStoredFromHistory(t *testing.T) {
+	st := testkit.Store(t)
+	p := ingest.NewPipeline(st, ingest.NewFilter([]string{"secret@g.us"}, nil), &queueFake{}, &healthFake{}, quiet())
+	hs := history("secret@g.us", "S1", 100)
+	hs.Data.Conversations[0].Name = proto.String("Private Therapy Group")
+	stored, skipped, _ := p.ImportHistory(t.Context(), hs)
+	t.Logf("stored=%d skipped=%d", stored, skipped)
+	t.Logf("chats    = %v", rawQuery(t, st, "SELECT jid,name FROM chats"))
+	t.Logf("messages = %v", rawQuery(t, st, "SELECT chat_jid,id FROM messages"))
+}
+
+// E3: wrapped (ephemeral / doc-with-caption) messages in history lose text and media.
+func TestProbeHistoryWrappedMessagesLoseContent(t *testing.T) {
+	st := testkit.Store(t)
+	q := &queueFake{}
+	p := ingest.NewPipeline(st, ingest.NewFilter(nil, nil), q, &healthFake{}, quiet())
+	wrapEph := &waE2E.Message{EphemeralMessage: &waE2E.FutureProofMessage{Message: text("disappearing hello")}}
+	wrapDoc := &waE2E.Message{DocumentWithCaptionMessage: &waE2E.FutureProofMessage{Message: &waE2E.Message{DocumentMessage: &waE2E.DocumentMessage{Mimetype: proto.String("application/pdf"), Caption: proto.String("syllabus")}}}}
+	hs := &events.HistorySync{Data: &waHistorySync.HistorySync{Progress: proto.Uint32(1), Conversations: []*waHistorySync.Conversation{{ID: proto.String("g@g.us"), Messages: []*waHistorySync.HistorySyncMsg{
+		{Message: &waWeb.WebMessageInfo{Key: &waCommon.MessageKey{ID: proto.String("EPH")}, MessageTimestamp: proto.Uint64(10), Message: wrapEph}},
+		{Message: &waWeb.WebMessageInfo{Key: &waCommon.MessageKey{ID: proto.String("DOC")}, MessageTimestamp: proto.Uint64(11), Message: wrapDoc}},
+	}}}}}
+	_, _, err := p.ImportHistory(t.Context(), hs)
+	t.Logf("err=%v", err)
+	t.Logf("messages(id,text,media_type) = %v", rawQuery(t, st, "SELECT id,text,media_type FROM messages ORDER BY id"))
+	t.Logf("media rows enqueued = %d", len(q.items))
+	// the live path (whatsmeow UnwrapRaw) would deliver inner content:
+	live := &events.Message{Info: types.MessageInfo{MessageSource: types.MessageSource{Chat: jid("g@g.us"), Sender: jid("2@lid")}, ID: "LIVEEPH", Timestamp: time.Unix(10, 0)}, RawMessage: wrapEph}
+	live.UnwrapRaw()
+	r := ingest.FromMessage(live, "live", time.Now())
+	t.Logf("live-path text for same wrapped msg = %q", r.Message.Text)
+}
+
+// E4: sender attribution for our own messages in history.
+func TestProbeHistoryOwnMessageSender(t *testing.T) {
+	st := testkit.Store(t)
+	p := ingest.NewPipeline(st, ingest.NewFilter(nil, nil), &queueFake{}, &healthFake{}, quiet())
+	mk := func(chat, id string, fromMe bool) *events.HistorySync {
+		return &events.HistorySync{Data: &waHistorySync.HistorySync{Progress: proto.Uint32(1), Conversations: []*waHistorySync.Conversation{{ID: proto.String(chat), Messages: []*waHistorySync.HistorySyncMsg{
+			{Message: &waWeb.WebMessageInfo{Key: &waCommon.MessageKey{ID: proto.String(id), FromMe: proto.Bool(fromMe)}, MessageTimestamp: proto.Uint64(10), PushName: proto.String("Alice"), Message: text(id)}}}}}}}
+	}
+	_, _, _ = p.ImportHistory(t.Context(), mk("4915111@s.whatsapp.net", "DM_FROM_ME", true))
+	_, _, _ = p.ImportHistory(t.Context(), mk("120363@g.us", "GRP_FROM_ME", true))
+	t.Logf("sender_jid by message = %v", rawQuery(t, st, "SELECT id,chat_jid,sender_jid,'from_me=true' FROM messages ORDER BY id"))
+	t.Logf("participants (push names) = %v", rawQuery(t, st, "SELECT jid,display_name FROM participants"))
+}
+
+// E5: chat-event ids, timestamps and payload.
+func TestProbeChatEventShape(t *testing.T) {
+	now := time.Unix(1000, 0)
+	mk := func() *events.GroupInfo {
+		return &events.GroupInfo{JID: jid("g@g.us"), Timestamp: time.Unix(500, 0), Name: &types.GroupName{Name: "New Name"}, Join: []types.JID{jid("5@s.whatsapp.net")}}
+	}
+	a, _ := ingest.FromChatEvent(mk(), now)
+	b, _ := ingest.FromChatEvent(mk(), now)
+	t.Logf("identical GroupInfo twice -> same EventID? %v (%s vs %s)", a.ChatEvent.EventID == b.ChatEvent.EventID, a.ChatEvent.EventID, b.ChatEvent.EventID)
+	t.Logf("ChatEvent: Value=%q Timestamp=%d RawProto=%d bytes (WhatsApp ts was 500)", a.ChatEvent.Value, a.ChatEvent.Timestamp, len(a.ChatEvent.RawProto))
+	arch := func(v bool) *events.Archive {
+		return &events.Archive{JID: jid("g@g.us"), Timestamp: time.Unix(500, 0), Action: &waSyncAction.ArchiveChatAction{Archived: proto.Bool(v)}}
+	}
+	x, _ := ingest.FromChatEvent(arch(true), now)
+	y, _ := ingest.FromChatEvent(arch(false), now)
+	t.Logf("archive=true Value=%q  archive=false Value=%q  (distinguishable? %v)", x.ChatEvent.Value, y.ChatEvent.Value, x.ChatEvent.Value != y.ChatEvent.Value)
+}
+
+// E6: non-revoke protocol messages are classified as revoke.
+func TestProbeProtocolMessageMisclassified(t *testing.T) {
+	pm := &waE2E.Message{ProtocolMessage: &waE2E.ProtocolMessage{Type: waE2E.ProtocolMessage_EPHEMERAL_SETTING.Enum(), EphemeralExpiration: proto.Uint32(86400)}}
+	r := ingest.FromMessage(messageEvent("g@g.us", "PM1", pm), "live", time.Now())
+	t.Logf("EPHEMERAL_SETTING protocol message -> Kind=%s EventKind=%q TargetID=%q", r.Kind, r.Event.Kind, r.Event.TargetID)
+}
+
+type failingWriter struct {
+	*store.Store
+	fail  atomic.Bool
+	calls atomic.Int64
+}
+
+func (w *failingWriter) InsertMessage(ctx context.Context, m store.Message) (bool, error) {
+	w.calls.Add(1)
+	if w.fail.Load() {
+		return false, errors.New("disk full")
+	}
+	return w.Store.InsertMessage(ctx, m)
+}
+func (w *failingWriter) InsertHistoryChunk(ctx context.Context, h store.HistoryChunk) error {
+	return w.Store.InsertHistoryChunk(ctx, h)
+}
+
+// E7: write failure -> how hard does Ingest retry, and does it alert once?
+func TestProbeWriteFailureRetryRate(t *testing.T) {
+	st := testkit.Store(t)
+	w := &failingWriter{Store: st}
+	w.fail.Store(true)
+	h := &healthFake{}
+	p := ingest.NewPipeline(w, ingest.NewFilter(nil, nil), &queueFake{}, h, quiet())
+	done := make(chan struct{})
+	go func() { p.Handle(messageEvent("g@g.us", "A", text("x"))); close(done) }()
+	time.Sleep(1500 * time.Millisecond)
+	before := w.calls.Load()
+	time.Sleep(1 * time.Second)
+	perSec := w.calls.Load() - before
+	t.Logf("insert attempts in the 1s window after the initial back-off: %d (a 160ms interval would be ~6)", perSec)
+	w.fail.Store(false)
+	select {
+	case <-done:
+		t.Logf("stored after recovery; WriteFailed alerts = %d", h.failed)
+	case <-time.After(3 * time.Second):
+		t.Fatal("did not recover")
+	}
+}
+
+// E8: history ledger id collisions.
+func TestProbeLedgerCollision(t *testing.T) {
+	st := testkit.Store(t)
+	p := ingest.NewPipeline(st, ingest.NewFilter(nil, nil), &queueFake{}, &healthFake{}, quiet())
+	a := history("g@g.us", "A", 100)
+	b := history("g@g.us", "B", 100) // different content, same type/order/progress/size (e.g. a re-pair's second sync)
+	_, _, _ = p.ImportHistory(t.Context(), a)
+	_, _, _ = p.ImportHistory(t.Context(), b)
+	cov, _ := st.HistoryCoverage(t.Context())
+	t.Logf("two distinct chunks with the same progress -> ledger rows = %d (messages stored = %v)", cov.Chunks, rawQuery(t, st, "SELECT count(*) FROM messages"))
+}
+
+// E9: ImportHistory reports 'stored' for duplicates.
+func TestProbeStoredCountForDuplicates(t *testing.T) {
+	st := testkit.Store(t)
+	p := ingest.NewPipeline(st, ingest.NewFilter(nil, nil), &queueFake{}, &healthFake{}, quiet())
+	p.Handle(messageEvent("g@g.us", "ABC", text("live")))
+	stored, skipped, _ := p.ImportHistory(t.Context(), history("g@g.us", "ABC", 1))
+	t.Logf("history chunk with 1 message that already exists -> stored=%d skipped=%d, messages rows=%v", stored, skipped, rawQuery(t, st, "SELECT count(*) FROM messages"))
+}

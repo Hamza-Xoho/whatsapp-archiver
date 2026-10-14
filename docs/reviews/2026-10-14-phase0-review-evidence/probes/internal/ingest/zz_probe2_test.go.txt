@@ -1,0 +1,66 @@
+package ingest_test
+
+import (
+	"encoding/base64"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/types"
+	"go.mau.fi/whatsmeow/types/events"
+	"google.golang.org/protobuf/proto"
+
+	"whatsapp-archiver/internal/ingest"
+)
+
+func TestProbeScrubMissesNumbersInsideProtobufAndDeviceJIDs(t *testing.T) {
+	in, out := t.TempDir(), t.TempDir()
+	msg := &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{
+		Text: proto.String("see you"),
+		ContextInfo: &waE2E.ContextInfo{
+			Participant:  proto.String("4915123456789@s.whatsapp.net"),
+			MentionedJID: []string{"4915999888777@s.whatsapp.net"},
+		}}}
+	e := messageEvent("120363@g.us", "A", msg)
+	e.Info.Sender = jid("4915123456789:12@s.whatsapp.net") // device-suffixed JID as phones really send
+	ingest.NewRecorder(in).Wrap(func(any) {})(e)
+	if err := ingest.Scrub(in, out); err != nil {
+		t.Fatal(err)
+	}
+	files, _ := os.ReadDir(out)
+	data, _ := os.ReadFile(filepath.Join(out, files[0].Name()))
+	var rec map[string]any
+	_ = json.Unmarshal(data, &rec)
+	raw, _ := base64.StdEncoding.DecodeString(rec["proto"].(string))
+	t.Logf("scrubbed JSON sender field        : %v", rec["sender"])
+	t.Logf("number 4915123456789 still in file : JSON text=%v  decoded protobuf=%v", strings.Contains(string(data), "4915123456789"), strings.Contains(string(raw), "4915123456789"))
+	t.Logf("mentioned number 4915999888777 in decoded protobuf: %v", strings.Contains(string(raw), "4915999888777"))
+}
+
+func TestProbeReplayRoundTripLosesFields(t *testing.T) {
+	dir := t.TempDir()
+	e := messageEvent("1@lid", "A", text("hello"))
+	e.Info.Timestamp = time.Unix(1_700_000_123, 0)
+	e.Info.PushName = "Alice"
+	e.Info.SenderAlt = jid("4915123456789@s.whatsapp.net")
+	e.Info.Sender = jid("1@lid")
+	e.Info.IsGroup = true
+	ingest.NewRecorder(dir).Wrap(func(any) {})(e)
+	loaded, err := ingest.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := loaded[0].(*events.Message)
+	t.Logf("original : ts=%d push=%q senderAlt=%q isGroup=%v", e.Info.Timestamp.Unix(), e.Info.PushName, e.Info.SenderAlt, e.Info.IsGroup)
+	t.Logf("replayed : ts=%d push=%q senderAlt=%q isGroup=%v", m.Info.Timestamp.Unix(), m.Info.PushName, m.Info.SenderAlt, m.Info.IsGroup)
+	for _, ev := range []any{&events.UndecryptableMessage{Info: types.MessageInfo{ID: "U"}}, &events.GroupInfo{JID: jid("g@g.us")}, &events.Archive{JID: jid("g@g.us")}, &events.HistorySync{}, &events.MediaRetry{}} {
+		d := t.TempDir()
+		ingest.NewRecorder(d).Wrap(func(any) {})(ev)
+		entries, _ := os.ReadDir(d)
+		t.Logf("recorder keeps %-32T : %v", ev, len(entries) == 1)
+	}
+}

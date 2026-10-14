@@ -1,0 +1,55 @@
+package backup
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"whatsapp-archiver/internal/config"
+	"whatsapp-archiver/internal/store"
+)
+
+// retention removes ANY directory in the destination, not only snapshots.
+func TestProbeRetentionDeletesForeignDirs(t *testing.T) {
+	data := t.TempDir()
+	st, _ := store.Open(filepath.Join(data, "archive.db"))
+	_ = st.Close()
+	dest := t.TempDir()
+	for _, d := range []string{"2023-family-photos", "0-keep-me", "media"} {
+		_ = os.MkdirAll(filepath.Join(dest, d), 0o700)
+		_ = os.WriteFile(filepath.Join(dest, d, "precious.txt"), []byte("x"), 0o600)
+	}
+	cfg := &config.Config{DataDir: data, Backup: config.BackupConfig{Destination: dest, Keep: 1}}
+	if _, err := Run(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	entries, _ := os.ReadDir(dest)
+	for _, e := range entries {
+		t.Logf("remaining in destination: %s", e.Name())
+	}
+}
+
+// a failed (empty) snapshot folder still counts toward Keep and pushes out good ones
+func TestProbeFailedSnapshotLeavesJunkFolder(t *testing.T) {
+	data := t.TempDir() // no archive.db at all -> VACUUM INTO on an empty db
+	dest := t.TempDir()
+	cfg := &config.Config{DataDir: filepath.Join(data, "nope"), Backup: config.BackupConfig{Destination: dest, Keep: 3}}
+	_, err := Run(context.Background(), cfg)
+	entries, _ := os.ReadDir(dest)
+	t.Logf("Run err=%v ; folders left behind in destination=%d", err, len(entries))
+}
+
+// Schedule with a fake clock: does it fire once?  (plan: planned test missing)
+type fc struct {
+	now   time.Time
+	fired chan struct{}
+}
+
+func (c *fc) Now() time.Time { return c.now }
+func (c *fc) After(d time.Duration) <-chan time.Time {
+	ch := make(chan time.Time, 1)
+	ch <- c.now.Add(d)
+	return ch
+}

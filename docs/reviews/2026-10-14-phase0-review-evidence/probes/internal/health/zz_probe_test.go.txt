@@ -1,0 +1,52 @@
+package health
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"whatsapp-archiver/internal/config"
+)
+
+func TestProbeDisconnectedNeverAlerts(t *testing.T) {
+	dir := t.TempDir()
+	n := &note{}
+	c := &clock{time.Unix(1_700_000_000, 0)}
+	cfg := &config.Config{DataDir: dir, Alerts: config.AlertConfig{DisconnectedAfter: 15 * time.Minute, PhoneQuietAfter: 240 * time.Hour, NoEventsAfter: 6 * time.Hour}}
+	m := NewMonitor(cfg, n, c, nil, func() string { return "v" })
+	m.SetState("disconnected", "")
+	m.Seen(c.now, false) // only ever messages from others
+	for i := 0; i < 20*24; i++ { // 20 days in 1h steps
+		c.now = c.now.Add(time.Hour)
+		m.check()
+	}
+	t.Logf("after 20 days: state=%q, alerts sent=%d %v  (disconnected>15m and phone-quiet>10d should each have alerted)", m.Status().State, len(n.bodies), n.bodies)
+}
+
+func TestProbeNoRecoveredMessage(t *testing.T) {
+	dir := t.TempDir()
+	n := &note{}
+	c := &clock{time.Unix(1_700_000_000, 0)}
+	m := NewMonitor(&config.Config{DataDir: dir, Alerts: config.AlertConfig{NoEventsAfter: time.Hour}}, n, c, nil, func() string { return "v" })
+	m.Seen(c.now, false)
+	c.now = c.now.Add(2 * time.Hour)
+	m.check()
+	m.Seen(c.now, false) // events resume
+	c.now = c.now.Add(time.Minute)
+	m.check()
+	t.Logf("alerts=%v  (a 'recovered' message was required once events resume)", n.bodies)
+}
+
+func TestProbeSeenRewritesHealthJSONEveryEvent(t *testing.T) {
+	dir := t.TempDir()
+	c := &clock{time.Unix(1_700_000_000, 0)}
+	m := NewMonitor(&config.Config{DataDir: dir}, &note{}, c, nil, func() string { return "v" })
+	start := time.Now()
+	for i := 0; i < 5000; i++ {
+		m.Seen(c.now, false)
+	}
+	d := time.Since(start)
+	st, _ := os.Stat(filepath.Join(dir, "health.json"))
+	t.Logf("5000 Seen() calls took %v (%.0f us each) and each rewrote health.json (size %d)", d.Round(time.Millisecond), float64(d.Microseconds())/5000, st.Size())
+}
