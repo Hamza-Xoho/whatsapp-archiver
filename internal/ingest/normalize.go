@@ -1,0 +1,203 @@
+package ingest
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"time"
+
+	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/types"
+	"go.mau.fi/whatsmeow/types/events"
+	"google.golang.org/protobuf/proto"
+
+	"whatsapp-archiver/internal/store"
+)
+
+func FromMessage(evt *events.Message, source string, received time.Time) Result {
+	if evt == nil {
+		return Result{Received: received}
+	}
+	rawMsg := evt.RawMessage
+	if rawMsg == nil {
+		rawMsg = evt.Message
+	}
+	raw, _ := proto.Marshal(rawMsg)
+	info := evt.Info
+	chat := info.Chat.String()
+	sender := info.Sender.String()
+	m := store.Message{ChatJID: chat, ID: string(info.ID), SenderJID: sender, Timestamp: info.Timestamp.Unix(), ReceivedAt: received.Unix(), Source: source, RawProto: raw}
+	r := Result{Kind: KindMessage, Chat: store.Chat{JID: chat}, Sender: store.Participant{JID: sender, DisplayName: info.PushName}, Message: &m, FromMe: info.IsFromMe, Received: received}
+	normalizeContent(evt.Message, &r)
+	r.Mappings = messageMappings(info, received)
+	return r
+}
+
+func normalizeContent(msg *waE2E.Message, r *Result) {
+	if msg == nil {
+		return
+	}
+	if text := msg.GetConversation(); text != "" {
+		r.Message.Text = text
+	}
+	if x := msg.GetExtendedTextMessage(); x != nil {
+		r.Message.Text = x.GetText()
+		contextFields(r.Message, x.GetContextInfo())
+	}
+	if x := msg.GetImageMessage(); x != nil {
+		r.Message.Text = x.GetCaption()
+		contextFields(r.Message, x.GetContextInfo())
+		setMedia(r, "image", x.GetMimetype(), x.GetFileLength())
+	}
+	if x := msg.GetDocumentMessage(); x != nil {
+		r.Message.Text = x.GetCaption()
+		contextFields(r.Message, x.GetContextInfo())
+		setMedia(r, "document", x.GetMimetype(), x.GetFileLength())
+	}
+	if x := msg.GetAudioMessage(); x != nil {
+		kind := "audio"
+		if x.GetPTT() {
+			kind = "audio"
+		}
+		setMedia(r, kind, x.GetMimetype(), x.GetFileLength())
+	}
+	if x := msg.GetVideoMessage(); x != nil {
+		kind := "video"
+		if x.GetGifPlayback() {
+			kind = "gif"
+		}
+		r.Message.Text = x.GetCaption()
+		contextFields(r.Message, x.GetContextInfo())
+		setMedia(r, kind, x.GetMimetype(), x.GetFileLength())
+	}
+	if x := msg.GetStickerMessage(); x != nil {
+		setMedia(r, "sticker", x.GetMimetype(), x.GetFileLength())
+	}
+	if x := msg.GetReactionMessage(); x != nil {
+		r.Kind = KindReaction
+		r.Event = event(r, x.GetKey().GetID(), "reaction", x.GetText())
+		r.Message = nil
+		r.Media = nil
+	}
+	if x := msg.GetPollUpdateMessage(); x != nil {
+		r.Kind = KindPollVote
+		r.Event = event(r, x.GetPollCreationMessageKey().GetID(), "poll_vote", "")
+		r.Message = nil
+		r.Media = nil
+	}
+	if x := msg.GetPinInChatMessage(); x != nil {
+		r.Kind = KindPin
+		r.Event = event(r, x.GetKey().GetID(), "pin", fmt.Sprint(x.GetType()))
+		r.Message = nil
+		r.Media = nil
+	}
+	if x := msg.GetProtocolMessage(); x != nil {
+		target := x.GetKey().GetID()
+		if x.GetEditedMessage() != nil {
+			r.Kind = KindEdit
+			r.Event = event(r, target, "edit", messageText(x.GetEditedMessage()))
+		} else {
+			r.Kind = KindRevoke
+			r.Event = event(r, target, "revoke", "")
+		}
+		r.Message = nil
+		r.Media = nil
+	}
+}
+
+func contextFields(m *store.Message, c *waE2E.ContextInfo) {
+	if c == nil {
+		return
+	}
+	m.QuotedID = c.GetStanzaID()
+	m.Forwarded = c.GetForwardingScore() > 0
+}
+func setMedia(r *Result, kind, mime string, size uint64) {
+	r.Message.MediaType = kind
+	r.Media = &store.Media{ChatJID: r.Message.ChatJID, MessageID: r.Message.ID, SenderJID: r.Message.SenderJID, Source: r.Message.Source, Type: kind, MIME: mime, DeclaredSize: int64(size), RawProto: r.Message.RawProto, State: "pending", MessageTimestamp: r.Message.Timestamp}
+}
+func event(r *Result, target, kind, value string) *store.MessageEvent {
+	return &store.MessageEvent{ChatJID: r.Chat.JID, TargetID: target, Kind: kind, EventID: stableID(r.Chat.JID, target, kind, string(r.Message.RawProto)), SenderJID: r.Sender.JID, Timestamp: r.Message.Timestamp, ReceivedAt: r.Received.Unix(), NewText: value, Value: value, RawProto: r.Message.RawProto}
+}
+func messageText(m *waE2E.Message) string {
+	if m == nil {
+		return ""
+	}
+	if m.GetConversation() != "" {
+		return m.GetConversation()
+	}
+	if x := m.GetExtendedTextMessage(); x != nil {
+		return x.GetText()
+	}
+	return ""
+}
+
+func FromUndecryptable(evt *events.UndecryptableMessage, received time.Time) Result {
+	if evt == nil {
+		return Result{Received: received}
+	}
+	chat := evt.Info.Chat.String()
+	id := string(evt.Info.ID)
+	e := store.MessageEvent{ChatJID: chat, TargetID: id, Kind: string(KindUndecryptable), EventID: stableID(chat, id, string(KindUndecryptable)), SenderJID: evt.Info.Sender.String(), Timestamp: evt.Info.Timestamp.Unix(), ReceivedAt: received.Unix(), Value: string(evt.DecryptFailMode)}
+	return Result{Kind: KindUndecryptable, Chat: store.Chat{JID: chat}, Sender: store.Participant{JID: evt.Info.Sender.String()}, Event: &e, FromMe: evt.Info.IsFromMe, Received: received}
+}
+
+func FromChatEvent(evt any, received time.Time) (Result, bool) {
+	var chat, kind, value string
+	switch e := evt.(type) {
+	case *events.GroupInfo:
+		chat = e.JID.String()
+		kind = string(KindGroupInfo)
+		value = e.Notify
+	case *events.JoinedGroup:
+		chat = e.JID.String()
+		kind = string(KindGroupInfo)
+		value = e.Reason
+	case *events.Archive:
+		chat = e.JID.String()
+		kind = string(KindAppState)
+		value = "archive"
+	case *events.Mute:
+		chat = e.JID.String()
+		kind = string(KindAppState)
+		value = "mute"
+	case *events.Pin:
+		chat = e.JID.String()
+		kind = string(KindAppState)
+		value = "pin"
+	default:
+		return Result{}, false
+	}
+	id := stableID(chat, kind, value, fmt.Sprintf("%v", evt))
+	ce := store.ChatEvent{ChatJID: chat, Kind: kind, EventID: id, ReceivedAt: received.Unix(), Value: value}
+	return Result{Kind: Kind(kind), Chat: store.Chat{JID: chat}, ChatEvent: &ce, Received: received}, true
+}
+
+func messageMappings(info types.MessageInfo, seen time.Time) []store.IDMapping {
+	pairs := [][2]types.JID{{info.Chat, info.RecipientAlt}, {info.Sender, info.SenderAlt}}
+	var out []store.IDMapping
+	for _, pair := range pairs {
+		a, b := pair[0], pair[1]
+		if a.IsEmpty() || b.IsEmpty() {
+			continue
+		}
+		var lid, pn types.JID
+		if a.Server == types.HiddenUserServer {
+			lid, pn = a, b
+		} else if b.Server == types.HiddenUserServer {
+			lid, pn = b, a
+		} else {
+			continue
+		}
+		out = append(out, store.IDMapping{LID: lid.String(), PN: pn.String(), Source: "message_alt", FirstSeen: seen})
+	}
+	return out
+}
+func stableID(parts ...string) string {
+	h := sha256.New()
+	for _, part := range parts {
+		_, _ = h.Write([]byte(part))
+		_, _ = h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))[:24]
+}

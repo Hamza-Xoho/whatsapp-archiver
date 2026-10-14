@@ -26,7 +26,15 @@
 - Deviations: exposed `OpenGapCount` and `SchemaVersionCount` as small read helpers so tests stay on public interfaces. The read pool uses the same WAL database with read-only mode; the write pool is capped at one connection.
 - Open questions for Hamza: none.
 
-## Tasks 3–11 — not started
+## Task 3 — complete
+
+- Test commit: `61d73a4`.
+- Implementation commit: pending at time of this entry.
+- Coverage: `internal/ingest` 51.4%.
+- Deviations: whatsmeow already unwraps ephemeral/view-once messages before emitting `events.Message`; normalization consumes `Message` while preserving `RawMessage`. No production client import was added.
+- Open questions for Hamza: none.
+
+## Tasks 4–11 — not started
 
 ## Task 12 — not attempted
 
