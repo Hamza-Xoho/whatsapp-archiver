@@ -46,26 +46,27 @@ func TestInsertMessageCostDoesNotGrowWithTableSize(t *testing.T) {
 		t.Fatalf("dedupe query plan scans or materialises:\n%s", all)
 	}
 
-	const total, window = 20000, 1000
-	var first, last time.Duration
-	start := time.Now()
-	for i := 0; i < total; i++ {
-		if i == total-window {
-			start = time.Now()
+	// Time n inserts into an empty archive, then n more after bulk-seeding many rows: cost must not depend on size.
+	const seed, n = 20000, 100
+	insertN := func(prefix string) time.Duration {
+		start := time.Now()
+		for i := 0; i < n; i++ {
+			m := Message{ChatJID: fmt.Sprintf("chat%d@g.us", i%50), ID: fmt.Sprintf("%s%07d", prefix, i), Source: "history", Timestamp: int64(i), ReceivedAt: 1, RawProto: []byte("x")}
+			if ok, err := s.InsertMessage(ctx, m); err != nil || !ok {
+				t.Fatalf("insert %s%d: ok=%v err=%v", prefix, i, ok, err)
+			}
 		}
-		m := Message{ChatJID: fmt.Sprintf("chat%d@g.us", i%50), ID: fmt.Sprintf("M%07d", i), Source: "history", Timestamp: int64(i), ReceivedAt: 1, RawProto: []byte("x")}
-		if ok, err := s.InsertMessage(ctx, m); err != nil || !ok {
-			t.Fatalf("insert %d: ok=%v err=%v", i, ok, err)
-		}
-		if i == window-1 {
-			first = time.Since(start)
-			start = time.Now()
-		}
+		return time.Since(start)
 	}
-	last = time.Since(start)
-	t.Logf("first %d inserts %v, last %d inserts %v", window, first, window, last)
-	if last > 4*first {
-		t.Fatalf("insert cost grew with table size: first %d took %v, last %d took %v", window, first, window, last)
+	small := insertN("A")
+	if _, err = s.write.ExecContext(ctx, `WITH RECURSIVE c(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM c WHERE i<?)
+INSERT INTO messages(chat_jid,id,ts,received_at,source,raw_proto) SELECT 'seed' || (i%50) || '@g.us','S' || i,i,1,'history',x'78' FROM c`, seed); err != nil {
+		t.Fatal(err)
+	}
+	large := insertN("B")
+	t.Logf("%d inserts into an empty archive %v, into %d rows %v", n, small, seed, large)
+	if large > 4*small {
+		t.Fatalf("insert cost grew with table size: %d inserts took %v when empty, %v with %d rows", n, small, large, seed)
 	}
 }
 
