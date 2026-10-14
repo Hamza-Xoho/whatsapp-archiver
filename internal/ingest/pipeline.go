@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -61,6 +62,8 @@ func (p *Pipeline) WithClock(now func() time.Time, sleep func(time.Duration)) *P
 	return p
 }
 
+func isPermanent(err error) bool { return errors.Is(err, store.ErrConstraint) }
+
 func sleepContext(ctx context.Context, d time.Duration) {
 	timer := time.NewTimer(d)
 	defer timer.Stop()
@@ -73,12 +76,17 @@ func sleepContext(ctx context.Context, d time.Duration) {
 // persist runs one write so that it is never dropped: it retries with back-off, reports WriteFailed once when the
 // policy gives up, then keeps retrying at the longest interval until the write succeeds or ctx ends.
 func (p *Pipeline) persist(ctx context.Context, what string, fn func() error) error {
-	policy := retry.Policy{Max: writeAttempts, Base: writeBase, Sleep: func(d time.Duration) { p.sleep(ctx, d) }}
+	policy := retry.Policy{Max: writeAttempts, Base: writeBase, Sleep: func(d time.Duration) { p.sleep(ctx, d) }, Permanent: isPermanent}
 	_, err := retry.Do(ctx, policy, fn)
 	if err == nil {
 		return nil
 	}
 	p.health.WriteFailed(err)
+	if isPermanent(err) {
+		err = fmt.Errorf("%s: %w", what, err)
+		p.log.Error("write rejected, not retrying", "what", what, "err", err)
+		return err
+	}
 	for ctx.Err() == nil {
 		p.sleep(ctx, writeMaxWait)
 		if err = fn(); err == nil {

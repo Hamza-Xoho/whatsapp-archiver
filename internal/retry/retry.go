@@ -10,6 +10,8 @@ type Policy struct {
 	Max   int
 	Base  time.Duration
 	Sleep func(time.Duration)
+	// Permanent reports errors that retrying cannot fix; Do returns them at once.
+	Permanent func(error) bool
 }
 
 func Do(ctx context.Context, policy Policy, fn func() error) (int, error) {
@@ -21,6 +23,9 @@ func Do(ctx context.Context, policy Policy, fn func() error) (int, error) {
 	}
 	for attempt := 1; attempt <= policy.Max; attempt++ {
 		if err := fn(); err != nil {
+			if policy.Permanent != nil && policy.Permanent(err) {
+				return attempt, err
+			}
 			if attempt == policy.Max {
 				return attempt, fmt.Errorf("after %d attempts: %w", attempt, err)
 			}

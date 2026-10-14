@@ -4,12 +4,25 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"time"
 
-	_ "modernc.org/sqlite"
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
+
+// ErrConstraint marks a write rejected by a SQLite constraint; retrying the same write can never succeed.
+var ErrConstraint = errors.New("constraint violation")
+
+func classify(err error) error {
+	var se *sqlite.Error
+	if errors.As(err, &se) && se.Code()&0xff == sqlite3.SQLITE_CONSTRAINT {
+		return fmt.Errorf("%w: %w", ErrConstraint, err)
+	}
+	return err
+}
 
 //go:embed migrations/*.sql
 var migrations embed.FS
@@ -114,7 +127,7 @@ func (s *Store) Path() string { return s.path }
 func (s *Store) insert(ctx context.Context, query string, args ...any) (bool, error) {
 	result, err := s.write.ExecContext(ctx, query, args...)
 	if err != nil {
-		return false, err
+		return false, classify(err)
 	}
 	n, err := result.RowsAffected()
 	return n > 0, err
@@ -148,7 +161,7 @@ func (s *Store) InsertMessage(ctx context.Context, m Message) (bool, error) {
 	}
 	result, err := tx.ExecContext(ctx, `INSERT INTO messages(chat_jid,id,sender_jid,ts,received_at,source,text,quoted_id,forwarded,media_type,raw_proto) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING`, m.ChatJID, m.ID, m.SenderJID, m.Timestamp, m.ReceivedAt, m.Source, m.Text, m.QuotedID, m.Forwarded, m.MediaType, m.RawProto)
 	if err != nil {
-		return false, fmt.Errorf("insert message %s: %w", m.ID, err)
+		return false, fmt.Errorf("insert message %s: %w", m.ID, classify(err))
 	}
 	if err = tx.Commit(); err != nil {
 		return false, fmt.Errorf("commit message %s: %w", m.ID, err)
