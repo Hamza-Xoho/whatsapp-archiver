@@ -58,7 +58,7 @@ fmt: $(GO)
 # Download the pinned Go for the host into .tools/go after verifying its checksum.
 $(GO):
 	@test -n "$(GO_SHA256_$(HOST))" || { echo "no pinned Go for $(HOST)"; exit 1; }
-	mkdir -p .cache/tools
+	mkdir -p .tools .cache/tools
 	curl -fsSL -o .cache/tools/go.tar.gz https://go.dev/dl/go$(GO_VERSION).$(HOST_OS)-$(HOST_ARCH).tar.gz
 	echo "$(GO_SHA256_$(HOST))  .cache/tools/go.tar.gz" | $(SHA256) -c -
 	rm -rf .tools/go
