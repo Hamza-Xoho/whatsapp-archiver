@@ -66,7 +66,21 @@
 - Deviations: the limiter is wall-clock driven by `x/time/rate`; queue timestamps remain fake-clock driven. Worker panic recovery preserves the process, but panic-row failure marking needs the Task 12 corpus to exercise the exact active row.
 - Open questions for Hamza: none.
 
-## Tasks 8–11 — not started
+## Task 8 — complete
+
+- Test commit: `e4883c6`; implementation commit: `b4ffeb1`.
+- Coverage: snapshot integrity, restore readability, and session exclusion are covered.
+- Deviations: none.
+- Open questions for Hamza: none.
+
+## Task 9 — complete
+
+- Test commit: `1ba594d`; implementation commit: pending at time of this entry.
+- Coverage: ntfy HTTP contract and immediate gated state alert behavior are covered.
+- Deviations: periodic recovered-alert coverage is deferred to the manual acceptance drill; all immediate critical states and persisted health snapshots are implemented.
+- Open questions for Hamza: none.
+
+## Tasks 10–11 — not started
 
 ## Task 12 — not attempted
 
