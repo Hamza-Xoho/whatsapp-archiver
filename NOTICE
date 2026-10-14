@@ -1,0 +1,6 @@
+WhatsApp Archiver includes code adapted from openclaw/wacli.
+
+Copyright (c) 2024 Peter Steinberger and wacli contributors
+
+Used under the MIT License. Adapted files retain the upstream copyright and
+MIT notice in their file header. See docs/prior-art.md Table 3.

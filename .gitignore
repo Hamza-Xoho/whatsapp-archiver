@@ -1,0 +1,8 @@
+/.cache/
+/.tools/
+/data/
+*.db
+*.db-*
+/archiver
+/dist/
+/.claude/green.lock

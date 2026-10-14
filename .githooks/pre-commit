@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+
+deleted_tests=$(git diff --cached --name-only --diff-filter=D -- '*_test.go')
+if [ -n "$deleted_tests" ]; then
+  echo "pre-commit: deleting test files is forbidden: $deleted_tests" >&2
+  exit 1
+fi
+
+if [ -f .claude/green.lock ]; then
+  changed_tests=$(git diff --cached --name-only --diff-filter=ACMR -- '*_test.go')
+  if [ -n "$changed_tests" ]; then
+    echo "pre-commit: test files are locked during green: $changed_tests" >&2
+    exit 1
+  fi
+fi

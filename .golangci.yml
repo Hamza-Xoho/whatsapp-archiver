@@ -1,0 +1,34 @@
+version: "2"
+run:
+  timeout: 10m
+  relative-path-mode: gomod
+linters:
+  default: none
+  enable:
+    - depguard
+    - errcheck
+    - forbidigo
+    - govet
+    - staticcheck
+  settings:
+    depguard:
+      rules:
+        receive-only-client:
+          list-mode: lax
+          files:
+            - "!${base-path}/internal/wa/**/*.go"
+          deny:
+            - pkg: "go.mau.fi/whatsmeow$"
+              desc: "only internal/wa may import the whatsmeow client"
+    forbidigo:
+      analyze-types: true
+      forbid:
+        # Keep this list in sync with internal/archtest/scan.go.
+        - pattern: '.*\.(SendMessage|SendReaction|SendPresence|SendChatPresence|MarkRead|SetForceActiveDeliveryReceipts|SendPeerMessage|UpdateGroupParticipants|JoinGroupWithLink|LeaveGroup|RevokeMessage|BuildEdit|CreateGroup|RejectCall|Upload|Logout)$'
+          msg: "user-visible WhatsApp send or mutation is forbidden"
+  exclusions:
+    rules:
+      - path: internal/wa/rerequest\.go
+        linters: [forbidigo]
+formatters:
+  enable: [gofmt]
