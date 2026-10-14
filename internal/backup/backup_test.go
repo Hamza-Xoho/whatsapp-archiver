@@ -288,3 +288,33 @@ func TestScheduleFiresOnceAtConfiguredTime(t *testing.T) {
 		t.Fatalf("%d snapshot folders, want 1", got)
 	}
 }
+
+func TestRetentionFailureKeepsNewSnapshot(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: directory permissions do not block RemoveAll")
+	}
+	dest := t.TempDir()
+	old := filepath.Join(dest, "20200101T000000.000000000Z")
+	if err := os.MkdirAll(old, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(old, "archive.db"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(old, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(old, 0o700) })
+	cfg, st := seededConfig(t, dest, 1, 1)
+	_ = st.Close()
+	report, err := Run(context.Background(), cfg)
+	if err == nil {
+		t.Fatal("expected the retention error")
+	}
+	if report.Snapshot == "" {
+		t.Fatal("report lacks the snapshot")
+	}
+	if verr := Verify(report.Snapshot); verr != nil {
+		t.Fatalf("new snapshot was not kept: %v", verr)
+	}
+}
