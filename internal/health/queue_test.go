@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"strings"
 	"sync"
@@ -112,5 +113,48 @@ func TestFullAlertQueueDropsAndLogs(t *testing.T) {
 	}
 	if !strings.Contains(logs.String(), "worker19") {
 		t.Fatalf("drop log must say which alert was dropped:\n%s", logs.String())
+	}
+}
+
+type failing struct{}
+
+func (failing) Notify(context.Context, string, string) error { return errors.New("ntfy status 503") }
+
+func TestFailedNotifyIsLoggedOncePerSend(t *testing.T) {
+	var logs bytes.Buffer
+	m := NewMonitor(&config.Config{DataDir: t.TempDir()}, failing{}, &clock{time.Unix(1_700_000_000, 0)}, nil, func() string { return "v" }).
+		WithLogger(slog.New(slog.NewTextHandler(&logs, nil)))
+	stop := running(t, m)
+	m.SetState("logged_out", "401")
+	m.WriteFailed(errors.New("disk I/O error"))
+	m.Panic("handler")
+	stop()
+	out := logs.String()
+	if got := strings.Count(out, "level=ERROR"); got != 3 {
+		t.Fatalf("want 3 Error logs, one per failed send, got %d:\n%s", got, out)
+	}
+	for _, title := range []string{"WhatsApp logged out", "Archive write failed", "Recovered panic"} {
+		if !strings.Contains(out, title) {
+			t.Fatalf("log must name the alert %q:\n%s", title, out)
+		}
+	}
+	if strings.Count(out, "ntfy status 503") != 3 {
+		t.Fatalf("log must carry the error:\n%s", out)
+	}
+}
+
+func TestDroppedAlertFiresAgainOnNextTrigger(t *testing.T) {
+	n := &note{}
+	m := NewMonitor(&config.Config{DataDir: t.TempDir()}, n, &clock{time.Unix(1_700_000_000, 0)}, nil, func() string { return "v" }).
+		WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	for i := 0; i < 16; i++ { // Run is not started: fill the queue
+		m.Panic(fmt.Sprint("worker", i))
+	}
+	m.SetState("logged_out", "401") // dropped
+	running(t, m)()                 // drain the queue
+	m.SetState("logged_out", "401") // next trigger
+	running(t, m)()
+	if len(n.bodies) != 17 || !strings.Contains(n.bodies[16], "401") {
+		t.Fatalf("a dropped logged_out must be sent on its next trigger; sent %d: %q", len(n.bodies), n.bodies)
 	}
 }

@@ -121,6 +121,7 @@ func TestDisconnectedBeforeFirstConnectMeasuredFromStart(t *testing.T) {
 
 func TestRecoveredMessageAfterEventsResume(t *testing.T) {
 	r := newRig(t, config.AlertConfig{NoEventsAfter: 6 * time.Hour})
+	r.m.SetState("connected", "")        // no_events only applies while connected
 	r.advance(6*time.Hour + time.Minute) // no Seen since start
 	r.m.check()
 	r.advance(time.Minute)
@@ -205,4 +206,37 @@ func TestRunLeavesNoGoroutines(t *testing.T) {
 	r.m.SetState("logged_out", "")
 	r.m.WriteFailed(errors.New("x"))
 	r.stop()
+}
+
+func TestTempBanAlertSaysUntilWhen(t *testing.T) {
+	r := newRig(t, config.AlertConfig{}) // clock at 2023-11-14T22:13:20Z
+	r.m.SetState("temp_banned", "24h0m0s")
+	r.m.SetState("connected", "")
+	r.m.SetState("temp_banned", "soon")
+	got := r.sent()
+	wantBodies(t, got, "", "ecovered", "soon")
+	if want := "Temporarily banned for 24h0m0s (until 2023-11-15T22:13:20Z); capture is paused"; got[0] != want {
+		t.Fatalf("temp ban alert %q, want %q", got[0], want)
+	}
+	if !strings.Contains(got[2], "paused") {
+		t.Fatalf("temp ban alert %q must say capture is paused", got[2])
+	}
+}
+
+func TestNoEventsSilentWhileDisconnected(t *testing.T) {
+	r := newRig(t, config.AlertConfig{DisconnectedAfter: 15 * time.Minute, PhoneQuietAfter: 240 * time.Hour, NoEventsAfter: 6 * time.Hour})
+	r.m.SetState("connected", "")
+	r.m.Seen(r.c.now, false)
+	r.m.SetState("disconnected", "")
+	for i := 0; i < 20*24; i++ { // 20 days down, no events
+		r.advance(time.Hour)
+		r.m.check()
+	}
+	all := strings.Join(r.sent(), "\n")
+	if n := strings.Count(all, "No events"); n != 0 {
+		t.Fatalf("%d no-events alerts while disconnected (the disconnected rule covers it):\n%s", n, all)
+	}
+	if !strings.Contains(all, "Disconnected for") || !strings.Contains(all, "14-day unlink") {
+		t.Fatalf("disconnected and phone-quiet must still alert:\n%s", all)
+	}
 }
