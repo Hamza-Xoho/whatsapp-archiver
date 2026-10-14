@@ -15,6 +15,8 @@ import (
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
+
+	"whatsapp-archiver/internal/store"
 )
 
 // Load rebuilds the recorded events in dir, in file-name order, as the Go event types Handle routes.
@@ -121,3 +123,6 @@ func Replay(ctx context.Context, p *Pipeline, items []any) error {
 	}
 	return nil
 }
+
+// DumpRaw is the sorted SQL dump of the raw tables, without receive times, for golden comparison.
+func DumpRaw(st *store.Store) (string, error) { return st.DumpRaw(context.Background()) }

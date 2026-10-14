@@ -35,61 +35,77 @@ func runFixtureTool(cmd string, args []string, out, errOut io.Writer) int {
 		_, _ = fmt.Fprintf(out, "scrubbed %s into %s\n", args[0], args[1])
 		return 0
 	}
-	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
-	fs.SetOutput(errOut)
-	data := fs.String("data", "./data", "data directory for the fresh archive")
+	flags := flag.NewFlagSet(cmd, flag.ContinueOnError)
+	flags.SetOutput(errOut)
+	data := flags.String("data", "./data", "data directory for the fresh archive")
 	// History messages sent by this account are attributed to these IDs; recorded fixtures use the placeholders.
-	own := fs.String("own", "10000000000@s.whatsapp.net", "own phone-number JID for history parsing")
-	ownLID := fs.String("own-lid", "10000000000@lid", "own LID for history parsing")
-	err := fs.Parse(args)
-	dir := fs.Arg(0)
-	if err == nil && fs.NArg() > 0 {
-		err = fs.Parse(fs.Args()[1:]) // flags may follow the folder
+	own := flags.String("own", "10000000000@s.whatsapp.net", "own phone-number JID for history parsing")
+	ownLID := flags.String("own-lid", "10000000000@lid", "own LID for history parsing")
+	dump := flags.Bool("dump", false, "print the raw-table dump instead of writing <data>/raw.sql")
+	err := flags.Parse(args)
+	dir := flags.Arg(0)
+	if err == nil && flags.NArg() > 0 {
+		err = flags.Parse(flags.Args()[1:]) // flags may follow the folder
 	}
-	if err != nil || dir == "" || fs.NArg() > 0 {
+	if err != nil || dir == "" || flags.NArg() > 0 {
 		_, _ = fmt.Fprintln(errOut, "usage: archiver replay <events-dir> --data <dir>")
 		return 2
 	}
-	n, err := replay(dir, *data, *own, *ownLID, errOut)
+	n, raw, err := replay(dir, *data, *own, *ownLID, errOut)
+	if err == nil && *dump {
+		_, _ = fmt.Fprintf(errOut, "replayed %d events\n", n)
+		_, _ = fmt.Fprint(out, raw)
+		return 0
+	}
+	path := filepath.Join(*data, "raw.sql")
+	if err == nil {
+		err = os.WriteFile(path, []byte(raw), 0o600)
+	}
 	if err != nil {
 		_, _ = fmt.Fprintln(errOut, err)
 		return 1
 	}
-	_, _ = fmt.Fprintf(out, "replayed %d events\n", n)
+	_, _ = fmt.Fprintf(out, "replayed %d events\nraw dump: %s\n", n, path)
 	return 0
 }
 
-func replay(dir, data, own, ownLID string, errOut io.Writer) (int, error) {
+// replay loads the events in dir and feeds them through a fresh pipeline into <data>/archive.db; it returns the
+// number of events and the DumpRaw of the result.
+func replay(dir, data, own, ownLID string, errOut io.Writer) (int, string, error) {
 	pn, err := types.ParseJID(own)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	lid, err := types.ParseJID(ownLID)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	cfg, err := config.Load(filepath.Join(data, "config.yaml"))
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	evts, err := ingest.Load(dir)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	path := filepath.Join(data, "archive.db")
 	if _, err = os.Stat(path); !errors.Is(err, fs.ErrNotExist) {
-		return 0, fmt.Errorf("replay needs a fresh data folder: %s exists", path)
+		return 0, "", fmt.Errorf("replay needs a fresh data folder: %s exists", path)
 	}
 	st, err := store.Open(path)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	defer func() { _ = st.Close() }()
 	ctx := context.Background()
 	aliases := func(jid string) []string { v, _ := st.Aliases(ctx, jid); return v }
 	log := slog.New(slog.NewJSONHandler(errOut, nil))
 	p := ingest.NewPipeline(st, ingest.NewFilter(cfg.Exclude, aliases), noMedia{}, noHealth{}, log).WithHistoryParser(wa.NewHistoryParser(pn, lid))
-	return len(evts), ingest.Replay(ctx, p, evts)
+	if err = ingest.Replay(ctx, p, evts); err != nil {
+		return 0, "", err
+	}
+	raw, err := ingest.DumpRaw(st)
+	return len(evts), raw, err
 }
 
 // noMedia drops media jobs: a replay downloads nothing.
