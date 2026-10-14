@@ -4,7 +4,7 @@
   "rf": "ingest-A",
   "file": "internal/ingest/scope.go",
   "old": "\t\tif err != nil {\n\t\t\treturn false, fmt.Errorf(\"alias lookup for %s: %w\", chatJID, err)\n\t\t}\n",
-  "new": "\t\tif err != nil {\n\t\t\taliases = nil // error treated as \"no aliases\": fails open\n\t\t}\n",
+  "new": "\t\tif err != nil {\n\t\t\taliases = nil\n\t\t\t_ = fmt.Sprint(err) // error treated as no aliases: fails open\n\t\t}\n",
   "pkgs": "./internal/ingest/"
  },
  {
