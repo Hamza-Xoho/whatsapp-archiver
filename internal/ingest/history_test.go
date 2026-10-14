@@ -203,3 +203,33 @@ func history(chat, id string, progress uint32) *events.HistorySync {
 		}},
 	}}
 }
+
+// H6a: a chat name learned from history survives the next live message, which carries no name.
+func TestLiveMessageKeepsKnownChatName(t *testing.T) {
+	st := testkit.Store(t)
+	p := historyPipeline(st, ingest.NewFilter(nil, nil), &queueFake{})
+	hs := history("g@g.us", "H1", 100)
+	hs.Data.Conversations[0].Name = proto.String("Study Group")
+	if _, _, err := p.ImportHistory(t.Context(), hs); err != nil {
+		t.Fatal(err)
+	}
+	p.Handle(messageEvent("g@g.us", "L1", text("live")))
+	if got := strings.Join(rows(t, st, "SELECT jid,name FROM chats"), ","); got != "g@g.us|Study Group" {
+		t.Fatalf("chats=%s", got)
+	}
+}
+
+// H6b: nothing of an excluded chat is stored from history, not even its JID or name.
+func TestExcludedChatNameNotStoredFromHistory(t *testing.T) {
+	st := testkit.Store(t)
+	p := historyPipeline(st, ingest.NewFilter([]string{"secret@g.us"}, nil), &queueFake{})
+	hs := history("secret@g.us", "S1", 100)
+	hs.Data.Conversations[0].Name = proto.String("Private Therapy Group")
+	stored, skipped, err := p.ImportHistory(t.Context(), hs)
+	if err != nil || stored != 0 || skipped != 1 {
+		t.Fatalf("stored=%d skipped=%d err=%v", stored, skipped, err)
+	}
+	if chats, messages := rows(t, st, "SELECT jid,name FROM chats"), rows(t, st, "SELECT id FROM messages"); len(chats)+len(messages) != 0 {
+		t.Fatalf("chats=%v messages=%v", chats, messages)
+	}
+}

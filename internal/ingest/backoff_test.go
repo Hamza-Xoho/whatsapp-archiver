@@ -127,3 +127,31 @@ func TestConstraintErrorIsPermanent(t *testing.T) {
 		t.Fatalf("log=%q", out)
 	}
 }
+
+// lateConstraintWriter fails like a locked database for the first `transient` inserts, then with a constraint error.
+type lateConstraintWriter struct {
+	constraintWriter
+	transient int
+}
+
+func (w *lateConstraintWriter) InsertMessage(ctx context.Context, m store.Message) (bool, error) {
+	if w.calls < w.transient {
+		w.calls++
+		return false, errors.New("database is locked")
+	}
+	return w.constraintWriter.InsertMessage(ctx, m)
+}
+
+// B1/H2 carry-over: a constraint error that appears after the retry policy gave up still stops the retry loop.
+func TestConstraintErrorDuringRetryLoopIsPermanent(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	w := &lateConstraintWriter{constraintWriter: constraintWriter{Store: testkit.Store(t), cancel: cancel}, transient: 6}
+	ft := newFakeTime()
+	h := &healthFake{}
+	p := newPipeline(w, &queueFake{}, h, ft)
+	err := p.Ingest(ctx, ingest.FromMessage(messageEvent("g@g.us", "A", text("x")), "live", ft.clock.Now()))
+	if !errors.Is(err, store.ErrConstraint) || w.calls != 7 || ctx.Err() != nil || h.failed != 1 {
+		t.Fatalf("err=%v insert calls=%d cancelled=%v WriteFailed=%d", err, w.calls, ctx.Err() != nil, h.failed)
+	}
+}

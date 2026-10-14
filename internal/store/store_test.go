@@ -2,10 +2,13 @@ package store_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"modernc.org/sqlite"
 
 	"whatsapp-archiver/internal/store"
 )
@@ -189,6 +192,60 @@ func TestOtherErrorsAreNotConstraintErrors(t *testing.T) {
 	_ = s.Close()
 	_, err := s.InsertEvent(context.Background(), store.MessageEvent{ChatJID: "g@g.us", TargetID: "A", Kind: "reaction", EventID: "E1"})
 	if err == nil || errors.Is(err, store.ErrConstraint) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+// failInserts makes every insert into table run body through a trigger installed from a second connection.
+func failInserts(t *testing.T, s *store.Store, table, body string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", "file:"+s.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err = db.Exec("CREATE TRIGGER fail_" + table + " BEFORE INSERT ON " + table + " BEGIN " + body + "; END"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// B1/H2 carry-over: every write classifies constraint errors, not only insert() and the message insert.
+func TestUpsertAndMediaConstraintErrorsAreClassified(t *testing.T) {
+	writes := map[string]func(*store.Store) error{
+		"chats": func(s *store.Store) error { return s.UpsertChat(context.Background(), store.Chat{JID: "g@g.us"}) },
+		"participants": func(s *store.Store) error {
+			return s.UpsertParticipant(context.Background(), store.Participant{JID: "1@lid"})
+		},
+		"media": func(s *store.Store) error {
+			return s.InsertMedia(context.Background(), store.Media{ChatJID: "g@g.us", MessageID: "A", State: "pending"})
+		},
+	}
+	for table, write := range writes {
+		t.Run(table, func(t *testing.T) {
+			s := open(t)
+			failInserts(t, s, table, "SELECT RAISE(ABORT, 'rejected')")
+			if err := write(s); !errors.Is(err, store.ErrConstraint) {
+				t.Fatalf("err=%v", err)
+			}
+		})
+	}
+}
+
+func TestConstraintThroughInsertIsClassified(t *testing.T) {
+	s := open(t)
+	failInserts(t, s, "message_events", "SELECT RAISE(ABORT, 'rejected')")
+	_, err := s.InsertEvent(context.Background(), store.MessageEvent{ChatJID: "g@g.us", TargetID: "A", Kind: "reaction", EventID: "E1"})
+	if !errors.Is(err, store.ErrConstraint) {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestOtherSQLiteErrorIsNotAConstraintError(t *testing.T) {
+	s := open(t)
+	failInserts(t, s, "message_events", "SELECT abs(-9223372036854775807 - 1)")
+	_, err := s.InsertEvent(context.Background(), store.MessageEvent{ChatJID: "g@g.us", TargetID: "A", Kind: "reaction", EventID: "E1"})
+	var se *sqlite.Error
+	if !errors.As(err, &se) || errors.Is(err, store.ErrConstraint) {
 		t.Fatalf("err=%v", err)
 	}
 }
