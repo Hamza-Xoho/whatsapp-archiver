@@ -2,7 +2,6 @@ package wa
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -28,6 +27,15 @@ type Client struct {
 	version       string
 	versionReason string
 	closeOnce     sync.Once
+	sock          socket
+	refresh       func(context.Context) (changed bool, err error)
+	sleep         func(context.Context, time.Duration) error
+}
+
+// socket is the connection boundary the reconnect loop drives; *whatsmeow.Client satisfies it.
+type socket interface {
+	ConnectContext(context.Context) error
+	Disconnect()
 }
 
 func Open(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Client, error) {
@@ -37,7 +45,8 @@ func Open(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Client, e
 	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
-	container, err := sqlstore.New(ctx, "sqlite", sessionDSN(filepath.Join(cfg.DataDir, "session.db")), nil)
+	wal := newWALogger(log)
+	container, err := sqlstore.New(ctx, "sqlite", sessionDSN(filepath.Join(cfg.DataDir, "session.db")), wal.Sub("Database"))
 	if err != nil {
 		return nil, fmt.Errorf("open session: %w", err)
 	}
@@ -58,10 +67,12 @@ func Open(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Client, e
 		return nil, err
 	}
 	wmstore.SetWAVersion(parsed)
-	inner := whatsmeow.NewClient(device, nil)
+	inner := whatsmeow.NewClient(device, wal.Sub("Client"))
 	inner.AutomaticMessageRerequestFromPhone = true
 	inner.SynchronousAck = true
-	return &Client{client: inner, container: container, cfg: cfg, log: log, version: version, versionReason: reason}, nil
+	c := &Client{client: inner, container: container, cfg: cfg, log: log, version: version, versionReason: reason, sock: inner, sleep: sleepCtx}
+	c.refresh = c.refreshVersion
+	return c, nil
 }
 
 func chooseVersion(ctx context.Context, cfg *config.Config) (string, string, error) {
@@ -102,59 +113,96 @@ func (c *Client) Run(ctx context.Context, h func(any), pairing bool) error {
 			return fmt.Errorf("start QR pairing: %w", err)
 		}
 	}
-	outdated := make(chan struct{}, 1)
+	if qr != nil {
+		go printQR(ctx, qr)
+	}
+	ctl := make(chan any, 8)
 	c.client.AddEventHandler(func(evt any) {
 		h(evt)
-		if _, ok := evt.(*events.ClientOutdated); ok {
+		switch evt.(type) {
+		case *events.Connected, *events.ClientOutdated, *events.TemporaryBan, *events.LoggedOut, *events.StreamReplaced:
 			select {
-			case outdated <- struct{}{}:
+			case ctl <- evt:
 			default:
 			}
 		}
 	})
+	return c.reconnect(ctx, ctl)
+}
+
+// reconnect feeds control events to the reconnect policy and carries out its actions.
+// It returns nil once ctx is cancelled.
+func (c *Client) reconnect(ctx context.Context, ctl <-chan any) error {
+	defer c.sock.Disconnect()
+	var p policy
+	var in any = startInput{}
 	for {
-		if err = c.client.ConnectContext(ctx); err != nil && !errors.Is(err, context.Canceled) {
-			c.log.Error("connect failed", "error", err)
-		}
-		if pairing && qr != nil {
-			go printQR(ctx, qr)
-		}
-		select {
-		case <-ctx.Done():
-			c.client.Disconnect()
+		a := p.next(in, time.Now())
+		in = nil
+		if a.stop {
+			c.log.Error("logged out; reconnecting stopped")
+			<-ctx.Done()
 			return nil
-		case <-outdated:
-			c.client.Disconnect()
-			if err = c.refreshVersion(ctx); err != nil {
-				c.log.Error("version refresh failed", "error", err)
-				select {
-				case <-ctx.Done():
-					return nil
-				case <-time.After(30 * time.Minute):
-				}
-			}
-		case <-time.After(5 * time.Second):
-			if c.client.IsConnected() {
-				<-ctx.Done()
-				c.client.Disconnect()
+		}
+		if a.disconnect {
+			c.sock.Disconnect()
+		}
+		if a.wait > 0 {
+			c.log.Warn("reconnect waiting", "wait", a.wait)
+			if c.sleep(ctx, a.wait) != nil {
 				return nil
+			}
+		}
+		switch {
+		case a.refresh:
+			changed, err := c.refresh(ctx)
+			if err != nil {
+				c.log.Error("version refresh failed", "error", err)
+			}
+			in = versionRefreshed{changed: changed}
+		case a.connect:
+			if err := c.sock.ConnectContext(ctx); err != nil {
+				if ctx.Err() != nil {
+					return nil
+				}
+				c.log.Error("connect failed", "error", err)
+				in = connectFailed{}
+			}
+		}
+		if in == nil {
+			select {
+			case <-ctx.Done():
+				return nil
+			case in = <-ctl:
 			}
 		}
 	}
 }
 
-func (c *Client) refreshVersion(ctx context.Context) error {
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+func (c *Client) refreshVersion(ctx context.Context) (bool, error) {
 	use, reason, err := chooseVersion(ctx, c.cfg)
 	if err != nil {
-		return err
+		return false, err
 	}
 	parsed, err := parseVersion(use)
 	if err != nil {
-		return err
+		return false, err
 	}
 	wmstore.SetWAVersion(parsed)
+	changed := use != c.version
 	c.version, c.versionReason = use, reason
-	return nil
+	return changed, nil
 }
 func printQR(ctx context.Context, ch <-chan whatsmeow.QRChannelItem) {
 	for {
