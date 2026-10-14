@@ -11,8 +11,15 @@ import (
 )
 
 type Rules struct {
-	BannedCalls  map[string]struct{}
-	AllowedFiles map[string]struct{}
+	// BannedCalls are banned on any receiver, in any file.
+	BannedCalls map[string]struct{}
+	// BannedPrefixes ban every method with the prefix when called on a
+	// non-package receiver in a file that imports the whatsmeow client.
+	BannedPrefixes []string
+	// AllowedCalls are harmless prefix matches (proxy and HTTP-client setters).
+	AllowedCalls map[string]struct{}
+	// FileAllowedCalls exempts one call name in one file; nothing else.
+	FileAllowedCalls map[string]map[string]struct{}
 }
 type Violation struct {
 	Path   string
@@ -22,13 +29,49 @@ type Violation struct {
 }
 
 func DefaultRules() Rules {
-	// Keep this list in sync with .golangci.yml.
-	names := []string{"SendMessage", "SendReaction", "SendPresence", "SendChatPresence", "MarkRead", "SetForceActiveDeliveryReceipts", "SendPeerMessage", "UpdateGroupParticipants", "JoinGroupWithLink", "LeaveGroup", "RevokeMessage", "BuildEdit", "CreateGroup", "RejectCall", "Upload", "Logout"}
+	// Keep these lists in sync with .golangci.yml.
+	names := []string{"SendMessage", "SendReaction", "SendPresence", "SendChatPresence", "MarkRead", "SetForceActiveDeliveryReceipts", "SendPeerMessage", "UpdateGroupParticipants", "JoinGroupWithLink", "LeaveGroup", "RevokeMessage", "BuildEdit", "CreateGroup", "RejectCall", "Upload", "Logout", "SendMediaRetryReceipt"}
 	banned := make(map[string]struct{}, len(names))
 	for _, name := range names {
 		banned[name] = struct{}{}
 	}
-	return Rules{BannedCalls: banned, AllowedFiles: map[string]struct{}{filepath.FromSlash("internal/wa/rerequest.go"): {}}}
+	allowed := map[string]struct{}{}
+	for _, name := range []string{"SetProxy", "SetProxyAddress", "SetSOCKSProxy", "SetMediaHTTPClient", "SetWebsocketHTTPClient", "SetPreLoginHTTPClient", "SetMaxParallelRetryReceiptHandling"} {
+		allowed[name] = struct{}{}
+	}
+	return Rules{
+		BannedCalls:      banned,
+		BannedPrefixes:   []string{"Send", "Set", "Update", "Join", "Leave", "Revoke", "Build", "Mark", "Subscribe", "Create", "Reject", "Upload", "Logout"},
+		AllowedCalls:     allowed,
+		FileAllowedCalls: map[string]map[string]struct{}{filepath.FromSlash("internal/wa/rerequest.go"): {"SendMediaRetryReceipt": {}}},
+	}
+}
+
+func (r Rules) bannedPrefix(name string) bool {
+	if _, ok := r.AllowedCalls[name]; ok {
+		return false
+	}
+	for _, p := range r.BannedPrefixes {
+		// The prefix must end a word: Sender and Settings are fields, not sends.
+		if rest, ok := strings.CutPrefix(name, p); ok && (rest == "" || (rest[0] >= 'A' && rest[0] <= 'Z')) {
+			return true
+		}
+	}
+	return false
+}
+
+// importNames returns the local package names a file's imports introduce.
+func importNames(file *ast.File) map[string]struct{} {
+	out := map[string]struct{}{}
+	for _, imp := range file.Imports {
+		if imp.Name != nil {
+			out[imp.Name.Name] = struct{}{}
+			continue
+		}
+		path, _ := strconv.Unquote(imp.Path.Value)
+		out[filepath.Base(path)] = struct{}{}
+	}
+	return out
 }
 
 func Scan(root string, rules Rules) ([]Violation, error) {
@@ -65,16 +108,34 @@ func Scan(root string, rules Rules) ([]Violation, error) {
 				out = append(out, violation(set, imp.Pos(), rel, "client-import", name))
 			}
 		}
-		if _, allowed := rules.AllowedFiles[rel]; allowed {
-			return nil
+		importsClient := false
+		for _, imp := range file.Imports {
+			if name, _ := strconv.Unquote(imp.Path.Value); name == "go.mau.fi/whatsmeow" {
+				importsClient = true
+			}
 		}
+		pkgNames := importNames(file)
+		fileAllowed := rules.FileAllowedCalls[rel]
 		ast.Inspect(file, func(node ast.Node) bool {
 			sel, ok := node.(*ast.SelectorExpr)
 			if !ok {
 				return true
 			}
-			if _, banned := rules.BannedCalls[sel.Sel.Name]; banned {
-				out = append(out, violation(set, sel.Sel.Pos(), rel, "banned-call", sel.Sel.Name))
+			name := sel.Sel.Name
+			if _, ok := fileAllowed[name]; ok {
+				return true
+			}
+			if _, banned := rules.BannedCalls[name]; banned {
+				out = append(out, violation(set, sel.Sel.Pos(), rel, "banned-call", name))
+				return true
+			}
+			if importsClient && rules.bannedPrefix(name) {
+				if id, isIdent := sel.X.(*ast.Ident); isIdent {
+					if _, isPkg := pkgNames[id.Name]; isPkg {
+						return true // package-level function, not a client method
+					}
+				}
+				out = append(out, violation(set, sel.Sel.Pos(), rel, "banned-call", name))
 			}
 			return true
 		})
