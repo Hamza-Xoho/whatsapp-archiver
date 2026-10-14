@@ -16,7 +16,7 @@ linters:
         receive-only-client:
           list-mode: lax
           files:
-            - "!${base-path}/internal/wa/**/*.go"
+            - "!**/internal/wa/*.go"
           deny:
             - pkg: "go.mau.fi/whatsmeow$"
               desc: "only internal/wa may import the whatsmeow client"

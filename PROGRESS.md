@@ -34,7 +34,15 @@
 - Deviations: whatsmeow already unwraps ephemeral/view-once messages before emitting `events.Message`; normalization consumes `Message` while preserving `RawMessage`. No production client import was added.
 - Open questions for Hamza: none.
 
-## Tasks 4–11 — not started
+## Task 4 — complete
+
+- Test commit: `7abc461`.
+- Implementation commit: pending at time of this entry.
+- Coverage: `internal/wa` 13.7%; live connection/pairing glue is intentionally reserved for Task 12.
+- Deviations: the pinned API has `Client.SynchronousAck`; it is enabled. `GetLatestVersion` now accepts `(context.Context, *http.Client)`, not the older single-argument form shown in its stale doc comment. Modernc's sqlstore upgrade was exercised in the unit test.
+- Open questions for Hamza: none.
+
+## Tasks 5–11 — not started
 
 ## Task 12 — not attempted
 
