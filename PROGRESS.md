@@ -103,3 +103,9 @@
 ## Task 12 — not attempted
 
 Per the brief, only a ready-to-fill acceptance checklist will be produced.
+
+## Phase 0 fixes — Stage 0 (workspace tidy)
+
+- Approved by Hamza 2026-10-14: plan, charter (v1.1 + archived v0.3), research and prompts moved into the repo under `docs/plans/`, `docs/charter/`, `docs/research/`, `docs/prompts/`; the in-repo `docs/reviews/` is the only copy of the review. `AGENTS.md` links now resolve inside the repo. `.claude-flow/` and `.DS_Store` ignored.
+- Supersedes the Task 0 deviation above (planning docs now committed).
+- Hamza chose to make the GitHub repo private before anything containing the charter/research is pushed. Do not push until that is confirmed.

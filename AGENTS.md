@@ -1,8 +1,9 @@
 # WhatsApp Archiver agent rules
 
-Source of truth: `../docs/superpowers/plans/2026-10-14-phase0-capture-logger.md`.
-Charter: `../docs/superpowers/plans/WhatsApp Archiver — Project Charter & Build Plan.md`.
-Research: `../docs/research/researchoutcome.md`.
+Source of truth: `docs/plans/2026-10-14-phase0-capture-logger.md`.
+Charter: `docs/charter/WhatsApp Archiver — Project Charter & Build Plan.md`.
+Research: `docs/research/researchoutcome.md`.
+Review work list: `docs/reviews/2026-10-14-phase0-review.md`. Prompts: `docs/prompts/`.
 
 ## Commands
 
