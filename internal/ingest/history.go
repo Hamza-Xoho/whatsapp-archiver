@@ -3,9 +3,7 @@ package ingest
 import (
 	"context"
 	"fmt"
-	"time"
 
-	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/proto/waWeb"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -14,6 +12,15 @@ import (
 
 type historyStore interface {
 	InsertHistoryChunk(context.Context, store.HistoryChunk) error
+}
+
+// HistoryParser turns one history message into the event the live path would deliver; internal/wa provides it.
+type HistoryParser func(chat types.JID, web *waWeb.WebMessageInfo) (*events.Message, error)
+
+// WithHistoryParser sets the parser ImportHistory uses for every message.
+func (p *Pipeline) WithHistoryParser(parse HistoryParser) *Pipeline {
+	p.parse = parse
+	return p
 }
 
 func (p *Pipeline) ImportHistory(ctx context.Context, evt *events.HistorySync) (stored, skipped int, err error) {
@@ -25,6 +32,9 @@ func (p *Pipeline) ImportHistory(ctx context.Context, evt *events.HistorySync) (
 	ledger, ok := p.writer.(historyStore)
 	if !ok {
 		return 0, 0, fmt.Errorf("writer does not support history ledger")
+	}
+	if p.parse == nil {
+		return 0, 0, fmt.Errorf("pipeline has no history parser")
 	}
 	chunk := store.HistoryChunk{ID: stableID(fmt.Sprint(hs.GetSyncType()), fmt.Sprint(hs.GetChunkOrder()), fmt.Sprint(hs.GetProgress()), fmt.Sprint(len(hs.GetConversations()))), SyncType: hs.GetSyncType().String(), ChunkOrder: int(hs.GetChunkOrder()), Progress: int(hs.GetProgress()), ConversationCount: len(hs.GetConversations()), ReceivedAt: now.Unix()}
 	for _, conv := range hs.GetConversations() {
@@ -73,12 +83,14 @@ func (p *Pipeline) ImportHistory(ctx context.Context, evt *events.HistorySync) (
 				return stored, skipped, upErr
 			}
 		}
+		chatJID, _ := types.ParseJID(chat) // an unparsable ID leaves it empty, so the parser uses the key's chat
 		for _, item := range conv.GetMessages() {
 			if item == nil || item.GetMessage() == nil {
 				continue
 			}
-			message, parseErr := historyMessage(chat, item.GetMessage())
+			message, parseErr := p.parse(chatJID, item.GetMessage())
 			if parseErr != nil {
+				p.log.Warn("history message not parsed", "chat", chat, "id", item.GetMessage().GetKey().GetID(), "err", parseErr)
 				skipped++
 				continue
 			}
@@ -96,25 +108,3 @@ func (p *Pipeline) ImportHistory(ctx context.Context, evt *events.HistorySync) (
 	p.log.Info("history chunk imported", "progress", chunk.Progress, "stored", stored, "skipped", skipped)
 	return
 }
-
-func historyMessage(chat string, web *waWeb.WebMessageInfo) (*events.Message, error) {
-	key := web.GetKey()
-	if key == nil {
-		return nil, fmt.Errorf("missing key")
-	}
-	chatJID, err := types.ParseJID(chat)
-	if err != nil {
-		return nil, err
-	}
-	sender := chatJID
-	if key.GetParticipant() != "" {
-		sender, err = types.ParseJID(key.GetParticipant())
-		if err != nil {
-			return nil, err
-		}
-	}
-	info := types.MessageInfo{MessageSource: types.MessageSource{Chat: chatJID, Sender: sender, IsFromMe: key.GetFromMe(), IsGroup: chatJID.Server == types.GroupServer}, ID: types.MessageID(key.GetID()), Timestamp: time.Unix(int64(web.GetMessageTimestamp()), 0)}
-	return &events.Message{Info: info, Message: web.GetMessage(), RawMessage: web.GetMessage(), SourceWebMsg: web}, nil
-}
-
-var _ = waHistorySync.HistorySync_INITIAL_BOOTSTRAP

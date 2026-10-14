@@ -39,6 +39,7 @@ type Pipeline struct {
 	log    *slog.Logger
 	now    func() time.Time
 	sleep  func(context.Context, time.Duration)
+	parse  HistoryParser
 }
 
 const (

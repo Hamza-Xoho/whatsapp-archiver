@@ -114,7 +114,7 @@ func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) er
 	mon := health.NewMonitor(cfg, notifier, systemClock{}, health.DiskFree, client.VersionInUse)
 	aliases := func(jid string) []string { v, _ := st.Aliases(context.Background(), jid); return v }
 	queue := media.NewQueue(cfg.DataDir, cfg.Media, st, client, systemClock{}, log)
-	pipeline := ingest.NewPipeline(st, ingest.NewFilter(cfg.Exclude, aliases), queue, mon, log)
+	pipeline := ingest.NewPipeline(st, ingest.NewFilter(cfg.Exclude, aliases), queue, mon, log).WithHistoryParser(client.HistoryParser())
 	handler := pipeline.Handle
 	if recordDir != "" {
 		handler = ingest.NewRecorder(recordDir).Wrap(handler)
