@@ -110,3 +110,17 @@ Per the brief, only a ready-to-fill acceptance checklist will be produced.
 - Supersedes the Task 0 deviation above (planning docs now committed).
 - Hamza chose to make the GitHub repo private before anything containing the charter/research is pushed. Do not push until that is confirmed.
 - M1 (tooling) fixed: `b4c9e06`, `44a2d05`. Plain `make check` now works on macOS Make 3.81 with no PATH prefix: tools are called by absolute path; Go 1.26.9 and golangci-lint v2.14.0 are bootstrapped into `.tools/` from pinned SHA-256s; a lint binary that fails `--version` is reinstalled; `build-all` builds linux amd64/arm64, darwin arm64/amd64, windows amd64 with no error-hiding fallbacks. Verified on a fresh clone with `env -i` (bootstrap from nothing → exit 0). Not a Go-test change, so no red test; no mutation applies. Deferred minors: the `shasum` fallback is unexercised on this Mac (it has `sha256sum`); CI's `setup-go` step is now redundant.
+
+## Phase 0 fixes — B1 (never drop an event)
+
+- Test commit `0662664`; fix commit `2e89ce2`. Every raw write (id mappings, chat/participant/message/event write, media `Enqueue`, history ledger, history mappings, history chat upserts) now goes through one `Pipeline.persist`: `retry.Do` (5 attempts, 10 ms base), `WriteFailed` once on give-up, then retry every 160 ms until success or ctx end. `Handle` logs every `Ingest`/`ImportHistory` error at Error. `Pipeline.WithClock(now, sleep)` injects time for tests.
+- Coverage (ingest / store / retry): 65.7% / 42.7% / 70.0%.
+- Mutations killed: rf5a, rf5b, b1-map, b1-enq, b1-ledger (5/5).
+- Deviations: the red commit fails to compile only on the new `WithClock` API (behavioural failures verified in a scratch copy with a stub). `TestHandleWriteFailureRetriesUntilStored` already passed against the old loop once `WithClock` existed (the old code retried the message write); the other new tests failed behaviourally.
+
+## Phase 0 fixes — H2 (retry back-off)
+
+- Test commit `2f6f10d`; fix commit `685a1eb`. `persist` sleeps the policy maximum (160 ms) between retries, so the hot loop is gone. `store.ErrConstraint` wraps SQLite constraint errors (`sqlite.Error` code class 19); `retry.Policy.Permanent` lets `Do` stop at once; `persist` treats constraint errors as permanent (WriteFailed once, Error log, error returned, no loop).
+- Coverage (ingest / store / retry): 65.7% / 42.7% / 70.0%.
+- Mutations killed: rf1c, rf1d, h2-sleep, h2-perm, h2-classify, h2-retry-perm (6/6).
+- Deviations: the back-off fix landed in the B1 green commit (the retry loop sleeps from the start), so `TestWriteRetryBacksOff` and the store duplicate tests were green when first run; they are proven by mutations h2-sleep, rf1c and rf1d. The red commit fails to compile on `store.ErrConstraint` / `retry.Policy.Permanent`; behavioural failures verified with stubs.
