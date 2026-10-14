@@ -168,3 +168,11 @@ Per the brief, only a ready-to-fill acceptance checklist will be produced.
 - Mutations killed: rf8d, rf9c, rf9d, h9-collide (4/4). Full stage-2 run of every spec at `01e9355`: 45/45 KILLED.
 - Probe `TestProbeLedgerCollision`: before 1 ledger row for two distinct chunks at progress 100 → after 2.
 - Deviations: neither review option (`received_at` in the ID, autoincrement key) was used — the content hash is one line, needs no schema change and survives same-second chunks; dedup of an identical redelivery is untested.
+
+## Phase 0 fixes — H6b (review follow-ups to H5/H6/H9)
+
+- Test commit `0cffc31`; fix commit `6495743`. `UpsertParticipant` sets `display_name=COALESCE(NULLIF(excluded.display_name,''),display_name)`, so a message without a push name no longer wipes a known one. The chunk-ID encoding uses `proto.MarshalOptions{Deterministic: true, AllowPartial: true}`; an encoding error is wrapped and returned from `ImportHistory` before any write (nothing counted).
+- New tests: `TestEmptyPushNameKeepsKnownDisplayName` (red: `participants=2@lid|`), and pinning tests that passed when written: `TestIdenticalChunkTwiceIsOneLedgerRow` (same chunk an hour apart → 1 ledger row, 1 message), `TestExcludedHistoryChatLeavesNoParticipantsOrMedia` (excluded chat with an image and a push name → no participants, no media rows, nothing queued), `TestHistoryFromMeInLIDChatHasOwnLIDAsSender` (own message in a `@lid` DM → `222@lid`).
+- Coverage: internal/ingest 71.1%, internal/store 59.3%.
+- Mutations killed: h6b-participant, h9-dedup (2/2). Full run of all specs at `6495743`: 47/47 KILLED.
+- Deviations: the encoding-error branch has no test. `HistorySync` is proto2, so with `AllowPartial` there are no required-field checks and no UTF-8 validation, and no cheap input makes `Marshal` fail.
