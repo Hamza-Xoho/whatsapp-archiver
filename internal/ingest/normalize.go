@@ -153,37 +153,6 @@ func FromUndecryptable(evt *events.UndecryptableMessage, received time.Time) Res
 	return Result{Kind: KindUndecryptable, Chat: store.Chat{JID: chat}, Sender: store.Participant{JID: evt.Info.Sender.String()}, Event: &e, FromMe: evt.Info.IsFromMe, Received: received}
 }
 
-func FromChatEvent(evt any, received time.Time) (Result, bool) {
-	var chat, kind, value string
-	switch e := evt.(type) {
-	case *events.GroupInfo:
-		chat = e.JID.String()
-		kind = string(KindGroupInfo)
-		value = e.Notify
-	case *events.JoinedGroup:
-		chat = e.JID.String()
-		kind = string(KindGroupInfo)
-		value = e.Reason
-	case *events.Archive:
-		chat = e.JID.String()
-		kind = string(KindAppState)
-		value = "archive"
-	case *events.Mute:
-		chat = e.JID.String()
-		kind = string(KindAppState)
-		value = "mute"
-	case *events.Pin:
-		chat = e.JID.String()
-		kind = string(KindAppState)
-		value = "pin"
-	default:
-		return Result{}, false
-	}
-	id := stableID(chat, kind, value, fmt.Sprintf("%v", evt))
-	ce := store.ChatEvent{ChatJID: chat, Kind: kind, EventID: id, ReceivedAt: received.Unix(), Value: value}
-	return Result{Kind: Kind(kind), Chat: store.Chat{JID: chat}, ChatEvent: &ce, Received: received}, true
-}
-
 func messageMappings(info types.MessageInfo, seen time.Time) []store.IDMapping {
 	pairs := [][2]types.JID{{info.Chat, info.RecipientAlt}, {info.Sender, info.SenderAlt}}
 	var out []store.IDMapping
