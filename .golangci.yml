@@ -23,13 +23,20 @@ linters:
     forbidigo:
       analyze-types: true
       forbid:
-        # Keep this list in sync with internal/archtest/scan.go.
-        - pattern: '.*\.(SendMessage|SendReaction|SendPresence|SendChatPresence|MarkRead|SetForceActiveDeliveryReceipts|SendPeerMessage|UpdateGroupParticipants|JoinGroupWithLink|LeaveGroup|RevokeMessage|BuildEdit|CreateGroup|RejectCall|Upload|Logout)$'
+        # Keep these lists in sync with DefaultRules in internal/archtest/scan.go.
+        - pattern: '.*\.(SendMessage|SendReaction|SendPresence|SendChatPresence|MarkRead|SetForceActiveDeliveryReceipts|SendPeerMessage|UpdateGroupParticipants|JoinGroupWithLink|LeaveGroup|RevokeMessage|BuildEdit|CreateGroup|RejectCall|Upload|Logout|SendMediaRetryReceipt)$'
           msg: "user-visible WhatsApp send or mutation is forbidden"
+        # CON-1: every whatsmeow Client method with a send/mutation prefix.
+        - pattern: '^whatsmeow\.Client\.(Send|Set|Update|Join|Leave|Revoke|Build|Mark|Subscribe|Create|Reject|Upload|Logout)([A-Z]\w*)?$'
+          msg: "CON-1: whatsmeow Client send/mutation methods are forbidden"
   exclusions:
     rules:
-      - path: internal/wa/rerequest\.go
+      # Harmless setters (allow-list). Only internal/wa/rerequest.go may send the media retry receipt.
+      - linters: [forbidigo]
+        text: 'use of `[^`]*\.(SetProxy|SetProxyAddress|SetSOCKSProxy|SetMediaHTTPClient|SetWebsocketHTTPClient|SetPreLoginHTTPClient|SetMaxParallelRetryReceiptHandling)` forbidden'
+      - path: '^internal/wa/rerequest\.go$'
         linters: [forbidigo]
+        text: 'use of `[^`]*\.SendMediaRetryReceipt` forbidden'
       - path: _test\.go
         linters: [errcheck]
 formatters:
