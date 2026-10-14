@@ -291,8 +291,8 @@
   "name": "h6-excluded",
   "rf": "H6",
   "file": "internal/ingest/history.go",
-  "old": "if chat != \"\" && p.filter.Keep(chat, KindMessage) {",
-  "new": "if chat != \"\" {",
+  "old": "\t\tif keepChat {\n\t\t\tif upErr",
+  "new": "\t\tif chat != \"\" || keepChat {\n\t\t\tif upErr",
   "pkgs": "./internal/ingest/"
  },
  {
