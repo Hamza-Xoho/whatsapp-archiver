@@ -24,3 +24,15 @@ func TestNtfyPostsTokenTitleAndBody(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestNtfyPostsToTopicPath(t *testing.T) {
+	var path string
+	s := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { path = r.URL.Path }))
+	defer s.Close()
+	if err := NewNtfy(&config.NtfyConfig{URL: s.URL + "/archiver-alerts"}).Notify(context.Background(), "t", "b"); err != nil {
+		t.Fatal(err)
+	}
+	if path != "/archiver-alerts" {
+		t.Fatalf("path=%q", path)
+	}
+}

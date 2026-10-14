@@ -76,3 +76,25 @@ func TestConnectFailureReportsDisconnected(t *testing.T) {
 		t.Fatalf("state=%q detail=%q", h.state, h.detail)
 	}
 }
+
+func TestConnectionEventsReportHealthStates(t *testing.T) {
+	cases := []struct {
+		evt           any
+		state, detail string
+	}{
+		{&events.Connected{}, "connected", ""},
+		{&events.Disconnected{}, "disconnected", ""},
+		{&events.LoggedOut{Reason: events.ConnectFailureLoggedOut}, "logged_out", "401: logged out from another device"},
+		{&events.ClientOutdated{}, "client_outdated", ""},
+		{&events.TemporaryBan{Expire: 24 * time.Hour}, "temp_banned", "24h0m0s"},
+		{&events.StreamReplaced{}, "stream_replaced", ""},
+	}
+	for _, c := range cases {
+		h := &healthFake{}
+		p := ingest.NewPipeline(testkit.Store(t), ingest.NewFilter(nil, nil), &queueFake{}, h, slog.New(slog.NewTextHandler(io.Discard, nil)))
+		p.Handle(c.evt)
+		if h.state != c.state || h.detail != c.detail {
+			t.Fatalf("%T: state=%q detail=%q, want %q %q", c.evt, h.state, h.detail, c.state, c.detail)
+		}
+	}
+}

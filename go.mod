@@ -4,6 +4,7 @@ go 1.26.0
 
 require (
 	go.mau.fi/whatsmeow v0.0.0-20261013142727-4cf8bc8e0aeb
+	go.uber.org/goleak v1.3.0
 	google.golang.org/protobuf v1.36.12
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.60.1
