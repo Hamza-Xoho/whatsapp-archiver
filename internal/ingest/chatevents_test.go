@@ -1,10 +1,13 @@
 package ingest_test
 
 import (
+	"encoding/json"
+	"maps"
 	"slices"
 	"testing"
 	"time"
 
+	waBinary "go.mau.fi/whatsmeow/binary"
 	"go.mau.fi/whatsmeow/proto/waSyncAction"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -108,5 +111,84 @@ func TestAppStateEventWithoutActionIsStored(t *testing.T) {
 	}
 	if got := rows(t, st, chatEventCols); !slices.Equal(got, want) {
 		t.Fatalf("chat_events:\n got %q\nwant %q", got, want)
+	}
+}
+
+// I1: two group changes that differ only in the join-approval mode (same sender, same second) are two rows.
+func TestApprovalModeChangesAreDistinct(t *testing.T) {
+	p, st := chatEventPipeline(t)
+	for _, required := range []bool{true, false} {
+		p.Handle(&events.GroupInfo{JID: jid("g@g.us"), Sender: jidPtr("5@s.whatsapp.net"), Timestamp: time.Unix(500, 0),
+			MembershipApprovalMode: &types.GroupMembershipApprovalMode{IsJoinApprovalRequired: required}})
+	}
+	want := []string{
+		`{"sender":"5@s.whatsapp.net","membership_approval":false}`,
+		`{"sender":"5@s.whatsapp.net","membership_approval":true}`,
+	}
+	if got := rows(t, st, `SELECT value FROM chat_events ORDER BY value`); !slices.Equal(got, want) {
+		t.Fatalf("chat_events:\n got %q\nwant %q", got, want)
+	}
+}
+
+// I1: a deleted group is stored with the reason.
+func TestGroupDeleteStoredWithReason(t *testing.T) {
+	p, st := chatEventPipeline(t)
+	p.Handle(&events.GroupInfo{JID: jid("g@g.us"), Sender: jidPtr("5@s.whatsapp.net"), Timestamp: time.Unix(500, 0), Delete: &types.GroupDelete{Deleted: true, DeleteReason: "admin"}})
+	want := []string{`group_info|5@s.whatsapp.net|500|{"sender":"5@s.whatsapp.net","delete":{"Deleted":true,"DeleteReason":"admin"}}|`}
+	if got := rows(t, st, chatEventCols); !slices.Equal(got, want) {
+		t.Fatalf("chat_events:\n got %q\nwant %q", got, want)
+	}
+}
+
+// I1: every kind of change a GroupInfo can carry reaches the stored value.
+func TestGroupInfoKeepsEveryChangeKind(t *testing.T) {
+	link := &types.GroupLinkChange{Type: types.GroupLinkChangeTypeSub, Group: types.GroupLinkTarget{JID: jid("sub@g.us"), GroupName: types.GroupName{Name: "Sub"}}}
+	invite := "https://chat.whatsapp.com/abc"
+	evt := &events.GroupInfo{JID: jid("g@g.us"), Timestamp: time.Unix(500, 0), Delete: &types.GroupDelete{Deleted: true},
+		Link: link, Unlink: link, NewInviteLink: &invite, MembershipApprovalMode: &types.GroupMembershipApprovalMode{IsJoinApprovalRequired: true},
+		Suspended: true, Unsuspended: true, JoinReason: "invite", ParticipantVersionID: "v7",
+		UnknownChanges: []*waBinary.Node{{Tag: "mystery", Attrs: waBinary.Attrs{"b": "2", "a": "1"}}}}
+	r, _ := ingest.FromChatEvent(evt, time.Unix(1000, 0))
+	var got map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(r.ChatEvent.Value), &got); err != nil {
+		t.Fatal(err)
+	}
+	keys := slices.Sorted(maps.Keys(got))
+	want := []string{"delete", "invite_link", "join_reason", "link", "membership_approval", "suspended", "unknown", "unlink", "unsuspended", "version"}
+	if !slices.Equal(keys, want) {
+		t.Fatalf("keys %v, want %v (value %s)", keys, want, r.ChatEvent.Value)
+	}
+	if string(got["unknown"]) != `["\u003cmystery a=\"1\" b=\"2\"/\u003e"]` || string(got["invite_link"]) != `"https://chat.whatsapp.com/abc"` || string(got["version"]) != `"v7"` {
+		t.Fatalf("value %s", r.ChatEvent.Value)
+	}
+	b, _ := ingest.FromChatEvent(evt, time.Unix(2000, 0))
+	if b.ChatEvent.Value != r.ChatEvent.Value || b.ChatEvent.EventID != r.ChatEvent.EventID {
+		t.Fatalf("not deterministic: %s vs %s", r.ChatEvent.Value, b.ChatEvent.Value)
+	}
+}
+
+// I2: being added to the same group again (new participant version) is a new row; the create key is kept.
+func TestRepeatJoinedGroupIsDistinct(t *testing.T) {
+	p, st := chatEventPipeline(t)
+	for _, version := range []string{"v1", "v2"} {
+		p.Handle(&events.JoinedGroup{Reason: "invite", CreateKey: "CK", GroupInfo: types.GroupInfo{JID: jid("g@g.us"), GroupName: types.GroupName{Name: "Club"}, ParticipantVersionID: version, GroupCreated: time.Unix(400, 0)}})
+	}
+	want := []string{
+		`{"reason":"invite","name":"Club","version":"v1","create_key":"CK","created":400}`,
+		`{"reason":"invite","name":"Club","version":"v2","create_key":"CK","created":400}`,
+	}
+	if got := rows(t, st, `SELECT value FROM chat_events ORDER BY value`); !slices.Equal(got, want) {
+		t.Fatalf("chat_events:\n got %q\nwant %q", got, want)
+	}
+}
+
+// M2: archive, unarchive, archive within one second are three events; ts stays in seconds.
+func TestArchiveToggleWithinOneSecondIsThreeRows(t *testing.T) {
+	p, st := chatEventPipeline(t)
+	for i, v := range []bool{true, false, true} {
+		p.Handle(&events.Archive{JID: jid("g@g.us"), Timestamp: time.Unix(600, int64(i+1)*250*int64(time.Millisecond)), Action: &waSyncAction.ArchiveChatAction{Archived: proto.Bool(v)}})
+	}
+	if got := rows(t, st, `SELECT ts,value FROM chat_events ORDER BY rowid`); len(got) != 3 || got[0] != got[2] || got[0][:4] != "600|" {
+		t.Fatalf("chat_events=%q", got)
 	}
 }

@@ -65,13 +65,14 @@ func TestNonRevokeProtocolMessageIsNotARevoke(t *testing.T) {
 		pm     *waE2E.ProtocolMessage
 		target string
 		value  string
+		keys   bool // carries key material: stored without raw proto (M6)
 	}{
-		{protocolMsg(waE2E.ProtocolMessage_EPHEMERAL_SETTING.Enum(), ""), "", "EPHEMERAL_SETTING"},
-		{protocolMsg(waE2E.ProtocolMessage_HISTORY_SYNC_NOTIFICATION.Enum(), ""), "", "HISTORY_SYNC_NOTIFICATION"},
-		{protocolMsg(waE2E.ProtocolMessage_APP_STATE_SYNC_KEY_SHARE.Enum(), ""), "", "APP_STATE_SYNC_KEY_SHARE"},
-		{protocolMsg(waE2E.ProtocolMessage_MESSAGE_UNSCHEDULE.Enum(), "SCHED"), "SCHED", "MESSAGE_UNSCHEDULE"},
+		{protocolMsg(waE2E.ProtocolMessage_EPHEMERAL_SETTING.Enum(), ""), "", "EPHEMERAL_SETTING", false},
+		{protocolMsg(waE2E.ProtocolMessage_HISTORY_SYNC_NOTIFICATION.Enum(), ""), "", "HISTORY_SYNC_NOTIFICATION", true},
+		{protocolMsg(waE2E.ProtocolMessage_APP_STATE_SYNC_KEY_SHARE.Enum(), ""), "", "APP_STATE_SYNC_KEY_SHARE", true},
+		{protocolMsg(waE2E.ProtocolMessage_MESSAGE_UNSCHEDULE.Enum(), "SCHED"), "SCHED", "MESSAGE_UNSCHEDULE", false},
 		// No type at all: the proto2 default (REVOKE) must not turn it into a deletion.
-		{protocolMsg(nil, "T"), "T", ""},
+		{protocolMsg(nil, "T"), "T", "", false},
 	}
 	for _, c := range cases {
 		c.pm.EphemeralExpiration = proto.Uint32(86400)
@@ -79,7 +80,7 @@ func TestNonRevokeProtocolMessageIsNotARevoke(t *testing.T) {
 		if r.Kind != ingest.Kind("protocol") || r.Message != nil || r.Event == nil {
 			t.Fatalf("%s: kind=%s message=%+v event=%+v", c.value, r.Kind, r.Message, r.Event)
 		}
-		if e := r.Event; e.Kind != "protocol" || e.TargetID != c.target || e.Value != c.value || e.NewText != "" || len(e.RawProto) == 0 {
+		if e := r.Event; e.Kind != "protocol" || e.TargetID != c.target || e.Value != c.value || e.NewText != "" || (len(e.RawProto) == 0) != c.keys {
 			t.Fatalf("%s: event=%+v", c.value, e)
 		}
 	}
@@ -148,5 +149,70 @@ func TestPollVoteCurrentAndNewVersions(t *testing.T) {
 	}
 	if got := rows(t, st, `SELECT kind,target_id,sender_jid,ts,length(raw_proto)>0 FROM message_events ORDER BY target_id`); !slices.Equal(got, []string{"poll_vote|P1|2@lid|10|1", "poll_vote|P5|2@lid|10|1"}) {
 		t.Fatalf("message_events=%v", got)
+	}
+}
+
+// M6: protocol messages that carry key material (app-state sync keys, contact hash keys, the media key of a history
+// blob or of a peer-data response) are stored without their raw proto, so backups of archive.db never hold keys.
+func TestKeyShareProtocolMessageKeepsNoRawProto(t *testing.T) {
+	keyShare := protocolMsg(waE2E.ProtocolMessage_APP_STATE_SYNC_KEY_SHARE.Enum(), "")
+	keyShare.AppStateSyncKeyShare = &waE2E.AppStateSyncKeyShare{Keys: []*waE2E.AppStateSyncKey{{KeyData: &waE2E.AppStateSyncKeyData{KeyData: []byte("secret key")}}}}
+	history := protocolMsg(waE2E.ProtocolMessage_HISTORY_SYNC_NOTIFICATION.Enum(), "")
+	history.HistorySyncNotification = &waE2E.HistorySyncNotification{MediaKey: []byte("media key"), DirectPath: proto.String("/v/t62")}
+	hashKey := protocolMsg(waE2E.ProtocolMessage_SHARED_DEVICE_CONTACT_HASH_KEY_SHARE.Enum(), "")
+	hashKey.SharedDeviceContactHashKeyShare = &waE2E.SharedDeviceContactHashKeyShare{Keys: []*waE2E.SharedDeviceContactHashKey{{KeyData: []byte("hash key")}}}
+	peer := protocolMsg(waE2E.ProtocolMessage_PEER_DATA_OPERATION_REQUEST_RESPONSE_MESSAGE.Enum(), "")
+	st := testkit.Store(t)
+	p := ingest.NewPipeline(st, ingest.NewFilter(nil, nil), &queueFake{}, &healthFake{}, quiet())
+	for i, pm := range []*waE2E.ProtocolMessage{keyShare, history, hashKey, peer} {
+		p.Handle(messageEvent("g@g.us", string(rune('A'+i)), &waE2E.Message{ProtocolMessage: pm}))
+	}
+	want := []string{"APP_STATE_SYNC_KEY_SHARE|0", "HISTORY_SYNC_NOTIFICATION|0", "PEER_DATA_OPERATION_REQUEST_RESPONSE_MESSAGE|0", "SHARED_DEVICE_CONTACT_HASH_KEY_SHARE|0"}
+	if got := rows(t, st, `SELECT value,length(raw_proto) FROM message_events WHERE kind='protocol' ORDER BY value`); !slices.Equal(got, want) {
+		t.Fatalf("message_events=%v", got)
+	}
+	if got := rows(t, st, `SELECT count(*) FROM messages`); !slices.Equal(got, []string{"0"}) {
+		t.Fatalf("messages=%v", got)
+	}
+}
+
+// I3: an edit encrypted with the message secret (SecretEncryptedMessage, MESSAGE_EDIT) is an edit of its target;
+// the new content is encrypted, so NewText stays empty and the raw proto is kept, like a poll vote.
+func TestSecretEncryptedEditIsAnEdit(t *testing.T) {
+	msg := &waE2E.Message{SecretEncryptedMessage: &waE2E.SecretEncryptedMessage{
+		TargetMessageKey: &waCommon.MessageKey{ID: proto.String("ORIG")}, EncPayload: []byte("cipher"), EncIV: []byte("iv"),
+		SecretEncType: waE2E.SecretEncryptedMessage_MESSAGE_EDIT.Enum(),
+	}}
+	r := ingest.FromMessage(messageEvent("g@g.us", "SE", msg), "live", time.Unix(20, 0))
+	if r.Kind != ingest.KindEdit || r.Message != nil || r.Event == nil {
+		t.Fatalf("kind=%s message=%+v event=%+v", r.Kind, r.Message, r.Event)
+	}
+	if e := r.Event; e.Kind != "edit" || e.TargetID != "ORIG" || e.NewText != "" || e.Timestamp != 10 || len(e.RawProto) == 0 {
+		t.Fatalf("event=%+v", e)
+	}
+	st := testkit.Store(t)
+	p := ingest.NewPipeline(st, ingest.NewFilter(nil, nil), &queueFake{}, &healthFake{}, quiet())
+	p.Handle(messageEvent("g@g.us", "SE", msg))
+	if got := rows(t, st, `SELECT count(*) FROM messages`); !slices.Equal(got, []string{"0"}) {
+		t.Fatalf("messages=%v", got)
+	}
+	if got := rows(t, st, `SELECT kind,target_id,new_text,length(raw_proto)>0 FROM message_events`); !slices.Equal(got, []string{"edit|ORIG||1"}) {
+		t.Fatalf("message_events=%v", got)
+	}
+}
+
+// M3: an edited image, video or document caption is the edit's new text.
+func TestEditedMediaCaptionIsNewText(t *testing.T) {
+	for _, content := range []*waE2E.Message{
+		{ImageMessage: &waE2E.ImageMessage{Caption: proto.String("new caption")}},
+		{VideoMessage: &waE2E.VideoMessage{Caption: proto.String("new caption")}},
+		{DocumentMessage: &waE2E.DocumentMessage{Caption: proto.String("new caption")}},
+	} {
+		pm := protocolMsg(waE2E.ProtocolMessage_MESSAGE_EDIT.Enum(), "ORIG")
+		pm.EditedMessage = content
+		r := ingest.FromMessage(messageEvent("g@g.us", "EC", &waE2E.Message{ProtocolMessage: pm}), "live", time.Unix(20, 0))
+		if r.Kind != ingest.KindEdit || r.Event == nil || r.Event.NewText != "new caption" || r.Media != nil {
+			t.Fatalf("content=%v kind=%s event=%+v media=%+v", content, r.Kind, r.Event, r.Media)
+		}
 	}
 }
