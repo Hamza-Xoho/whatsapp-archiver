@@ -32,6 +32,7 @@ const (
 	replaceWaitMin  = 5 * time.Minute
 	replaceWaitMax  = time.Hour
 	replaceQuietGap = 6 * time.Hour
+	failureWait     = 30 * time.Minute
 )
 
 // policy is the pure reconnect state machine: input in, action out. No I/O, no sleeping.
@@ -67,6 +68,8 @@ func (p *policy) next(in any, now time.Time) action {
 			wait = banUnknownWait
 		}
 		return action{disconnect: true, wait: wait, connect: true}
+	case *events.ConnectFailure, *events.CATRefreshError:
+		return action{disconnect: true, wait: failureWait, connect: true}
 	case *events.LoggedOut:
 		return action{stop: true}
 	case *events.StreamReplaced:

@@ -131,6 +131,8 @@ func (p *Pipeline) Handle(evt any) {
 			p.health.SetState("temp_banned", fmt.Sprint(e.Expire))
 		case *events.StreamReplaced:
 			p.health.SetState("stream_replaced", "")
+		case *events.ConnectFailure:
+			p.health.SetState("disconnected", fmt.Sprintf("%v %s", e.Reason, e.Message))
 		default:
 			p.log.Debug("ignored event", "type", fmt.Sprintf("%T", evt))
 		}

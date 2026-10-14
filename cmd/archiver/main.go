@@ -24,6 +24,9 @@ import (
 const version = "0.1.0-phase0"
 const whatsmeowVersion = "v0.0.0-20261013142727-4cf8bc8e0aeb"
 
+// exitNotPaired tells systemd not to restart (RestartPreventExitStatus in deploy/archiver.service).
+const exitNotPaired = 3
+
 type systemClock struct{}
 
 func (systemClock) Now() time.Time                         { return time.Now() }
@@ -54,9 +57,15 @@ func run(args []string, out, errOut io.Writer) int {
 	cfg.DataDir = *data
 	switch cmd {
 	case "run":
-		if _, err = os.Stat(filepath.Join(*data, "session.db")); err != nil {
-			_, _ = fmt.Fprintln(errOut, "not paired; run `archiver pair` in a terminal first")
+		paired, err := wa.IsPaired(context.Background(), *data)
+		if err != nil {
+			_, _ = fmt.Fprintln(errOut, err)
 			return 1
+		}
+		if !paired {
+			_, _ = fmt.Fprintln(errOut, notPairedHint)
+			alertNotPaired(cfg, errOut)
+			return exitNotPaired
 		}
 		fallthrough
 	case "pair":
@@ -116,11 +125,21 @@ func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) er
 	if pairing {
 		_, _ = fmt.Fprintln(out, "Scan the QR code from WhatsApp → Linked Devices.")
 	}
-	err = client.Run(ctx, handler, pairing)
-	if pairing && err == nil {
-		_, _ = fmt.Fprintln(out, "Paired. Capture is running.")
+	return client.Run(ctx, handler, pairing)
+}
+
+const notPairedHint = "not paired: run `archiver pair` in a terminal first"
+
+// alertNotPaired sends one ntfy alert when configured; a send failure is reported, not fatal.
+func alertNotPaired(cfg *config.Config, errOut io.Writer) {
+	if cfg.Alerts.Ntfy == nil {
+		return
 	}
-	return err
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	if err := health.NewNtfy(cfg.Alerts.Ntfy).Notify(ctx, "WhatsApp Archiver is not paired", notPairedHint); err != nil {
+		_, _ = fmt.Fprintln(errOut, "ntfy alert failed:", err)
+	}
 }
 func printStatus(cfg *config.Config, out io.Writer) error {
 	st, err := store.Open(filepath.Join(cfg.DataDir, "archive.db"))

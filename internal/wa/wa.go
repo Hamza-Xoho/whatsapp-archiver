@@ -119,15 +119,24 @@ func (c *Client) Run(ctx context.Context, h func(any), pairing bool) error {
 	ctl := make(chan any, 8)
 	c.client.AddEventHandler(func(evt any) {
 		h(evt)
-		switch evt.(type) {
-		case *events.Connected, *events.ClientOutdated, *events.TemporaryBan, *events.LoggedOut, *events.StreamReplaced:
-			select {
-			case ctl <- evt:
-			default:
-			}
+		if line := pairLine(evt); pairing && line != "" {
+			_, _ = fmt.Fprintln(os.Stdout, line)
 		}
+		forwardControl(ctl, evt)
 	})
 	return c.reconnect(ctx, ctl)
+}
+
+// forwardControl hands the reconnect loop the events its policy acts on, never blocking the handler.
+func forwardControl(ctl chan<- any, evt any) {
+	switch evt.(type) {
+	case *events.Connected, *events.ClientOutdated, *events.TemporaryBan, *events.LoggedOut, *events.StreamReplaced,
+		*events.ConnectFailure, *events.CATRefreshError:
+		select {
+		case ctl <- evt:
+		default:
+		}
+	}
 }
 
 // reconnect feeds control events to the reconnect policy and carries out its actions.
@@ -213,8 +222,10 @@ func printQR(ctx context.Context, ch <-chan whatsmeow.QRChannelItem) {
 			if !ok {
 				return
 			}
-			if item.Event == "code" {
+			if item.Event == whatsmeow.QRChannelEventCode {
 				qrterminal.GenerateHalfBlock(item.Code, qrterminal.L, os.Stdout)
+			} else if line := pairLine(item); line != "" {
+				_, _ = fmt.Fprintln(os.Stdout, line)
 			}
 		}
 	}
