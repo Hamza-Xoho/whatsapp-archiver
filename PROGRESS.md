@@ -321,3 +321,35 @@ Per the brief, only a ready-to-fill acceptance checklist will be produced.
 - Minors: `.golangci.yml` rerequest `path:` is anchored; `SendMediaRetryReceipt` is in forbidigo's explicit list (excluded only for rerequest.go); AGENTS.md CON-1 notes the reflection limit.
 - Deviation: the prefix rule requires a word boundary (name equals the prefix or the next letter is upper case), not a literal "starts with", because fields such as `info.Sender` would otherwise be hits. `TestScanFlagsEveryBannedPrefixMethod` enumerates the pinned whatsmeow methods, so a future name that breaks the boundary fails that test.
 - Known, unguarded limit: reflection (`reflect.ValueOf(client).MethodByName("SetStatusMessage")`) is not caught by archtest or forbidigo. A prefix hit on a non-client receiver in wa (a field named `Sender...`/`Update...`) fails safe: rename it.
+
+## Phase 0 fixes — H14 (record / replay / scrub, DumpRaw and the synthetic golden)
+
+### Golden review: `internal/ingest/testdata/golden/synthetic.sql` (reviewed before `-update`)
+
+Fixtures: `internal/ingest/testdata/events/synthetic/` (17 files) were written by `TestSyntheticEventsMatchGenerator -update` from `syntheticEvents()` (Go-constructed, fake numbers only: group `10000000100@g.us`; Alice `20000000001@lid`/`10000000001@s.whatsapp.net`, Bob `...02`, Carol `...03`, Dave `20000000004@lid`). Every file and every decoded protobuf was read: 01 joined_group (owner Alice, name "Synthetic Group", 2 participants), 02 text, 03 reply (stanza SYN-TEXT-1, quoted text), 04 edit (EditedMessage → MESSAGE_EDIT of SYN-TEXT-1, "Hello, edited"), 05 revoke of SYN-REPLY-1, 06 reaction 👍 on SYN-TEXT-1, 07 image (jpeg, caption, 2048 bytes, no keys), 08 undecryptable SYN-GAP-1, 09 SYN-GAP-1 resent, 10 history chunk (INITIAL_BOOTSTRAP, order 1, progress 100, one mapping Carol PN→LID, one DM message SYN-HIST-1 a day earlier, push name Carol), 11 group rename, 12 Dave added, 13/14 archive on/off, 15 mute (end 1760004400000), 16 pin, 17 media retry with error code 2 for unknown SYN-UNKNOWN-1. No real number, no key bytes.
+
+The dump was produced with `archiver replay internal/ingest/testdata/events/synthetic --data <tmp> --dump` (same pipeline as the test; "replayed 17 events", one history INFO log line, no errors) and read line by line:
+
+1. `chats` `10000000100@g.us` name '' — the group row; the joined/rename names live in `chat_events` (FromChatEvent sets only the JID; existing behaviour, not changed here).
+2. `chats` `20000000003@lid` 'Carol' — the history conversation name.
+3–5. `participants` Alice, Bob, Carol with their push names (H14 d: push name survives replay).
+6–7. `id_mappings` Alice and Bob LID↔PN, source `message_alt` (H14 d: alt JIDs survive replay); `first_seen` (a receive time) omitted.
+8. `id_mappings` Carol, source `history` (the chunk's mapping list).
+9. `messages` SYN-GAP-1, Bob, ts 1760000420, the resent text, raw = conversation proto.
+10. `messages` SYN-IMAGE-1, Alice, ts 1760000360, caption as text, media_type image, raw = the image proto (media row not dumped: replay's media queue is a no-op).
+11. `messages` SYN-REPLY-1, Bob, quoted_id SYN-TEXT-1 (stays after its revoke: raw rows are insert-only).
+12. `messages` SYN-TEXT-1, Alice, ts 1760000060 (H14 d: the WhatsApp timestamp, not year 1).
+13. `messages` `20000000003@lid` SYN-HIST-1, sender = the DM chat (not from me), ts 1759913600, source history.
+14. `message_events` undecryptable SYN-GAP-1 (closed by line 9 via `open_gaps`), value '' (DecryptFailShow).
+15. `message_events` revoke of SYN-REPLY-1 by Bob, raw = the protocol message.
+16. `message_events` edit of SYN-TEXT-1, new_text and value 'Hello, edited' (as `event()` writes both), raw = the EditedMessage wrapper.
+17. `message_events` reaction 👍 on SYN-TEXT-1 by Bob.
+18. `chat_events` mute, ts 1760000800, value with mute_end, raw `0801 10..`.
+19–20. `chat_events` archive off (1760000760, raw `0800`) and on (1760000700, raw `0801`): two distinct rows.
+21. `chat_events` pin, ts 1760000900.
+22. `chat_events` group_info rename by Alice, ts 1760000600.
+23. `chat_events` group_info joined group, ts 0 (JoinedGroup has no WhatsApp timestamp), value notify/type/name/created.
+24. `chat_events` participants: Dave joined, ts 1760000660.
+25. `history_sync_chunks` content-hash id, INITIAL_BOOTSTRAP, order 1, progress 100, 1 conversation, 1 message, oldest = newest = 1759913600; `received_at` omitted.
+
+Rows are ordered by table (chats, participants, id_mappings, messages, message_events, chat_events, history_sync_chunks) then by every column. The media retry (17) writes nothing (no-op queue). Verdict: every line matches the scenario; the golden may be created.
