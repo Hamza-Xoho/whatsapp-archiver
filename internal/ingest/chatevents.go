@@ -1,10 +1,12 @@
 package ingest
 
 import (
+	"cmp"
 	"encoding/json"
 	"strconv"
 	"time"
 
+	"go.mau.fi/whatsmeow/proto/waSyncAction"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
@@ -77,15 +79,18 @@ func FromChatEvent(evt any, received time.Time) (Result, bool) {
 		payload = groupChange{Notify: e.Notify, Sender: jidString(sender), Reason: e.Reason, Type: e.Type, Name: &e.Name}
 	case *events.Archive:
 		chat, ts = e.JID, e.Timestamp
-		payload = stateChange{Action: "archive", Archived: e.Action.Archived, FromFullSync: e.FromFullSync}
+		a := cmp.Or(e.Action, &waSyncAction.ArchiveChatAction{}) // the dispatched action may be missing
+		payload = stateChange{Action: "archive", Archived: a.Archived, FromFullSync: e.FromFullSync}
 		raw, _ = proto.Marshal(e.Action)
 	case *events.Mute:
 		chat, ts = e.JID, e.Timestamp
-		payload = stateChange{Action: "mute", Muted: e.Action.Muted, MuteEnd: e.Action.MuteEndTimestamp, FromFullSync: e.FromFullSync}
+		a := cmp.Or(e.Action, &waSyncAction.MuteAction{})
+		payload = stateChange{Action: "mute", Muted: a.Muted, MuteEnd: a.MuteEndTimestamp, FromFullSync: e.FromFullSync}
 		raw, _ = proto.Marshal(e.Action)
 	case *events.Pin:
 		chat, ts = e.JID, e.Timestamp
-		payload = stateChange{Action: "pin", Pinned: e.Action.Pinned, FromFullSync: e.FromFullSync}
+		a := cmp.Or(e.Action, &waSyncAction.PinAction{})
+		payload = stateChange{Action: "pin", Pinned: a.Pinned, FromFullSync: e.FromFullSync}
 		raw, _ = proto.Marshal(e.Action)
 	default:
 		return Result{}, false
