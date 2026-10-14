@@ -207,3 +207,69 @@ func TestHandleLogsIngestErrors(t *testing.T) {
 		t.Fatalf("log=%q", out)
 	}
 }
+
+// flakyAliases fails the first `failures` lookups, then answers with `answer`.
+type flakyAliases struct {
+	failures, calls int
+	answer          []string
+}
+
+func (a *flakyAliases) lookup(string) ([]string, error) {
+	a.calls++
+	if a.failures > 0 {
+		a.failures--
+		return nil, errors.New("database is locked")
+	}
+	return a.answer, nil
+}
+
+// Privacy: the exclusion filter fails closed. A failed alias lookup is retried until it answers; it never keeps an
+// event of an excluded chat that is seen under its other alias, and never drops a kept one. WriteFailed fires once.
+func TestAliasLookupErrorNeverLeaksExcludedChat(t *testing.T) {
+	cases := []struct {
+		name     string
+		answer   []string
+		wantKept int
+	}{
+		{"excluded alias", []string{"9665@s.whatsapp.net"}, 0},
+		{"no excluded alias", nil, 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name+"/live", func(t *testing.T) {
+			st := testkit.Store(t)
+			a := &flakyAliases{failures: 7, answer: c.answer}
+			h := &healthFake{}
+			ft := newFakeTime()
+			p := ingest.NewPipeline(st, ingest.NewFilter([]string{"9665@s.whatsapp.net"}, a.lookup), &queueFake{}, h, quiet()).WithClock(ft.clock.Now, ft.sleep)
+			p.Handle(messageEvent("123@lid", "A", text("secret")))
+			if n := messageCount(t, st); n != c.wantKept {
+				t.Fatalf("messages stored=%d, want %d", n, c.wantKept)
+			}
+			if chats := rows(t, st, "SELECT jid FROM chats"); len(chats) != c.wantKept {
+				t.Fatalf("chats=%v", chats)
+			}
+			if a.calls != 8 || h.failed != 1 {
+				t.Fatalf("alias lookups=%d WriteFailed=%d", a.calls, h.failed)
+			}
+		})
+		t.Run(c.name+"/history", func(t *testing.T) {
+			st := testkit.Store(t)
+			a := &flakyAliases{failures: 7, answer: c.answer}
+			h := &healthFake{}
+			ft := newFakeTime()
+			p := ingest.NewPipeline(st, ingest.NewFilter([]string{"9665@s.whatsapp.net"}, a.lookup), &queueFake{}, h, quiet()).WithClock(ft.clock.Now, ft.sleep).WithHistoryParser(historyParser())
+			hs := history("123@lid", "A", 5)
+			hs.Data.Conversations[0].Name = proto.String("Private Name")
+			stored, _, err := p.ImportHistory(t.Context(), hs)
+			if err != nil || stored != c.wantKept {
+				t.Fatalf("stored=%d err=%v", stored, err)
+			}
+			if chats := rows(t, st, "SELECT jid FROM chats"); len(chats) != c.wantKept {
+				t.Fatalf("chats=%v", chats)
+			}
+			if n := messageCount(t, st); n != c.wantKept || h.failed != 1 || a.calls < 8 {
+				t.Fatalf("messages=%d WriteFailed=%d alias lookups=%d", n, h.failed, a.calls)
+			}
+		})
+	}
+}
