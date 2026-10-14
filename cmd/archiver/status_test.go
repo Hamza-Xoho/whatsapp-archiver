@@ -186,6 +186,18 @@ func TestStatusWithoutHealthJSON(t *testing.T) {
 	}
 }
 
+func TestStatusPrintsDashForUnknownTimesAndVersion(t *testing.T) {
+	dir := seedFolder(t)
+	mustDo(t, os.Remove(filepath.Join(dir, "health.json")))
+	_, out, _ := runCmd(t, "status", "--data", dir)
+	got := lines(out)
+	for _, want := range []string{"client version: -", "last event: -", "phone last active: -", "recovered panics: 0"} {
+		if !slices.Contains(got, want) {
+			t.Errorf("missing line %q in\n%s", want, out)
+		}
+	}
+}
+
 func TestStatusEmptyTimeZoneIsUTCAndInvalidIsAnError(t *testing.T) {
 	dir := seedFolder(t)
 	writeFile(t, filepath.Join(dir, "config.yaml"), "time_zone: \"\"\n")

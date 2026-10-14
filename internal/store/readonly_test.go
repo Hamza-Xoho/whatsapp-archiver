@@ -195,3 +195,24 @@ func TestCoverageIsCompleteWhenAnyChunkReachedHundred(t *testing.T) {
 		})
 	}
 }
+
+// Joining a live (WAL) archive must not make writes possible either.
+func TestOpenReadOnlyStoreRejectsWritesWhileTheWriterIsOpen(t *testing.T) {
+	w := open(t)
+	ctx := context.Background()
+	if _, err := w.InsertMessage(ctx, message("g@g.us", "A", time.Unix(5, 0))); err != nil {
+		t.Fatal(err)
+	}
+	r, err := store.OpenReadOnly(w.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = r.Close() }()
+	if ok, err := r.InsertMessage(ctx, message("g@g.us", "B", time.Unix(6, 0))); err == nil || ok {
+		t.Fatalf("InsertMessage inserted=%v err=%v", ok, err)
+	}
+	stats, err := w.ChatStats(ctx)
+	if err != nil || len(stats) != 1 || stats[0].MessageCount != 1 {
+		t.Fatalf("stats=%+v err=%v", stats, err)
+	}
+}
