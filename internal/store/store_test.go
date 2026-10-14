@@ -1,0 +1,149 @@
+package store_test
+
+import (
+	"context"
+	"path/filepath"
+	"testing"
+	"time"
+
+	"whatsapp-archiver/internal/store"
+)
+
+func TestInsertMessageIsIdempotent(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	m := message("120363@g.us", "ABC", time.Unix(10, 0))
+	ok1, err := s.InsertMessage(ctx, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok2, err := s.InsertMessage(ctx, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok1 || ok2 {
+		t.Fatalf("inserted=%v,%v", ok1, ok2)
+	}
+	stats, _ := s.ChatStats(ctx)
+	if len(stats) != 1 || stats[0].MessageCount != 1 {
+		t.Fatalf("stats=%+v", stats)
+	}
+}
+
+func TestInsertMessageUnderKnownAliasIsDuplicate(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	_, _ = s.InsertMessage(ctx, message("9665@s.whatsapp.net", "X", time.Unix(1, 0)))
+	_, _ = s.InsertIDMapping(ctx, store.IDMapping{LID: "1234@lid", PN: "9665@s.whatsapp.net", Source: "test", FirstSeen: time.Unix(2, 0)})
+	ok, err := s.InsertMessage(ctx, message("1234@lid", "X", time.Unix(3, 0)))
+	if err != nil || ok {
+		t.Fatalf("inserted=%v err=%v", ok, err)
+	}
+}
+
+func TestAliasLearnedLaterCollapsesInView(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	_, _ = s.InsertMessage(ctx, message("9665@s.whatsapp.net", "X", time.Unix(1, 0)))
+	_, _ = s.InsertMessage(ctx, message("1234@lid", "X", time.Unix(2, 0)))
+	_, _ = s.InsertIDMapping(ctx, store.IDMapping{LID: "1234@lid", PN: "9665@s.whatsapp.net", Source: "test"})
+	stats, err := s.ChatStats(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stats) != 1 || stats[0].MessageCount != 1 {
+		t.Fatalf("stats=%+v", stats)
+	}
+}
+
+func TestEventForUnknownMessageIsStored(t *testing.T) {
+	s := open(t)
+	ok, err := s.InsertEvent(context.Background(), store.MessageEvent{ChatJID: "120363@g.us", TargetID: "NOPE", Kind: "edit", EventID: "E1", NewText: "x"})
+	if err != nil || !ok {
+		t.Fatalf("inserted=%v err=%v", ok, err)
+	}
+}
+
+func TestIDMappingIsIdempotent(t *testing.T) {
+	s := open(t)
+	m := store.IDMapping{LID: "1@lid", PN: "1@s.whatsapp.net"}
+	a, _ := s.InsertIDMapping(context.Background(), m)
+	b, _ := s.InsertIDMapping(context.Background(), m)
+	if !a || b {
+		t.Fatalf("inserted=%v,%v", a, b)
+	}
+}
+
+func TestOpenGapClosesWhenMessageArrives(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	_, _ = s.InsertEvent(ctx, store.MessageEvent{ChatJID: "1@lid", TargetID: "X", Kind: "undecryptable", EventID: "gap-X"})
+	if n, _ := s.OpenGapCount(ctx); n != 1 {
+		t.Fatalf("gaps=%d", n)
+	}
+	_, _ = s.InsertMessage(ctx, message("1@lid", "X", time.Unix(1, 0)))
+	if n, _ := s.OpenGapCount(ctx); n != 0 {
+		t.Fatalf("gaps=%d", n)
+	}
+}
+
+func TestWriteErrorIsReturned(t *testing.T) {
+	s := open(t)
+	_ = s.Close()
+	if _, err := s.InsertMessage(context.Background(), message("1@lid", "X", time.Time{})); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestChatStatsOldestNewest(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	for i, sec := range []int64{2, 1, 3} {
+		_, _ = s.InsertMessage(ctx, message("g@g.us", string(rune('A'+i)), time.Unix(sec, 0)))
+	}
+	stats, _ := s.ChatStats(ctx)
+	if len(stats) != 1 || stats[0].Oldest != 1 || stats[0].Newest != 3 || stats[0].MessageCount != 3 {
+		t.Fatalf("stats=%+v", stats)
+	}
+}
+
+func TestTimestampStoredAsGiven(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	_, _ = s.InsertMessage(ctx, message("g@g.us", "future", time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)))
+	_, _ = s.InsertMessage(ctx, message("g@g.us", "zero", time.Unix(0, 0)))
+	stats, _ := s.ChatStats(ctx)
+	if stats[0].Oldest != 0 || stats[0].Newest != 4070908800 {
+		t.Fatalf("stats=%+v", stats)
+	}
+}
+
+func TestReopenRunsMigrationsOnce(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "archive.db")
+	s, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = s.Close()
+	s, err = store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if n, err := s.SchemaVersionCount(context.Background()); err != nil || n != 1 {
+		t.Fatalf("count=%d err=%v", n, err)
+	}
+}
+
+func open(t *testing.T) *store.Store {
+	t.Helper()
+	s, err := store.Open(filepath.Join(t.TempDir(), "archive.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	return s
+}
+func message(chat, id string, ts time.Time) store.Message {
+	return store.Message{ChatJID: chat, ID: id, SenderJID: "sender@lid", Timestamp: ts.Unix(), ReceivedAt: ts.Unix(), Source: "live", Text: id, RawProto: []byte(id)}
+}
