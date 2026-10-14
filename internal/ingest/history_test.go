@@ -179,8 +179,8 @@ func TestLateChunkAfterCompleteIsStored(t *testing.T) {
 	_, _, _ = p.ImportHistory(t.Context(), a)
 	_, _, _ = p.ImportHistory(t.Context(), b)
 	coverage, err := st.HistoryCoverage(t.Context())
-	if err != nil || coverage.Chunks != 2 {
-		t.Fatalf("coverage=%+v err=%v", coverage, err)
+	if err != nil || coverage.Chunks != 2 || messageCount(t, st) != 2 {
+		t.Fatalf("coverage=%+v err=%v messages=%d", coverage, err, messageCount(t, st))
 	}
 }
 func TestEmptyOrPartialChunkDoesNotPanic(t *testing.T) {
@@ -231,5 +231,52 @@ func TestExcludedChatNameNotStoredFromHistory(t *testing.T) {
 	}
 	if chats, messages := rows(t, st, "SELECT jid,name FROM chats"), rows(t, st, "SELECT id FROM messages"); len(chats)+len(messages) != 0 {
 		t.Fatalf("chats=%v messages=%v", chats, messages)
+	}
+}
+
+// H9: two different chunks with the same type, order, progress and size, received at the same instant, are both
+// in the ledger.
+func TestTwoDistinctChunksWithSameProgressAreBothLedgered(t *testing.T) {
+	st := testkit.Store(t)
+	p := newPipeline(st, &queueFake{}, &healthFake{}, newFakeTime())
+	for _, hs := range []*events.HistorySync{history("g@g.us", "A", 100), history("g@g.us", "B", 100)} {
+		if _, _, err := p.ImportHistory(t.Context(), hs); err != nil {
+			t.Fatal(err)
+		}
+	}
+	coverage, err := st.HistoryCoverage(t.Context())
+	if err != nil || coverage.Chunks != 2 || messageCount(t, st) != 2 {
+		t.Fatalf("coverage=%+v err=%v messages=%d", coverage, err, messageCount(t, st))
+	}
+}
+
+// A DM held under both its LID and phone forms in one chunk is one conversation once the chunk's mappings are stored.
+func TestMappingsInChunkApplyToItsMessages(t *testing.T) {
+	st := testkit.Store(t)
+	p := historyPipeline(st, ingest.NewFilter(nil, nil), &queueFake{})
+	hs := chunk("1234@lid", webMsg("A", "", false, text("a")))
+	hs.Data.Conversations = append(hs.Data.Conversations, chunk("9665@s.whatsapp.net", webMsg("B", "", false, text("b"))).Data.Conversations...)
+	hs.Data.PhoneNumberToLidMappings = []*waHistorySync.PhoneNumberToLIDMapping{{LidJID: proto.String("1234@lid"), PnJID: proto.String("9665@s.whatsapp.net")}}
+	if stored, _, err := p.ImportHistory(t.Context(), hs); err != nil || stored != 2 {
+		t.Fatalf("stored=%d err=%v", stored, err)
+	}
+	stats, err := st.ChatStats(t.Context())
+	if err != nil || len(stats) != 1 || stats[0].MessageCount != 2 {
+		t.Fatalf("stats=%+v err=%v", stats, err)
+	}
+}
+
+// Far-future and zero history timestamps are stored exactly as given, and the import carries on past them.
+func TestNonsensicalHistoryTimestampStoredAsGiven(t *testing.T) {
+	st := testkit.Store(t)
+	p := historyPipeline(st, ingest.NewFilter(nil, nil), &queueFake{})
+	future, zero, normal := webMsg("FUTURE", "3@lid", false, text("f")), webMsg("ZERO", "3@lid", false, text("z")), webMsg("NORMAL", "3@lid", false, text("n"))
+	future.MessageTimestamp = proto.Uint64(4070908800)
+	zero.MessageTimestamp = proto.Uint64(0)
+	if stored, _, err := p.ImportHistory(t.Context(), chunk("g@g.us", future, zero, normal)); err != nil || stored != 3 {
+		t.Fatalf("stored=%d err=%v", stored, err)
+	}
+	if got := strings.Join(rows(t, st, "SELECT id,ts FROM messages ORDER BY id"), ","); got != "FUTURE|4070908800,NORMAL|10,ZERO|0" {
+		t.Fatalf("messages=%s", got)
 	}
 }

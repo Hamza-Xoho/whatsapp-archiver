@@ -249,3 +249,26 @@ func TestOtherSQLiteErrorIsNotAConstraintError(t *testing.T) {
 		t.Fatalf("err=%v", err)
 	}
 }
+
+func TestCoverageReportsOldestPerChat(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	for _, m := range []store.Message{message("g@g.us", "A", time.Unix(5, 0)), message("g@g.us", "B", time.Unix(3, 0)), message("9665@s.whatsapp.net", "C", time.Unix(7, 0)), message("1234@lid", "D", time.Unix(4, 0)), message("g@g.us", "LIVE", time.Unix(1, 0))} {
+		if m.ID != "LIVE" {
+			m.Source = "history"
+		}
+		if _, err := s.InsertMessage(ctx, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, _ = s.InsertIDMapping(ctx, store.IDMapping{LID: "1234@lid", PN: "9665@s.whatsapp.net"})
+	for i, progress := range []int{40, 90} {
+		if err := s.InsertHistoryChunk(ctx, store.HistoryChunk{ID: string(rune('a' + i)), Progress: progress, ReceivedAt: int64(100 + i)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c, err := s.HistoryCoverage(ctx)
+	if err != nil || c.Chunks != 2 || c.LastProgress != 90 || c.LastChunkTime != 101 || len(c.OldestByChat) != 2 || c.OldestByChat["g@g.us"] != 3 || c.OldestByChat["1234@lid"] != 4 {
+		t.Fatalf("coverage=%+v err=%v", c, err)
+	}
+}
