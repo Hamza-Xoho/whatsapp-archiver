@@ -134,7 +134,7 @@ func contextFields(m *store.Message, c *waE2E.ContextInfo) {
 }
 func setMedia(r *Result, kind, mime string, size uint64) {
 	r.Message.MediaType = kind
-	r.Media = &store.Media{ChatJID: r.Message.ChatJID, MessageID: r.Message.ID, SenderJID: r.Message.SenderJID, Source: r.Message.Source, Type: kind, MIME: mime, DeclaredSize: int64(size), RawProto: r.Message.RawProto, State: "pending", MessageTimestamp: r.Message.Timestamp}
+	r.Media = &store.Media{ChatJID: r.Message.ChatJID, MessageID: r.Message.ID, SenderJID: r.Message.SenderJID, Source: r.Message.Source, Type: kind, MIME: mime, DeclaredSize: int64(size), RawProto: r.Message.RawProto, State: "pending", MessageTimestamp: r.Message.Timestamp, FromMe: r.FromMe}
 }
 func event(r *Result, target, kind, value string) *store.MessageEvent {
 	return &store.MessageEvent{ChatJID: r.Chat.JID, TargetID: target, Kind: kind, EventID: stableID(r.Chat.JID, target, kind, string(r.Message.RawProto)), SenderJID: r.Sender.JID, Timestamp: r.Message.Timestamp, ReceivedAt: r.Received.Unix(), NewText: value, Value: value, RawProto: r.Message.RawProto}

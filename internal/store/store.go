@@ -58,6 +58,7 @@ type Media struct {
 	ChatJID, MessageID, SenderJID, Source, Type, MIME, Path, SHA256, State, Reason, RetryDirectPath string
 	DeclaredSize, UpdatedAt, MessageTimestamp                                                       int64
 	Attempts                                                                                        int
+	FromMe                                                                                          bool
 	RawProto                                                                                        []byte
 }
 type ChatStat struct {
@@ -202,7 +203,7 @@ func (s *Store) InsertMedia(ctx context.Context, m Media) error {
 	if m.RawProto == nil {
 		m.RawProto = []byte{}
 	}
-	_, err := s.write.ExecContext(ctx, `INSERT INTO media(chat_jid,message_id,sender_jid,source,type,mime,declared_size,raw_proto,path,sha256,state,reason,attempts,retry_direct_path,updated_at,message_ts) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(chat_jid,message_id) DO NOTHING`, m.ChatJID, m.MessageID, m.SenderJID, m.Source, m.Type, m.MIME, m.DeclaredSize, m.RawProto, m.Path, m.SHA256, m.State, m.Reason, m.Attempts, m.RetryDirectPath, m.UpdatedAt, m.MessageTimestamp)
+	_, err := s.write.ExecContext(ctx, `INSERT INTO media(chat_jid,message_id,sender_jid,source,type,mime,declared_size,raw_proto,path,sha256,state,reason,attempts,retry_direct_path,updated_at,message_ts,from_me) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(chat_jid,message_id) DO NOTHING`, m.ChatJID, m.MessageID, m.SenderJID, m.Source, m.Type, m.MIME, m.DeclaredSize, m.RawProto, m.Path, m.SHA256, m.State, m.Reason, m.Attempts, m.RetryDirectPath, m.UpdatedAt, m.MessageTimestamp, m.FromMe)
 	return classify(err)
 }
 func (s *Store) SetMediaState(ctx context.Context, chat, id, state, reason string) error {
@@ -211,7 +212,7 @@ func (s *Store) SetMediaState(ctx context.Context, chat, id, state, reason strin
 }
 func (s *Store) MediaByID(ctx context.Context, chat, id string) (Media, error) {
 	var m Media
-	err := s.read.QueryRowContext(ctx, `SELECT chat_jid,message_id,sender_jid,source,type,mime,declared_size,raw_proto,path,sha256,state,reason,attempts,retry_direct_path,updated_at,message_ts FROM media WHERE chat_jid=? AND message_id=?`, chat, id).Scan(&m.ChatJID, &m.MessageID, &m.SenderJID, &m.Source, &m.Type, &m.MIME, &m.DeclaredSize, &m.RawProto, &m.Path, &m.SHA256, &m.State, &m.Reason, &m.Attempts, &m.RetryDirectPath, &m.UpdatedAt, &m.MessageTimestamp)
+	err := s.read.QueryRowContext(ctx, `SELECT chat_jid,message_id,sender_jid,source,type,mime,declared_size,raw_proto,path,sha256,state,reason,attempts,retry_direct_path,updated_at,message_ts,from_me FROM media WHERE chat_jid=? AND message_id=?`, chat, id).Scan(&m.ChatJID, &m.MessageID, &m.SenderJID, &m.Source, &m.Type, &m.MIME, &m.DeclaredSize, &m.RawProto, &m.Path, &m.SHA256, &m.State, &m.Reason, &m.Attempts, &m.RetryDirectPath, &m.UpdatedAt, &m.MessageTimestamp, &m.FromMe)
 	return m, err
 }
 func (s *Store) ClaimMedia(ctx context.Context) (*Media, error) {
@@ -221,7 +222,7 @@ func (s *Store) ClaimMedia(ctx context.Context) (*Media, error) {
 	}
 	defer func() { _ = tx.Rollback() }()
 	var m Media
-	err = tx.QueryRowContext(ctx, `SELECT chat_jid,message_id,sender_jid,source,type,mime,declared_size,raw_proto,path,sha256,state,reason,attempts,retry_direct_path,updated_at,message_ts FROM media WHERE state='pending' ORDER BY CASE source WHEN 'live' THEN 0 ELSE 1 END,message_ts DESC LIMIT 1`).Scan(&m.ChatJID, &m.MessageID, &m.SenderJID, &m.Source, &m.Type, &m.MIME, &m.DeclaredSize, &m.RawProto, &m.Path, &m.SHA256, &m.State, &m.Reason, &m.Attempts, &m.RetryDirectPath, &m.UpdatedAt, &m.MessageTimestamp)
+	err = tx.QueryRowContext(ctx, `SELECT chat_jid,message_id,sender_jid,source,type,mime,declared_size,raw_proto,path,sha256,state,reason,attempts,retry_direct_path,updated_at,message_ts,from_me FROM media WHERE state='pending' ORDER BY CASE source WHEN 'live' THEN 0 ELSE 1 END,message_ts DESC LIMIT 1`).Scan(&m.ChatJID, &m.MessageID, &m.SenderJID, &m.Source, &m.Type, &m.MIME, &m.DeclaredSize, &m.RawProto, &m.Path, &m.SHA256, &m.State, &m.Reason, &m.Attempts, &m.RetryDirectPath, &m.UpdatedAt, &m.MessageTimestamp, &m.FromMe)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}

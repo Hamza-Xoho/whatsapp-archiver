@@ -124,8 +124,14 @@ func (q *Queue) download(ctx context.Context, m *store.Media) {
 		m.State = "expired"
 		m.Reason = err.Error()
 		if q.limiter.Allow() {
-			if e := q.down.RequestMediaRetry(ctx, wa.MediaRef{}, m.RawProto); e == nil {
+			ref := wa.MediaRef{Chat: m.ChatJID, Sender: m.SenderJID, ID: m.MessageID, FromMe: m.FromMe}
+			switch e := q.down.RequestMediaRetry(ctx, ref, m.RawProto); {
+			case e == nil:
 				m.State = "retry_requested"
+			case errors.Is(e, wa.ErrNoMediaKey):
+				m.State, m.Reason = "failed", wa.ErrNoMediaKey.Error()
+			default:
+				q.log.Warn("media re-upload request failed", "chat", m.ChatJID, "id", m.MessageID, "err", e)
 			}
 		}
 		q.save(ctx, *m)
@@ -164,6 +170,7 @@ func (q *Queue) OnRetry(ctx context.Context, e *events.MediaRetry) {
 	}
 	path, err := q.down.ApplyMediaRetry(e, m.RawProto)
 	if err != nil {
+		q.log.Warn("media retry answer not applied", "chat", m.ChatJID, "id", m.MessageID, "err", err)
 		return
 	}
 	m.RetryDirectPath = path

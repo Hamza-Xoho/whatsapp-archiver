@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS media (
   retry_direct_path TEXT NOT NULL DEFAULT '',
   updated_at INTEGER NOT NULL DEFAULT 0,
   message_ts INTEGER NOT NULL DEFAULT 0,
+  from_me INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (chat_jid, message_id)
 );
 
