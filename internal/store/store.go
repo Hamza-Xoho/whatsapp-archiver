@@ -210,9 +210,19 @@ func (s *Store) SetMediaState(ctx context.Context, chat, id, state, reason strin
 	_, err := s.write.ExecContext(ctx, `UPDATE media SET state=?,reason=?,updated_at=? WHERE chat_jid=? AND message_id=?`, state, reason, time.Now().Unix(), chat, id)
 	return err
 }
+
+const mediaColumns = `chat_jid,message_id,sender_jid,source,type,mime,declared_size,raw_proto,path,sha256,state,reason,attempts,retry_direct_path,updated_at,message_ts,from_me`
+
+// mediaOrder is the queue order: live before history, newest first.
+const mediaOrder = `CASE source WHEN 'live' THEN 0 ELSE 1 END,message_ts DESC`
+
+func (m *Media) fields() []any {
+	return []any{&m.ChatJID, &m.MessageID, &m.SenderJID, &m.Source, &m.Type, &m.MIME, &m.DeclaredSize, &m.RawProto, &m.Path, &m.SHA256, &m.State, &m.Reason, &m.Attempts, &m.RetryDirectPath, &m.UpdatedAt, &m.MessageTimestamp, &m.FromMe}
+}
+
 func (s *Store) MediaByID(ctx context.Context, chat, id string) (Media, error) {
 	var m Media
-	err := s.read.QueryRowContext(ctx, `SELECT chat_jid,message_id,sender_jid,source,type,mime,declared_size,raw_proto,path,sha256,state,reason,attempts,retry_direct_path,updated_at,message_ts,from_me FROM media WHERE chat_jid=? AND message_id=?`, chat, id).Scan(&m.ChatJID, &m.MessageID, &m.SenderJID, &m.Source, &m.Type, &m.MIME, &m.DeclaredSize, &m.RawProto, &m.Path, &m.SHA256, &m.State, &m.Reason, &m.Attempts, &m.RetryDirectPath, &m.UpdatedAt, &m.MessageTimestamp, &m.FromMe)
+	err := s.read.QueryRowContext(ctx, `SELECT `+mediaColumns+` FROM media WHERE chat_jid=? AND message_id=?`, chat, id).Scan(m.fields()...)
 	return m, err
 }
 func (s *Store) ClaimMedia(ctx context.Context) (*Media, error) {
@@ -222,7 +232,7 @@ func (s *Store) ClaimMedia(ctx context.Context) (*Media, error) {
 	}
 	defer func() { _ = tx.Rollback() }()
 	var m Media
-	err = tx.QueryRowContext(ctx, `SELECT chat_jid,message_id,sender_jid,source,type,mime,declared_size,raw_proto,path,sha256,state,reason,attempts,retry_direct_path,updated_at,message_ts,from_me FROM media WHERE state='pending' ORDER BY CASE source WHEN 'live' THEN 0 ELSE 1 END,message_ts DESC LIMIT 1`).Scan(&m.ChatJID, &m.MessageID, &m.SenderJID, &m.Source, &m.Type, &m.MIME, &m.DeclaredSize, &m.RawProto, &m.Path, &m.SHA256, &m.State, &m.Reason, &m.Attempts, &m.RetryDirectPath, &m.UpdatedAt, &m.MessageTimestamp, &m.FromMe)
+	err = tx.QueryRowContext(ctx, `SELECT `+mediaColumns+` FROM media WHERE state='pending' ORDER BY `+mediaOrder+` LIMIT 1`).Scan(m.fields()...)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -243,8 +253,29 @@ func (s *Store) UpdateMedia(ctx context.Context, m Media) error {
 	return err
 }
 func (s *Store) ResetMediaOnStart(ctx context.Context, now time.Time) error {
-	_, err := s.write.ExecContext(ctx, `UPDATE media SET state='pending',reason='' WHERE state='downloading';UPDATE media SET state='failed',reason='no re-upload' WHERE state='retry_requested' AND updated_at<?`, now.Add(-24*time.Hour).Unix())
+	if _, err := s.write.ExecContext(ctx, `UPDATE media SET state='pending',reason='' WHERE state='downloading';`); err != nil {
+		return err
+	}
+	return s.FailStaleRetries(ctx, now)
+}
+
+// FailStaleRetries fails re-upload requests that have had no answer for 24 hours.
+func (s *Store) FailStaleRetries(ctx context.Context, now time.Time) error {
+	_, err := s.write.ExecContext(ctx, `UPDATE media SET state='failed',reason='no re-upload' WHERE state='retry_requested' AND updated_at<?`, now.Add(-24*time.Hour).Unix())
 	return err
+}
+
+// NextExpiredMedia returns the expired row to request a re-upload for next (live first, newest first), or nil.
+func (s *Store) NextExpiredMedia(ctx context.Context) (*Media, error) {
+	var m Media
+	err := s.read.QueryRowContext(ctx, `SELECT `+mediaColumns+` FROM media WHERE state='expired' ORDER BY `+mediaOrder+` LIMIT 1`).Scan(m.fields()...)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &m, nil
 }
 
 func (s *Store) Aliases(ctx context.Context, jid string) ([]string, error) {

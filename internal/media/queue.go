@@ -38,6 +38,7 @@ type Queue struct {
 	wake    chan struct{}
 	limiter *rate.Limiter
 	onPanic func(string)
+	pass    sync.Mutex // one request pass at a time
 	wg      sync.WaitGroup
 }
 
@@ -90,7 +91,10 @@ func (q *Queue) Run(ctx context.Context) {
 				case <-q.wake:
 				case <-time.After(100 * time.Millisecond):
 				}
-				guard.Run(q.log, "media worker", onPanic, func() { q.work(ctx, &current) })
+				guard.Run(q.log, "media worker", onPanic, func() {
+					q.work(ctx, &current)
+					q.requestPass(ctx, &current)
+				})
 			}
 		}()
 	}
@@ -109,6 +113,52 @@ func (q *Queue) work(ctx context.Context, current **store.Media) {
 	}
 }
 
+// requestPass fails re-upload requests unanswered for 24 hours, then asks for re-uploads of expired rows while the
+// limiter (driven by the queue's clock) allows; the rest stay expired for a later pass, also after a restart.
+func (q *Queue) requestPass(ctx context.Context, current **store.Media) {
+	if !q.pass.TryLock() {
+		return
+	}
+	defer q.pass.Unlock()
+	now := q.clock.Now()
+	if err := q.store.FailStaleRetries(ctx, now); err != nil {
+		q.log.Error("stale re-upload requests not failed", "err", err)
+	}
+	for ctx.Err() == nil {
+		m, err := q.store.NextExpiredMedia(ctx)
+		if err != nil {
+			q.log.Error("expired media not read", "err", err)
+			return
+		}
+		if m == nil || !q.limiter.AllowN(now, 1) {
+			return
+		}
+		*current = m
+		sent := q.request(ctx, m, now)
+		*current = nil
+		if !sent {
+			return // likely not connected; the next pass tries again
+		}
+	}
+}
+
+// request asks for a re-upload of m; it reports false when the request failed and m is still expired.
+func (q *Queue) request(ctx context.Context, m *store.Media, now time.Time) bool {
+	ref := wa.MediaRef{Chat: m.ChatJID, Sender: m.SenderJID, ID: m.MessageID, FromMe: m.FromMe}
+	switch err := q.down.RequestMediaRetry(ctx, ref, m.RawProto); {
+	case err == nil:
+		m.State = "retry_requested"
+	case errors.Is(err, wa.ErrNoMediaKey):
+		m.State, m.Reason = "failed", wa.ErrNoMediaKey.Error()
+	default:
+		q.log.Warn("media re-upload request failed", "chat", m.ChatJID, "id", m.MessageID, "err", err)
+		return false
+	}
+	m.UpdatedAt = now.Unix()
+	q.save(ctx, *m)
+	return true
+}
+
 // save writes the row; a failed write is logged and the row is re-claimable after a restart.
 func (q *Queue) save(ctx context.Context, m store.Media) {
 	if err := q.store.UpdateMedia(ctx, m); err != nil {
@@ -121,19 +171,8 @@ func (q *Queue) download(ctx context.Context, m *store.Media) {
 	m.Attempts += attempts
 	m.UpdatedAt = q.clock.Now().Unix()
 	if errors.Is(err, wa.ErrMediaExpired) {
-		m.State = "expired"
+		m.State = "expired" // the next request pass asks for a re-upload
 		m.Reason = err.Error()
-		if q.limiter.Allow() {
-			ref := wa.MediaRef{Chat: m.ChatJID, Sender: m.SenderJID, ID: m.MessageID, FromMe: m.FromMe}
-			switch e := q.down.RequestMediaRetry(ctx, ref, m.RawProto); {
-			case e == nil:
-				m.State = "retry_requested"
-			case errors.Is(e, wa.ErrNoMediaKey):
-				m.State, m.Reason = "failed", wa.ErrNoMediaKey.Error()
-			default:
-				q.log.Warn("media re-upload request failed", "chat", m.ChatJID, "id", m.MessageID, "err", e)
-			}
-		}
 		q.save(ctx, *m)
 		return
 	}
