@@ -83,7 +83,7 @@ func (r *Recorder) record(evt any) error {
 		item.Info = data
 	}
 	if payload != nil && payload.ProtoReflect().IsValid() {
-		raw, err := proto.MarshalOptions{Deterministic: true}.Marshal(payload)
+		raw, err := proto.MarshalOptions{Deterministic: true, AllowPartial: true}.Marshal(payload) // a chunk may lack required fields
 		if err != nil {
 			return err
 		}

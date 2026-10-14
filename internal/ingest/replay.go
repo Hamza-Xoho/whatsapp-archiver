@@ -109,7 +109,7 @@ func decodeProto(r recorded) (proto.Message, error) {
 		return nil, err
 	}
 	msg := newMsg()
-	return msg, proto.Unmarshal(raw, msg)
+	return msg, proto.UnmarshalOptions{AllowPartial: true}.Unmarshal(raw, msg)
 }
 
 func Replay(ctx context.Context, p *Pipeline, items []any) error {

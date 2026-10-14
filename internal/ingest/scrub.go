@@ -1,22 +1,39 @@
 package ingest
 
 import (
+	"bytes"
 	"crypto/sha256"
-	"encoding/hex"
+	"encoding/base64"
+	"encoding/binary"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
+
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
-var jidPattern = regexp.MustCompile(`([0-9]{4,})@(s\.whatsapp\.net|lid)`)
+// jidPattern matches user[.agent][:device]@server for the servers that carry a phone number, LID or group ID.
+// An old-style group user is <creator>-<timestamp>.
+var jidPattern = regexp.MustCompile(`([0-9]+(?:-[0-9]+)?)((?:\.[0-9]+)?(?::[0-9]+)?)@(s\.whatsapp\.net|lid|g\.us|c\.us|hosted\.lid|hosted|broadcast)`)
 
+// barePhone is a whole string that is a phone number; it is replaced only in identifier-named fields.
+var barePhone = regexp.MustCompile(`^\+?[0-9]{8,}$`)
+
+// Scrub copies the recorded files in `in` to `out`, replacing every phone number, LID and group ID in the JSON and
+// in every protobuf string field with a stable fake, and clearing key material. Text is kept.
 func Scrub(in, out string) error {
-	mapping := map[string]string{}
 	return filepath.WalkDir(in, func(path string, e os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		rel, _ := filepath.Rel(in, path)
+		rel, err := filepath.Rel(in, path)
+		if err != nil {
+			return err
+		}
 		target := filepath.Join(out, rel)
 		if e.IsDir() {
 			return os.MkdirAll(target, 0o700)
@@ -25,20 +42,171 @@ func Scrub(in, out string) error {
 		if err != nil {
 			return err
 		}
-		data = jidPattern.ReplaceAllFunc(data, func(value []byte) []byte {
-			key := string(value)
-			if fake, ok := mapping[key]; ok {
-				return []byte(fake)
-			}
-			sum := sha256.Sum256(value)
-			suffix := "@lid"
-			if jidPattern.FindSubmatch(value)[2][0] == 's' {
-				suffix = "@s.whatsapp.net"
-			}
-			fake := hex.EncodeToString(sum[:6]) + suffix
-			mapping[key] = fake
-			return []byte(fake)
-		})
+		if data, err = scrubFile(data); err != nil {
+			return fmt.Errorf("scrub %s: %w", rel, err)
+		}
 		return os.WriteFile(target, data, 0o600)
 	})
+}
+
+// scrubFile scrubs one JSON file; a recorded file's base64 protobuf is decoded, walked and re-encoded.
+func scrubFile(data []byte) ([]byte, error) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	var doc any
+	if err := dec.Decode(&doc); err != nil {
+		return nil, err
+	}
+	doc = scrubJSON(doc, "")
+	if top, ok := doc.(map[string]any); ok {
+		if encoded, ok := top["proto"].(string); ok {
+			kind, _ := top["kind"].(string)
+			scrubbed, err := scrubPayload(kind, encoded)
+			if err != nil {
+				return nil, err
+			}
+			top["proto"] = scrubbed
+		}
+	}
+	return json.MarshalIndent(doc, "", "  ")
+}
+
+func scrubJSON(v any, field string) any {
+	switch x := v.(type) {
+	case map[string]any:
+		for k, val := range x {
+			x[k] = scrubJSON(val, k)
+		}
+	case []any:
+		for i, val := range x {
+			x[i] = scrubJSON(val, field)
+		}
+	case string:
+		return scrubString(x, field)
+	}
+	return v
+}
+
+func scrubPayload(kind, encoded string) (string, error) {
+	newMsg, ok := protoKinds[kind]
+	if !ok {
+		return "", fmt.Errorf("cannot scrub the protobuf of kind %q", kind)
+	}
+	raw, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil {
+		return "", err
+	}
+	msg := newMsg()
+	if err = (proto.UnmarshalOptions{AllowPartial: true}).Unmarshal(raw, msg); err != nil {
+		return "", err
+	}
+	scrubMessage(msg.ProtoReflect())
+	raw, err = proto.MarshalOptions{Deterministic: true, AllowPartial: true}.Marshal(msg)
+	return base64.StdEncoding.EncodeToString(raw), err
+}
+
+// scrubMessage walks every populated field, recursing into nested, repeated and map values. Unknown fields are
+// dropped because they cannot be inspected.
+func scrubMessage(m protoreflect.Message) {
+	m.SetUnknown(nil)
+	var fields []protoreflect.FieldDescriptor
+	m.Range(func(fd protoreflect.FieldDescriptor, _ protoreflect.Value) bool {
+		fields = append(fields, fd)
+		return true
+	})
+	for _, fd := range fields {
+		name := string(fd.Name())
+		switch v := m.Get(fd); {
+		case fd.Kind() == protoreflect.BytesKind && keyMaterialField(name):
+			m.Clear(fd)
+		case fd.IsMap():
+			scrubMap(v.Map(), fd, name)
+		case fd.IsList():
+			for i, l := 0, v.List(); i < l.Len(); i++ {
+				if nv, ok := scrubValue(fd.Kind(), l.Get(i), name); ok {
+					l.Set(i, nv)
+				}
+			}
+		default:
+			if nv, ok := scrubValue(fd.Kind(), v, name); ok {
+				m.Set(fd, nv)
+			}
+		}
+	}
+}
+
+func scrubMap(mp protoreflect.Map, fd protoreflect.FieldDescriptor, field string) {
+	var keys []protoreflect.MapKey
+	mp.Range(func(k protoreflect.MapKey, _ protoreflect.Value) bool {
+		keys = append(keys, k)
+		return true
+	})
+	for _, k := range keys {
+		v := mp.Get(k)
+		if nv, ok := scrubValue(fd.MapValue().Kind(), v, field); ok {
+			v = nv
+		}
+		if fd.MapKey().Kind() == protoreflect.StringKind {
+			mp.Clear(k)
+			k = protoreflect.ValueOfString(scrubString(k.String(), field)).MapKey()
+		}
+		mp.Set(k, v)
+	}
+}
+
+// scrubValue scrubs a nested message in place, or returns the replacement of a string.
+func scrubValue(kind protoreflect.Kind, v protoreflect.Value, field string) (protoreflect.Value, bool) {
+	switch kind {
+	case protoreflect.MessageKind, protoreflect.GroupKind:
+		scrubMessage(v.Message())
+	case protoreflect.StringKind:
+		return protoreflect.ValueOfString(scrubString(v.String(), field)), true
+	}
+	return v, false
+}
+
+// keyMaterialField names the bytes fields cleared by Scrub: keys, key data, secrets, tokens and sender keys.
+// Fixtures never need them.
+func keyMaterialField(name string) bool {
+	n := strings.ToLower(name)
+	for _, suffix := range []string{"key", "keydata", "secret", "token"} {
+		if strings.HasSuffix(n, suffix) {
+			return true
+		}
+	}
+	return strings.Contains(n, "senderkeydistribution")
+}
+
+// scrubString replaces every JID's user part, keeping agent, device and server; a whole-string phone number is
+// replaced too when the field name says it holds an identifier.
+func scrubString(s, field string) string {
+	s = jidPattern.ReplaceAllStringFunc(s, func(match string) string {
+		p := jidPattern.FindStringSubmatch(match)
+		return fakeUser(p[1]) + p[2] + "@" + p[3]
+	})
+	if identifierField(field) && barePhone.MatchString(s) {
+		plus := ""
+		if strings.HasPrefix(s, "+") {
+			plus = "+"
+		}
+		return plus + fakeUser(strings.TrimPrefix(s, "+"))
+	}
+	return s
+}
+
+func identifierField(name string) bool {
+	n := strings.ToLower(name)
+	for _, word := range []string{"jid", "participant", "phone", "number"} {
+		if strings.Contains(n, word) {
+			return true
+		}
+	}
+	return false
+}
+
+// fakeUser is a deterministic stand-in for a JID user part: the same input maps to the same fake in every run.
+// The leading 0 marks it as fake (E.164 numbers never start with 0).
+func fakeUser(user string) string {
+	sum := sha256.Sum256([]byte(user))
+	return fmt.Sprintf("0%014d", binary.BigEndian.Uint64(sum[:8])%100_000_000_000_000)
 }

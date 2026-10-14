@@ -34,13 +34,16 @@ func (systemClock) After(d time.Duration) <-chan time.Time { return time.After(d
 func main()                                                { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 func run(args []string, out, errOut io.Writer) int {
 	if len(args) == 0 {
-		_, _ = fmt.Fprintln(errOut, "usage: archiver <pair|run|status|chats|backup|version>")
+		_, _ = fmt.Fprintln(errOut, "usage: archiver <pair|run|status|chats|backup|scrub|replay|version>")
 		return 2
 	}
 	cmd := args[0]
 	if cmd == "version" {
 		_, _ = fmt.Fprintf(out, "whatsapp-archiver %s\nwhatsmeow %s\n", version, whatsmeowVersion)
 		return 0
+	}
+	if cmd == "scrub" || cmd == "replay" { // offline fixture tools: no WhatsApp session, own arguments
+		return runFixtureTool(cmd, args[1:], out, errOut)
 	}
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	fs.SetOutput(errOut)
