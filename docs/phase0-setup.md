@@ -29,6 +29,12 @@ alerts:
 backup: {destination: "/srv/backups/whatsapp-archiver", time: "03:30", keep: 7}
 ```
 
+The systemd unit allows writes only to the data folder and `/srv/backups/whatsapp-archiver`, so a different `backup.destination` must be added to `ReadWritePaths` in `deploy/archiver.service` too. Create the backup folder owned by the service user:
+
+```sh
+sudo install -d -o whatsapp-archiver -g whatsapp-archiver -m 700 /srv/backups/whatsapp-archiver
+```
+
 Install the ntfy phone app and subscribe to that private topic. Pair in a terminal, leave capture running for at least ten minutes, then press Ctrl-C:
 
 ```sh
