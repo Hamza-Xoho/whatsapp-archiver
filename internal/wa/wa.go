@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/mdp/qrterminal/v3"
@@ -19,17 +20,18 @@ import (
 	"whatsapp-archiver/internal/config"
 )
 
+type clientVersion struct{ version, reason string }
+
 type Client struct {
-	client        *whatsmeow.Client
-	container     *sqlstore.Container
-	cfg           *config.Config
-	log           *slog.Logger
-	version       string
-	versionReason string
-	closeOnce     sync.Once
-	sock          socket
-	refresh       func(context.Context) (changed bool, err error)
-	sleep         func(context.Context, time.Duration) error
+	client    *whatsmeow.Client
+	container *sqlstore.Container
+	cfg       *config.Config
+	log       *slog.Logger
+	ver       atomic.Pointer[clientVersion] // version and reason as one pair: the monitor reads while the reconnect loop refreshes
+	closeOnce sync.Once
+	sock      socket
+	refresh   func(context.Context) (changed bool, err error)
+	sleep     func(context.Context, time.Duration) error
 }
 
 // socket is the connection boundary the reconnect loop drives; *whatsmeow.Client satisfies it.
@@ -70,7 +72,8 @@ func Open(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Client, e
 	inner := whatsmeow.NewClient(device, wal.Sub("Client"))
 	inner.AutomaticMessageRerequestFromPhone = true
 	inner.SynchronousAck = true
-	c := &Client{client: inner, container: container, cfg: cfg, log: log, version: version, versionReason: reason, sock: inner, sleep: sleepCtx}
+	c := &Client{client: inner, container: container, cfg: cfg, log: log, sock: inner, sleep: sleepCtx}
+	c.ver.Store(&clientVersion{version, reason})
 	c.refresh = c.refreshVersion
 	return c, nil
 }
@@ -89,9 +92,19 @@ func chooseVersion(ctx context.Context, cfg *config.Config) (string, string, err
 	use, reason := decideVersion(built, latest, cfg.WA.VersionOverride, latestErr, cfg.WA.CheckLatestVersion)
 	return use, reason, nil
 }
-func (c *Client) Paired() bool          { return c.client.Store.ID != nil }
-func (c *Client) VersionInUse() string  { return c.version }
-func (c *Client) VersionReason() string { return c.versionReason }
+func (c *Client) Paired() bool { return c.client.Store.ID != nil }
+func (c *Client) VersionInUse() string {
+	if v := c.ver.Load(); v != nil {
+		return v.version
+	}
+	return ""
+}
+func (c *Client) VersionReason() string {
+	if v := c.ver.Load(); v != nil {
+		return v.reason
+	}
+	return ""
+}
 func (c *Client) Close() error {
 	var err error
 	c.closeOnce.Do(func() { c.client.Disconnect(); err = c.container.Close() })
@@ -209,8 +222,8 @@ func (c *Client) refreshVersion(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	wmstore.SetWAVersion(parsed)
-	changed := use != c.version
-	c.version, c.versionReason = use, reason
+	changed := use != c.VersionInUse()
+	c.ver.Store(&clientVersion{use, reason})
 	return changed, nil
 }
 func printQR(ctx context.Context, ch <-chan whatsmeow.QRChannelItem) {
