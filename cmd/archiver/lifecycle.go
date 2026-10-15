@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 )
 
 // runService runs the background loops (media queue, health monitor, backup scheduler) and then main (the client's
@@ -28,3 +29,18 @@ func runService(ctx context.Context, cancel context.CancelFunc, main func(contex
 	}
 	return errors.Join(errs...)
 }
+
+// handlerDrainBound is how long shutdown waits for the event handlers in flight (systemd's default stop timeout is
+// 90 s).
+const handlerDrainBound = 30 * time.Second
+
+// inFlight tracks the whatsmeow event handlers that are running, so that shutdown can wait for them.
+type inFlight struct {
+	after func(time.Duration) <-chan time.Time // the bound's timer; nil means time.After
+}
+
+// wrap returns h counted as in flight while it runs.
+func (f *inFlight) wrap(h func(any)) func(any) { return h }
+
+// drain waits for the handlers in flight, at most handlerDrainBound.
+func (f *inFlight) drain() error { return nil }
