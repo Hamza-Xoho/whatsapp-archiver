@@ -16,14 +16,19 @@ import (
 	"whatsapp-archiver/internal/testkit"
 )
 
-// rejectingWriter wraps the real store and rejects one message ID with a constraint error, as SQLite would.
+// rejectingWriter wraps the real store and rejects one message ID with a constraint error, as SQLite would. A
+// rejection retried past a cap panics, so a pipeline that retries it forever ends the test at once.
 type rejectingWriter struct {
 	*store.Store
-	id string
+	id    string
+	tries int
 }
 
 func (w *rejectingWriter) InsertMessage(ctx context.Context, m store.Message) (bool, error) {
 	if m.ID == w.id {
+		if w.tries++; w.tries > 100 {
+			panic("a rejected write was retried")
+		}
 		return false, fmt.Errorf("insert message %s: %w", m.ID, store.ErrConstraint)
 	}
 	return w.Store.InsertMessage(ctx, m)
@@ -95,14 +100,19 @@ func TestBodylessMessageIsStoredWithEmptyRawProto(t *testing.T) {
 	}
 }
 
-// stuckWriter wraps the real store and fails every write of one message ID with a transient error.
+// stuckWriter wraps the real store and fails every write of one message ID with a transient error. Past a cap it
+// panics, so a retry loop that ignores shutdown ends the test at once instead of spinning on the fake clock.
 type stuckWriter struct {
 	*store.Store
-	id string
+	id    string
+	tries int
 }
 
 func (w *stuckWriter) InsertMessage(ctx context.Context, m store.Message) (bool, error) {
 	if m.ID == w.id {
+		if w.tries++; w.tries > 1000 {
+			panic("write retried after the serve context ended")
+		}
 		return false, errors.New("database is locked")
 	}
 	return w.Store.InsertMessage(ctx, m)
