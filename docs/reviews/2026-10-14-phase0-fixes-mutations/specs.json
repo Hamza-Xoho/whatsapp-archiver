@@ -2242,5 +2242,37 @@
   "old": "\"token\", \"bytes\", \"snapshot\"}",
   "new": "\"token\", \"bytes\"}",
   "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "fw-h14-replay-nocheck",
+  "old": "\tif h.writeFailed > 0 || h.panics > 0 {",
+  "new": "\tif false && (h.writeFailed > 0 || h.panics > 0) {",
+  "rf": "FW-H14",
+  "file": "cmd/archiver/replay.go",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "fw-h14-replay-nowrites",
+  "old": "func (h *replayHealth) WriteFailed(error)     { h.writeFailed++ }",
+  "new": "func (h *replayHealth) WriteFailed(error)     {}",
+  "rf": "FW-H14",
+  "file": "cmd/archiver/replay.go",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "fw-h14-replay-nopanics",
+  "old": "func (h *replayHealth) Panic(string)          { h.panics++ }",
+  "new": "func (h *replayHealth) Panic(string)          {}",
+  "rf": "FW-H14",
+  "file": "cmd/archiver/replay.go",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "fw-h14-replay-seam",
+  "old": "\tp := ingest.NewPipeline(replayWriter(st),",
+  "new": "\t_ = replayWriter\n\tp := ingest.NewPipeline(st,",
+  "rf": "FW-H14",
+  "file": "cmd/archiver/replay.go",
+  "pkgs": "./cmd/archiver/"
  }
 ]
