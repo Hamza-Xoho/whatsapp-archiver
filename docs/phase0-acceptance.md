@@ -2,7 +2,7 @@
 
 Task 12 of the plan is run by Hamza on the server; it is intentionally not run by Codex or any agent session. Fill every `Result` line before phase 1. Phase 0 is finished when every step is recorded, spikes 1 to 5 have results, any decision a spike forced is written into the charter's decision log, and the 7-day audit passes.
 
-Set-up commands are in `docs/phase0-setup.md` (section numbers below refer to it). Everything that talks to WhatsApp (`pair`, the service) is run only in these steps and only by Hamza. `status`, `chats`, `backup`, `replay`, `scrub` and the SQL queries never connect to WhatsApp.
+Set-up commands are in the Setup guide in `README.md` (section numbers below refer to it). Everything that talks to WhatsApp (`pair`, the service) is run only in these steps and only by Hamza. `status`, `chats`, `backup`, `replay`, `scrub` and the SQL queries never connect to WhatsApp.
 
 ## Spikes
 

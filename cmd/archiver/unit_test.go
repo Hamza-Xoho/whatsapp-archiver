@@ -13,7 +13,7 @@ func TestServiceUnitCanWriteDataAndBackupFolders(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	guide, err := os.ReadFile(filepath.Join("..", "..", "docs", "phase0-setup.md"))
+	guide, err := os.ReadFile(filepath.Join("..", "..", "README.md"))
 	if err != nil {
 		t.Fatal(err)
 	}

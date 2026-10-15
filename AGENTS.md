@@ -24,7 +24,7 @@ Review work list: `docs/reviews/2026-10-14-phase0-review.md`. Prompts: `docs/pro
 - Recover panics only at the event-handler and media-worker boundaries; never crash the process for an event.
 - Everything in `data/` is ignored. `session.db` is never backed up, copied, or restored.
 - Never connect to WhatsApp from tests or agent sessions.
-- A deployment session on a real server follows `docs/claude-code-deploy.md`: the agent never runs `pair` or `run` itself and never reads message text.
+- A deployment session on a real server follows the "Let Claude Code do the setup" part of `README.md`: the agent never runs `pair` or `run` itself and never reads message text.
 
 ## Workflow
 

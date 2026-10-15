@@ -98,14 +98,14 @@ func TestLoadAcceptsChatAddresses(t *testing.T) {
 
 // M10: the configuration example of the setup guide loads.
 func TestSetupGuideConfigExampleLoads(t *testing.T) {
-	guide, err := os.ReadFile("../../docs/phase0-setup.md")
+	guide, err := os.ReadFile("../../README.md")
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, rest, ok := strings.Cut(string(guide), "```yaml\n")
 	example, _, closed := strings.Cut(rest, "```")
 	if !ok || !closed || !strings.Contains(example, "exclude:") {
-		t.Fatal("no yaml example with an exclude list in docs/phase0-setup.md")
+		t.Fatal("no yaml example with an exclude list in README.md")
 	}
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err = os.WriteFile(path, []byte(example), 0o600); err != nil {

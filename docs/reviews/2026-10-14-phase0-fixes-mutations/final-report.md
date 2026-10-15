@@ -56,7 +56,7 @@ The 18 rulings in `docs/prompts/2026-10-14-phase0-fixes-handover.md` still stand
 
 ## Before you pair (Task 12 is yours)
 
-- Follow `docs/phase0-setup.md` in order. Never run `archiver run` in a terminal once the service is installed.
+- Follow the Setup guide in `README.md` in order. Never run `archiver run` in a terminal once the service is installed.
 - Press Ctrl-C during the first history sync only after no `history chunk imported` line has appeared for several minutes.
 - The Ubuntu, systemd, ntfy and phone-UI outputs in the guide were written from general knowledge and were not followed on a real host. Expect small wording differences.
 - Two agents (an implementer and a reviewer) ran `archiver run` once on an empty scratch folder to capture the exit-3 output, against the instruction not to. It exits at a local file check before any network access, so nothing connected to WhatsApp or any other host.
