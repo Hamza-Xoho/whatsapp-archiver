@@ -223,5 +223,101 @@
   "new": "store.Open(filepath.Join(cfg.DataDir, \"archive.db\"))",
   "pkgs": "./cmd/archiver/",
   "count": 2
+ },
+ {
+  "name": "h13-leak-ingest",
+  "rf": "H13",
+  "file": "internal/ingest/pipeline.go",
+  "old": "\tif log == nil {\n\t\tlog = slog.Default()",
+  "new": "\tgo func() { select {} }()\n\tif log == nil {\n\t\tlog = slog.Default()",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h13-leak-media",
+  "rf": "H13",
+  "file": "internal/media/queue.go",
+  "old": "\treturn &Queue{dir: dir,",
+  "new": "\tgo func() { select {} }()\n\treturn &Queue{dir: dir,",
+  "pkgs": "./internal/media/"
+ },
+ {
+  "name": "h13-leak-health",
+  "rf": "H13",
+  "file": "internal/health/health.go",
+  "old": "func (m *Monitor) WithLogger(l *slog.Logger) *Monitor { m.log = l; return m }",
+  "new": "func (m *Monitor) WithLogger(l *slog.Logger) *Monitor { go func() { select {} }(); m.log = l; return m }",
+  "pkgs": "./internal/health/"
+ },
+ {
+  "name": "h13-handle-background",
+  "rf": "H13",
+  "file": "internal/ingest/pipeline.go",
+  "old": "\t\tctx := p.ctx\n\t\tnow := p.now()",
+  "new": "\t\tctx := context.Background()\n\t\tnow := p.now()",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h13-withcontext-ignored",
+  "rf": "H13",
+  "file": "internal/ingest/pipeline.go",
+  "old": "\tp.ctx = ctx\n",
+  "new": "\t_ = ctx\n",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h13-svc-nowait",
+  "rf": "H13",
+  "file": "cmd/archiver/lifecycle.go",
+  "old": "\tcancel()\n\twg.Wait()\n",
+  "new": "\tcancel()\n",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "h13-svc-nocancel",
+  "rf": "H13",
+  "file": "cmd/archiver/lifecycle.go",
+  "old": "\terr := main(ctx)\n\tcancel()\n",
+  "new": "\terr := main(ctx)\n\t_ = cancel\n",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "h13-svc-closers-before-join",
+  "rf": "H13",
+  "file": "cmd/archiver/lifecycle.go",
+  "old": "\tcancel()\n\twg.Wait()\n\terrs := []error{err}\n\tfor _, closeFn := range closers {\n\t\terrs = append(errs, closeFn())\n\t}\n",
+  "new": "\tcancel()\n\terrs := []error{err}\n\tfor _, closeFn := range closers {\n\t\terrs = append(errs, closeFn())\n\t}\n\twg.Wait()\n",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "h13-svc-closer-order",
+  "rf": "H13",
+  "file": "cmd/archiver/lifecycle.go",
+  "old": "\tfor _, closeFn := range closers {\n\t\terrs = append(errs, closeFn())\n\t}\n",
+  "new": "\tfor i := len(closers) - 1; i >= 0; i-- {\n\t\terrs = append(errs, closers[i]())\n\t}\n",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "h13-svc-stop-on-close-error",
+  "rf": "H13",
+  "file": "cmd/archiver/lifecycle.go",
+  "old": "\tfor _, closeFn := range closers {\n\t\terrs = append(errs, closeFn())\n\t}\n",
+  "new": "\tfor _, closeFn := range closers {\n\t\tif cerr := closeFn(); cerr != nil {\n\t\t\treturn errors.Join(append(errs, cerr)...)\n\t\t}\n\t}\n",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "h13-serve-stray-go",
+  "rf": "H13",
+  "file": "cmd/archiver/main.go",
+  "old": "\tif pairing {\n\t\t_, _ = fmt.Fprintln(out, \"Scan the QR",
+  "new": "\tgo queue.Run(ctx)\n\tif pairing {\n\t\t_, _ = fmt.Fprintln(out, \"Scan the QR",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "h13-serve-noctx",
+  "rf": "H13",
+  "file": "cmd/archiver/main.go",
+  "old": ".WithHistoryParser(client.HistoryParser()).WithContext(ctx)",
+  "new": ".WithHistoryParser(client.HistoryParser())",
+  "pkgs": "./cmd/archiver/"
  }
 ]
