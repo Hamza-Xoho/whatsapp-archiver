@@ -2090,5 +2090,93 @@
   "old": "\tp.log.Error(\"write failing, retrying until it succeeds\", \"what\", what, \"err\", err)",
   "new": "\t_ = what",
   "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "fw-i2-nowrap",
+  "file": "cmd/archiver/main.go",
+  "old": "\thandler = handlers.wrap(handler)\n",
+  "new": "\t_ = handlers.wrap\n",
+  "rf": "FW-I2",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "fw-i2-nodrain",
+  "file": "cmd/archiver/main.go",
+  "old": "loops, handlers.drain, client.Close, st.Close)",
+  "new": "loops, client.Close, st.Close)",
+  "rf": "FW-I2",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "fw-i2-drainlast",
+  "file": "cmd/archiver/main.go",
+  "old": "loops, handlers.drain, client.Close, st.Close)",
+  "new": "loops, client.Close, st.Close, handlers.drain)",
+  "rf": "FW-I2",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "fw-i2-nowait",
+  "file": "cmd/archiver/lifecycle.go",
+  "old": "go func() { f.wg.Wait(); close(done) }()",
+  "new": "close(done)",
+  "rf": "FW-I2",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "fw-i2-nocount",
+  "file": "cmd/archiver/lifecycle.go",
+  "old": "\t\tf.wg.Add(1)\n\t\tf.mu.Unlock()\n\t\tdefer f.wg.Done()\n",
+  "new": "\t\tf.mu.Unlock()\n",
+  "rf": "FW-I2",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "fw-i2-unbounded",
+  "file": "cmd/archiver/lifecycle.go",
+  "old": "\tselect {\n\tcase <-done:",
+  "new": "\t<-done\n\tselect {\n\tcase <-done:",
+  "rf": "FW-I2",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "fw-i2-boundarg",
+  "file": "cmd/archiver/lifecycle.go",
+  "old": "case <-after(handlerDrainBound):",
+  "new": "case <-after(2 * handlerDrainBound):",
+  "rf": "FW-I2",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "fw-i2-boundvalue",
+  "file": "cmd/archiver/lifecycle.go",
+  "old": "const handlerDrainBound = 30 * time.Second",
+  "new": "const handlerDrainBound = 300 * time.Second",
+  "rf": "FW-I2",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "fw-i2-noreport",
+  "file": "cmd/archiver/lifecycle.go",
+  "old": "\t\treturn fmt.Errorf(\"an event handler",
+  "new": "\t\treturn nil\n\t\treturn fmt.Errorf(\"an event handler",
+  "rf": "FW-I2",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "fw-i2-lateevent",
+  "file": "cmd/archiver/lifecycle.go",
+  "old": "\t\tif f.closing {",
+  "new": "\t\tif false && f.closing {",
+  "rf": "FW-I2",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "fw-i2-noflag",
+  "file": "cmd/archiver/lifecycle.go",
+  "old": "f.closing = true //",
+  "new": "f.closing = false //",
+  "rf": "FW-I2",
+  "pkgs": "./cmd/archiver/"
  }
 ]
