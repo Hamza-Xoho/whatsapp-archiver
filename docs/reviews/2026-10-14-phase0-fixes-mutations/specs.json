@@ -563,7 +563,7 @@
   "name": "rf5b-health",
   "rf": "RF5/H10",
   "file": "internal/health/health.go",
-  "old": "m.gate.fire(\"write_failed\", \"Archive write failed\", err.Error())",
+  "old": "m.gate.fire(\"write_failed\", \"Archive write failed\", failingBody)",
   "new": "_ = err",
   "pkgs": "./internal/health/"
  },
