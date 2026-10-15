@@ -131,3 +131,24 @@ func TestScrubRewritesMentionsAndVCards(t *testing.T) {
 		t.Errorf("vcard:\n%s\nwant:\n%s", got, want)
 	}
 }
+
+// H14 final wave: an app-state snapshot in a fatal-recovery response (zlib-compressed, carrying JIDs) is cleared.
+func TestScrubClearsCollectionSnapshot(t *testing.T) {
+	in := t.TempDir()
+	var snapshot bytes.Buffer
+	zw := zlib.NewWriter(&snapshot)
+	_, _ = zw.Write([]byte(`["mute","` + phoneA + `@s.whatsapp.net"]`))
+	_ = zw.Close()
+	rec := ingest.NewRecorder(in).Wrap(func(any) {})
+	rec(messageEvent("1@s.whatsapp.net", "S", &waE2E.Message{ProtocolMessage: &waE2E.ProtocolMessage{Type: waE2E.ProtocolMessage_PEER_DATA_OPERATION_REQUEST_RESPONSE_MESSAGE.Enum(),
+		PeerDataOperationRequestResponseMessage: &waE2E.PeerDataOperationRequestResponseMessage{PeerDataOperationResult: []*waE2E.PeerDataOperationRequestResponseMessage_PeerDataOperationResult{{
+			SyncdSnapshotFatalRecoveryResponse: &waE2E.PeerDataOperationRequestResponseMessage_PeerDataOperationResult_SyncDSnapshotFatalRecoveryResponse{
+				CollectionSnapshot: snapshot.Bytes(), IsCompressed: proto.Bool(true)}}}}}}))
+	texts, protos := scrubbedFiles(t, scrub(t, in))
+	if len(texts) != 1 {
+		t.Fatalf("%d scrubbed files, want 1", len(texts))
+	}
+	if hidden([]byte(texts[0]), phoneA) || hidden([]byte(protos[0]), phoneA) {
+		t.Errorf("the snapshot keeps %s", phoneA)
+	}
+}
