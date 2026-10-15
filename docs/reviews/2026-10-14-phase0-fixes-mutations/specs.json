@@ -1633,5 +1633,334 @@
   "new": "*keyFile = filepath.Join(dir, \"scrub.key\")",
   "pkgs": "./cmd/archiver/",
   "rf": "H14-r1"
+ },
+ {
+  "name": "h13-guard",
+  "rf": "H13",
+  "file": "internal/ingest/pipeline.go",
+  "old": "guard.Run(p.log, \"handler\", func(string, any) { p.health.Panic(\"handler\") }, func() {",
+  "new": "_ = guard.Run\n\tfunc(fn func()) { fn() }(func() {",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h13-panic-unreported",
+  "rf": "H13",
+  "file": "internal/ingest/pipeline.go",
+  "old": "func(string, any) { p.health.Panic(\"handler\") }",
+  "new": "func(string, any) {}",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h13-mapping-after-filter",
+  "rf": "H13",
+  "file": "internal/ingest/pipeline.go",
+  "old": "\tfor _, m := range r.Mappings {\n\t\tif err := p.persist(ctx, \"insert id mapping\", func() error {\n\t\t\t_, err := p.writer.InsertIDMapping(ctx, m)\n\t\t\treturn err\n\t\t}); err != nil {\n\t\t\treturn err\n\t\t}\n\t}\n\tif keep, err := p.keep(ctx, r.Chat.JID, r.Kind); err != nil || !keep {\n\t\treturn err\n\t}\n",
+  "new": "\tif keep, err := p.keep(ctx, r.Chat.JID, r.Kind); err != nil || !keep {\n\t\treturn err\n\t}\n\tfor _, m := range r.Mappings {\n\t\tif err := p.persist(ctx, \"insert id mapping\", func() error {\n\t\t\t_, err := p.writer.InsertIDMapping(ctx, m)\n\t\t\treturn err\n\t\t}); err != nil {\n\t\t\treturn err\n\t\t}\n\t}\n",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h13-nomap",
+  "rf": "H13",
+  "file": "internal/ingest/pipeline.go",
+  "old": "for _, m := range r.Mappings {",
+  "new": "for _, m := range r.Mappings[:0] {",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h13-fromme",
+  "rf": "H13",
+  "file": "internal/ingest/normalize.go",
+  "old": "Message: &m, FromMe: info.IsFromMe,",
+  "new": "Message: &m, FromMe: false,",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h13-unknown-state",
+  "rf": "H13",
+  "file": "internal/ingest/pipeline.go",
+  "old": "\t\tdefault:\n\t\t\tp.log.Debug(\"ignored event\"",
+  "new": "\t\tdefault:\n\t\t\tp.health.SetState(\"disconnected\", \"\")\n\t\t\tp.log.Debug(\"ignored event\"",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h13-route-mediaretry",
+  "rf": "H13",
+  "file": "internal/ingest/pipeline.go",
+  "old": "\t\tcase *events.MediaRetry:\n\t\t\tp.queue.OnRetry(ctx, e)\n",
+  "new": "\t\tcase *events.MediaRetry:\n",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h13-route-history",
+  "rf": "H13",
+  "file": "internal/ingest/pipeline.go",
+  "old": "\t\t\t_, _, err := p.ImportHistory(ctx, e)\n\t\t\tlogErr(err)\n",
+  "new": "\t\t\t_ = e\n",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h13-scope-message-only",
+  "rf": "H13",
+  "file": "internal/ingest/scope.go",
+  "old": "if _, ok := f.exclude[chatJID]; ok {",
+  "new": "if _, ok := f.exclude[chatJID]; ok && kind == KindMessage {",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h13-alias-oneway",
+  "rf": "H13",
+  "file": "internal/store/store.go",
+  "old": "\n UNION SELECT lid FROM id_mappings WHERE pn=?1",
+  "new": "",
+  "pkgs": "./internal/store/ ./internal/ingest/"
+ },
+ {
+  "name": "h13-late-skip",
+  "rf": "H13",
+  "file": "internal/ingest/history.go",
+  "old": "\tfor _, mapping := range hs.GetPhoneNumberToLidMappings() {",
+  "new": "\tif c, ok := p.writer.(interface {\n\t\tHistoryCoverage(context.Context) (store.Coverage, error)\n\t}); ok {\n\t\tif cov, covErr := c.HistoryCoverage(ctx); covErr == nil && cov.Complete {\n\t\t\treturn 0, 0, nil\n\t\t}\n\t}\n\tfor _, mapping := range hs.GetPhoneNumberToLidMappings() {",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h13-skip-count",
+  "rf": "H13",
+  "file": "internal/ingest/history.go",
+  "old": "\t\t\tif !keepMessage {\n\t\t\t\tskipped++\n\t\t\t\tcontinue\n\t\t\t}",
+  "new": "\t\t\tif !keepMessage {\n\t\t\t\tcontinue\n\t\t\t}",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h13-gif",
+  "rf": "H13",
+  "file": "internal/ingest/normalize.go",
+  "old": "kind = \"gif\"",
+  "new": "kind = \"video\"",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h13-doc-type",
+  "rf": "H13",
+  "file": "internal/ingest/normalize.go",
+  "old": "setMedia(r, \"document\"",
+  "new": "setMedia(r, \"file\"",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h13-audio-nomedia",
+  "rf": "H13",
+  "file": "internal/ingest/normalize.go",
+  "old": "\t\tsetMedia(r, kind, x.GetMimetype(), x.GetFileLength())\n\t}\n\tif x := msg.GetVideoMessage(); x != nil {",
+  "new": "\t\t_ = kind\n\t}\n\tif x := msg.GetVideoMessage(); x != nil {",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h13-viewonce",
+  "rf": "H13",
+  "file": "internal/wa/history.go",
+  "old": "\t\treturn evt, nil\n",
+  "new": "\t\tevt.Message = evt.RawMessage\n\t\treturn evt, nil\n",
+  "pkgs": "./internal/ingest/ ./internal/wa/"
+ },
+ {
+  "name": "h13-revoke-event-dropped",
+  "rf": "H13",
+  "file": "internal/ingest/pipeline.go",
+  "old": "\t\tif r.Event != nil {\n",
+  "new": "\t\tif r.Event != nil && r.Event.Kind != \"revoke\" {\n",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h13-x2-four-writers",
+  "rf": "H13",
+  "file": "internal/store/store.go",
+  "old": "write.SetMaxOpenConns(1)",
+  "new": "write.SetMaxOpenConns(4)",
+  "pkgs": "./internal/store/"
+ },
+ {
+  "name": "h13-x2-readpool-writable",
+  "rf": "H13",
+  "file": "internal/store/store.go",
+  "old": "dsn+\"&mode=ro\"",
+  "new": "dsn",
+  "pkgs": "./internal/store/"
+ },
+ {
+  "name": "h13-x8-replace",
+  "rf": "H13",
+  "file": "internal/store/store.go",
+  "old": "INSERT INTO message_events(",
+  "new": "INSERT OR REPLACE INTO message_events(",
+  "pkgs": "./internal/store/"
+ },
+ {
+  "name": "h13-x8-upsert",
+  "rf": "H13",
+  "file": "internal/store/store.go",
+  "old": "VALUES(?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
+  "new": "VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(chat_jid,kind,event_id) DO UPDATE SET value=excluded.value",
+  "pkgs": "./internal/store/"
+ },
+ {
+  "name": "h13-x8-delete",
+  "rf": "H13",
+  "file": "internal/store/store.go",
+  "old": "func (s *Store) Close() error {",
+  "new": "var _ = \"DELETE FROM history_sync_chunks WHERE 1\"\n\nfunc (s *Store) Close() error {",
+  "pkgs": "./internal/store/"
+ },
+ {
+  "name": "h13-x8-migration-update",
+  "rf": "H13",
+  "file": "internal/store/migrations/0001_raw.sql",
+  "old": "CREATE VIEW IF NOT EXISTS open_gaps AS",
+  "new": "UPDATE messages SET text='';\nCREATE VIEW IF NOT EXISTS open_gaps AS",
+  "pkgs": "./internal/store/"
+ },
+ {
+  "name": "h13-x8-other-package",
+  "rf": "H13",
+  "file": "internal/media/queue.go",
+  "old": "type Downloader interface {",
+  "new": "var _ = \"UPDATE messages SET text=''\"\n\ntype Downloader interface {",
+  "pkgs": "./internal/store/"
+ },
+ {
+  "name": "h13-x8-cmd",
+  "rf": "H13",
+  "file": "cmd/archiver/main.go",
+  "old": "const notPairedHint =",
+  "new": "var _ = \"update message_events set value=1\"\n\nconst notPairedHint =",
+  "pkgs": "./internal/store/"
+ },
+ {
+  "name": "h13-enqueue-decide",
+  "rf": "H13",
+  "file": "internal/media/queue.go",
+  "old": "m.State, m.Reason = decide(m, q.rules)",
+  "new": "m.State = \"pending\"",
+  "pkgs": "./internal/media/"
+ },
+ {
+  "name": "h13-serve-open2",
+  "rf": "H13",
+  "file": "cmd/archiver/main.go",
+  "old": "\tclient, err := wa.Open(ctx, cfg, log)\n",
+  "new": "\tst2, err := store.Open(filepath.Join(cfg.DataDir, \"archive.db\"))\n\tif err != nil {\n\t\treturn err\n\t}\n\t_ = st2\n\tclient, err := wa.Open(ctx, cfg, log)\n",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "h13-open-elsewhere",
+  "rf": "H13",
+  "file": "cmd/archiver/status.go",
+  "old": "store.OpenReadOnly(filepath.Join(cfg.DataDir, \"archive.db\"))",
+  "new": "store.Open(filepath.Join(cfg.DataDir, \"archive.db\"))",
+  "pkgs": "./cmd/archiver/",
+  "count": 2
+ },
+ {
+  "name": "h13-leak-ingest",
+  "rf": "H13",
+  "file": "internal/ingest/pipeline.go",
+  "old": "\tif log == nil {\n\t\tlog = slog.Default()",
+  "new": "\tgo func() { select {} }()\n\tif log == nil {\n\t\tlog = slog.Default()",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h13-leak-media",
+  "rf": "H13",
+  "file": "internal/media/queue.go",
+  "old": "\treturn &Queue{dir: dir,",
+  "new": "\tgo func() { select {} }()\n\treturn &Queue{dir: dir,",
+  "pkgs": "./internal/media/"
+ },
+ {
+  "name": "h13-leak-health",
+  "rf": "H13",
+  "file": "internal/health/health.go",
+  "old": "func (m *Monitor) WithLogger(l *slog.Logger) *Monitor { m.log = l; return m }",
+  "new": "func (m *Monitor) WithLogger(l *slog.Logger) *Monitor { go func() { select {} }(); m.log = l; return m }",
+  "pkgs": "./internal/health/"
+ },
+ {
+  "name": "h13-handle-background",
+  "rf": "H13",
+  "file": "internal/ingest/pipeline.go",
+  "old": "\tfor !stopped() {",
+  "new": "\t_ = stopped\n\tfor ctx.Err() == nil {",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h13r1-writes-cancellable",
+  "rf": "H13",
+  "file": "internal/ingest/pipeline.go",
+  "old": "ctx := context.WithoutCancel(p.ctx) //",
+  "new": "ctx := p.ctx //",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h13-withcontext-ignored",
+  "rf": "H13",
+  "file": "internal/ingest/pipeline.go",
+  "old": "\tp.ctx = ctx\n",
+  "new": "\t_ = ctx\n",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h13-svc-nowait",
+  "rf": "H13",
+  "file": "cmd/archiver/lifecycle.go",
+  "old": "\tcancel()\n\twg.Wait()\n",
+  "new": "\tcancel()\n",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "h13-svc-nocancel",
+  "rf": "H13",
+  "file": "cmd/archiver/lifecycle.go",
+  "old": "\terr := main(ctx)\n\tcancel()\n",
+  "new": "\terr := main(ctx)\n\t_ = cancel\n",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "h13-svc-closers-before-join",
+  "rf": "H13",
+  "file": "cmd/archiver/lifecycle.go",
+  "old": "\tcancel()\n\twg.Wait()\n\terrs := []error{err}\n\tfor _, closeFn := range closers {\n\t\terrs = append(errs, closeFn())\n\t}\n",
+  "new": "\tcancel()\n\terrs := []error{err}\n\tfor _, closeFn := range closers {\n\t\terrs = append(errs, closeFn())\n\t}\n\twg.Wait()\n",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "h13-svc-closer-order",
+  "rf": "H13",
+  "file": "cmd/archiver/lifecycle.go",
+  "old": "\tfor _, closeFn := range closers {\n\t\terrs = append(errs, closeFn())\n\t}\n",
+  "new": "\tfor i := len(closers) - 1; i >= 0; i-- {\n\t\terrs = append(errs, closers[i]())\n\t}\n",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "h13-svc-stop-on-close-error",
+  "rf": "H13",
+  "file": "cmd/archiver/lifecycle.go",
+  "old": "\tfor _, closeFn := range closers {\n\t\terrs = append(errs, closeFn())\n\t}\n",
+  "new": "\tfor _, closeFn := range closers {\n\t\tif cerr := closeFn(); cerr != nil {\n\t\t\treturn errors.Join(append(errs, cerr)...)\n\t\t}\n\t}\n",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "h13-serve-stray-go",
+  "rf": "H13",
+  "file": "cmd/archiver/main.go",
+  "old": "\tif pairing {\n\t\t_, _ = fmt.Fprintln(out, \"Scan the QR",
+  "new": "\tgo queue.Run(ctx)\n\tif pairing {\n\t\t_, _ = fmt.Fprintln(out, \"Scan the QR",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "h13-serve-noctx",
+  "rf": "H13",
+  "file": "cmd/archiver/main.go",
+  "old": ".WithHistoryParser(client.HistoryParser()).WithContext(ctx)",
+  "new": ".WithHistoryParser(client.HistoryParser())",
+  "pkgs": "./cmd/archiver/"
  }
 ]
