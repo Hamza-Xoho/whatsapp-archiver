@@ -1962,5 +1962,77 @@
   "old": ".WithHistoryParser(client.HistoryParser()).WithContext(ctx)",
   "new": ".WithHistoryParser(client.HistoryParser())",
   "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "fw-c1-rawnil",
+  "rf": "FW-C1",
+  "file": "internal/ingest/normalize.go",
+  "old": "raw = []byte{} // a bodyless",
+  "new": "raw = nil // a bodyless",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "fw-c1-stubskip",
+  "rf": "FW-C1",
+  "file": "internal/ingest/history.go",
+  "old": "if web := item.GetMessage(); web.GetMessage() == nil {",
+  "new": "if web := item.GetMessage(); web == nil {",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "fw-c1-stubcount",
+  "rf": "FW-C1",
+  "file": "internal/ingest/history.go",
+  "old": "web.GetMessageStubType().String())\n\t\t\t\tskipped++\n",
+  "new": "web.GetMessageStubType().String())\n",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "fw-c1-stublevel",
+  "rf": "FW-C1",
+  "file": "internal/ingest/history.go",
+  "old": "p.log.Info(\"history stub skipped\"",
+  "new": "p.log.Debug(\"history stub skipped\"",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "fw-c1-stubtype",
+  "rf": "FW-C1",
+  "file": "internal/ingest/history.go",
+  "old": ", \"stub\", web.GetMessageStubType().String())",
+  "new": ")",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "fw-c1-permabort",
+  "rf": "FW-C1",
+  "file": "internal/ingest/history.go",
+  "old": "\t\t\t\tif !isPermanent(ingestErr) {",
+  "new": "\t\t\t\tif true {",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "fw-c1-permcount",
+  "rf": "FW-C1",
+  "file": "internal/ingest/history.go",
+  "old": "\t\t\t\tskipped++ // persist has logged",
+  "new": "\t\t\t\t// persist has logged",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "fw-c1-permstored",
+  "rf": "FW-C1",
+  "file": "internal/ingest/history.go",
+  "old": "reported it once\n\t\t\t\tcontinue\n",
+  "new": "reported it once\n",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "fw-c1-stopgoeson",
+  "rf": "FW-C1",
+  "file": "internal/ingest/history.go",
+  "old": "\t\t\t\tif !isPermanent(ingestErr) {",
+  "new": "\t\t\t\tif false && !isPermanent(ingestErr) {",
+  "pkgs": "./internal/ingest/"
  }
 ]
