@@ -6,6 +6,8 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -63,10 +65,10 @@ type Media struct {
 	RawProto                                                                                        []byte
 }
 type ChatStat struct {
-	CanonicalJID, Name    string
-	MessageCount          int
-	Oldest, Newest        int64
-	MediaFailed, OpenGaps int
+	CanonicalJID, Name                                string
+	MessageCount                                      int
+	Oldest, Newest                                    int64
+	MediaFailed, MediaExpired, MediaPending, OpenGaps int
 }
 type HistoryChunk struct {
 	ID, SyncType                                          string
@@ -75,6 +77,7 @@ type HistoryChunk struct {
 }
 type Coverage struct {
 	Chunks, LastProgress int
+	Complete             bool // some chunk reported progress 100
 	LastChunkTime        int64
 	OldestByChat         map[string]int64
 }
@@ -114,10 +117,37 @@ func Open(path string) (*Store, error) {
 	return &Store{write: write, read: read, path: path}, nil
 }
 
+// OpenReadOnly opens an existing archive for reading only: no migration, no pragma that writes, no directory
+// created, and every write method fails. While the service has the archive open (its -wal exists) the reader joins
+// it normally. Without -wal and -shm nobody has the archive open, and a plain read-only open would create both files
+// and leave them behind, so the file is read as is (immutable).
+func OpenReadOnly(path string) (*Store, error) {
+	if _, err := os.Stat(path); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("no archive at %s: run archiver first", path)
+		}
+		return nil, fmt.Errorf("stat archive: %w", err)
+	}
+	dsn := "file:" + filepath.ToSlash(path) + "?mode=ro&_pragma=busy_timeout(5000)"
+	if !exists(path+"-wal") && !exists(path+"-shm") {
+		dsn += "&immutable=1"
+	}
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("open archive reader: %w", err)
+	}
+	return &Store{write: db, read: db, path: path}, nil
+}
+
+func exists(path string) bool { _, err := os.Stat(path); return err == nil }
+
 func ensureParent(path string) error { return mkdirAll(filepath.Dir(path)) }
 
 func (s *Store) Close() error {
 	rerr := s.read.Close()
+	if s.write == s.read { // read-only store
+		return rerr
+	}
 	werr := s.write.Close()
 	if werr != nil {
 		return werr
@@ -318,7 +348,7 @@ func (s *Store) InsertHistoryChunk(ctx context.Context, h HistoryChunk) error {
 func (s *Store) HistoryCoverage(ctx context.Context) (Coverage, error) {
 	var c Coverage
 	c.OldestByChat = map[string]int64{}
-	err := s.read.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE((SELECT progress FROM history_sync_chunks ORDER BY received_at DESC,rowid DESC LIMIT 1),0),COALESCE(MAX(received_at),0) FROM history_sync_chunks`).Scan(&c.Chunks, &c.LastProgress, &c.LastChunkTime)
+	err := s.read.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE((SELECT progress FROM history_sync_chunks ORDER BY received_at DESC,rowid DESC LIMIT 1),0),COALESCE(MAX(received_at),0),COALESCE(MAX(progress)>=100,0) FROM history_sync_chunks`).Scan(&c.Chunks, &c.LastProgress, &c.LastChunkTime, &c.Complete)
 	if err != nil {
 		return c, err
 	}

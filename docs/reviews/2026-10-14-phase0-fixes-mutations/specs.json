@@ -1240,5 +1240,158 @@
   "old": "if x.GetSecretEncType() == waE2E.SecretEncryptedMessage_MESSAGE_EDIT {\n\t\t\tr.Kind = KindEdit",
   "new": "if x.GetSecretEncType() == waE2E.SecretEncryptedMessage_UNKNOWN {\n\t\t\tr.Kind = KindEdit",
   "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h17-rw",
+  "rf": 17,
+  "file": "cmd/archiver/status.go",
+  "old": "store.OpenReadOnly(",
+  "new": "store.Open(",
+  "pkgs": "./cmd/archiver/",
+  "count": 2
+ },
+ {
+  "name": "h17-tz",
+  "rf": 17,
+  "file": "cmd/archiver/status.go",
+  "old": "return t.In(loc).Format(timeLayout)",
+  "new": "return t.UTC().Format(timeLayout)",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "h17-version",
+  "rf": 17,
+  "file": "cmd/archiver/status.go",
+  "old": "\tp(\"client version: %s\", version)\n",
+  "new": "\t_ = version\n",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "h17-alias-excluded",
+  "rf": 17,
+  "file": "cmd/archiver/status.go",
+  "old": "hit = hit || excluded[a]",
+  "new": "_ = a",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "h17-immutable",
+  "rf": 17,
+  "file": "internal/store/store.go",
+  "old": "dsn += \"&immutable=1\"",
+  "new": "_ = dsn",
+  "pkgs": "./cmd/archiver/ ./internal/store/"
+ },
+ {
+  "name": "h17-mode-rw",
+  "rf": 17,
+  "file": "internal/store/store.go",
+  "old": "?mode=ro&_pragma=busy_timeout(5000)\"\n\tif !exists",
+  "new": "?_pragma=busy_timeout(5000)\"\n\tif !exists",
+  "pkgs": "./internal/store/"
+ },
+ {
+  "name": "h17-expired-retry",
+  "rf": 17,
+  "file": "internal/store/views.go",
+  "old": "mediaCount(`'expired','retry_requested'`)",
+  "new": "mediaCount(`'expired'`)",
+  "pkgs": "./internal/store/"
+ },
+ {
+  "name": "h17-pending-downloading",
+  "rf": 17,
+  "file": "internal/store/views.go",
+  "old": "mediaCount(`'pending','downloading'`)",
+  "new": "mediaCount(`'pending'`)",
+  "pkgs": "./internal/store/"
+ },
+ {
+  "name": "h17-failed-incl-expired",
+  "rf": 17,
+  "file": "internal/store/views.go",
+  "old": "mediaCount(`'failed'`)",
+  "new": "mediaCount(`'failed','expired'`)",
+  "pkgs": "./internal/store/ ./cmd/archiver/"
+ },
+ {
+  "name": "h17-complete-last",
+  "rf": 17,
+  "file": "internal/store/store.go",
+  "old": "COALESCE(MAX(progress)>=100,0)",
+  "new": "COALESCE((SELECT progress FROM history_sync_chunks ORDER BY received_at DESC,rowid DESC LIMIT 1)>=100,0)",
+  "pkgs": "./internal/store/"
+ },
+ {
+  "name": "h17-history-newest",
+  "rf": 17,
+  "file": "cmd/archiver/status.go",
+  "old": "ts < min",
+  "new": "ts > min",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "h17-total-messages",
+  "rf": 17,
+  "file": "cmd/archiver/status.go",
+  "old": "messages += s.MessageCount",
+  "new": "messages++",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "h17-nohealth-text",
+  "rf": 17,
+  "file": "cmd/archiver/status.go",
+  "old": "\"unknown (health.json not found)\"",
+  "new": "\"unknown\"",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "h17-zero-time",
+  "rf": 17,
+  "file": "cmd/archiver/status.go",
+  "old": "if t.IsZero() || t.Unix() == 0 {",
+  "new": "if false {",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "h17-size-walk",
+  "rf": 17,
+  "file": "cmd/archiver/status.go",
+  "old": "total += info.Size()",
+  "new": "total += 1 + 0*info.Size()",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "h17-humansize-cap",
+  "rf": 17,
+  "file": "cmd/archiver/status.go",
+  "old": "unit < 3",
+  "new": "unit < 2",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "h17-health-version",
+  "rf": 17,
+  "file": "internal/health/health.go",
+  "old": "\tm.snapshot.Version = m.version()\n",
+  "new": "",
+  "pkgs": "./internal/health/"
+ },
+ {
+  "name": "h17-health-reason",
+  "rf": 17,
+  "file": "internal/health/health.go",
+  "old": "m.snapshot.VersionReason = m.reason()",
+  "new": "m.snapshot.VersionReason = \"\"",
+  "pkgs": "./internal/health/"
+ },
+ {
+  "name": "h17-noexist-error",
+  "rf": 17,
+  "file": "internal/store/store.go",
+  "old": "return nil, fmt.Errorf(\"no archive at %s: run archiver first\", path)",
+  "new": "return nil, fmt.Errorf(\"stat archive: %w\", err)",
+  "pkgs": "./internal/store/ ./cmd/archiver/"
  }
 ]
