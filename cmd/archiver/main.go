@@ -136,8 +136,15 @@ func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) er
 }
 
 // storeAliases is the exclusion filter's alias lookup: the other forms (LID or phone) of a chat known to the store.
+// A failure is marked as a read, so its alert is titled as one.
 func storeAliases(st *store.Store) func(string) ([]string, error) {
-	return func(jid string) ([]string, error) { return st.Aliases(context.Background(), jid) }
+	return func(jid string) ([]string, error) {
+		aliases, err := st.Aliases(context.Background(), jid)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", health.ErrRead, err)
+		}
+		return aliases, nil
+	}
 }
 
 const notPairedHint = "not paired: run `archiver pair` in a terminal first"

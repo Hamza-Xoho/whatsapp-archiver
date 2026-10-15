@@ -99,6 +99,7 @@ func (p *Pipeline) persist(ctx context.Context, what string, fn func() error) er
 	if isPermanent(err) {
 		return p.rejected(what, err)
 	}
+	p.log.Error("write failing, retrying until it succeeds", "what", what, "err", err) // the alert carries no detail
 	for !stopped() {
 		p.sleep(ctx, writeMaxWait)
 		if err = fn(); err == nil {

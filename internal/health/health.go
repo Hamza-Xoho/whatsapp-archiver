@@ -115,8 +115,17 @@ func (m *Monitor) banBody(detail string) string {
 // ErrRead marks a failed archive read, such as the exclusion filter's alias lookup.
 var ErrRead = errors.New("archive read failed")
 
+// failingBody is the whole alert body: the error can name a chat (even the alias of an excluded one) and ntfy may be
+// a public server, so the error stays in the journal.
+const failingBody = "A write or read is failing; see the journal"
+
+// WriteFailed alerts that a write, or a read wrapped in ErrRead, keeps failing.
 func (m *Monitor) WriteFailed(err error) {
-	m.gate.fire("write_failed", "Archive write failed", err.Error())
+	if errors.Is(err, ErrRead) {
+		m.gate.fire("read_failed", "Archive read failed", failingBody)
+		return
+	}
+	m.gate.fire("write_failed", "Archive write failed", failingBody)
 }
 func (m *Monitor) Panic(where string) {
 	m.mu.Lock()
