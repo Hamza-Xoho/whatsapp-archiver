@@ -3,8 +3,8 @@
   "name": "rf5a",
   "rf": 5,
   "file": "internal/ingest/pipeline.go",
-  "old": "\tfor ctx.Err() == nil {\n\t\tp.sleep(ctx, writeMaxWait)",
-  "new": "\treturn err\n\tfor ctx.Err() == nil {\n\t\tp.sleep(ctx, writeMaxWait)",
+  "old": "\tfor !stopped() {\n\t\tp.sleep(ctx, writeMaxWait)",
+  "new": "\treturn err\n\tfor !stopped() {\n\t\tp.sleep(ctx, writeMaxWait)",
   "pkgs": "./internal/ingest/"
  },
  {
