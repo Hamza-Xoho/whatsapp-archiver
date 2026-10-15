@@ -57,6 +57,10 @@ type WAConfig struct {
 
 var versionPattern = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
 
+// chatAddress is the form of a chat's JID as WhatsApp sends it: a phone number or LID for a direct chat, a group ID.
+// Anything else, such as a "+" number or a missing server, would silently exclude nothing.
+var chatAddress = regexp.MustCompile(`^(\d+@s\.whatsapp\.net|\d+@lid|\d+(-\d+)?@g\.us)$`)
+
 func defaults() Config {
 	return Config{
 		DataDir: "./data", TimeZone: "Local",
@@ -84,6 +88,11 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.WA.VersionOverride != "" && !versionPattern.MatchString(cfg.WA.VersionOverride) {
 		return nil, fmt.Errorf("version_override must have three numeric components")
+	}
+	for _, entry := range cfg.Exclude {
+		if !chatAddress.MatchString(entry) {
+			return nil, fmt.Errorf("exclude entry %q is not a chat address; write <digits>@s.whatsapp.net (phone number, digits only), <digits>@lid or <id>@g.us (group, from `archiver chats`)", entry)
+		}
 	}
 	return &cfg, nil
 }
