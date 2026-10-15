@@ -3,6 +3,7 @@ package ingest_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -91,5 +92,43 @@ func TestBodylessMessageIsStoredWithEmptyRawProto(t *testing.T) {
 	p.Handle(messageEvent("g@g.us", "BODYLESS", nil))
 	if got := strings.Join(rows(t, st, "SELECT id, length(raw_proto) FROM messages"), ","); got != "BODYLESS|0" || h.failed != 0 {
 		t.Fatalf("messages=%q writeFailed=%d, want BODYLESS|0 and no failure", got, h.failed)
+	}
+}
+
+// stuckWriter wraps the real store and fails every write of one message ID with a transient error.
+type stuckWriter struct {
+	*store.Store
+	id string
+}
+
+func (w *stuckWriter) InsertMessage(ctx context.Context, m store.Message) (bool, error) {
+	if m.ID == w.id {
+		return false, errors.New("database is locked")
+	}
+	return w.Store.InsertMessage(ctx, m)
+}
+
+// C1: a stopped serve context still ends the chunk: once a failing write is abandoned at shutdown, the later
+// messages and conversations are not written.
+func TestHistoryChunkEndsWhenTheServeContextStops(t *testing.T) {
+	st := testkit.Store(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	ft := newFakeTime()
+	sleeps := 0
+	ft.onTick = func() {
+		if sleeps++; sleeps == 8 {
+			cancel()
+		}
+	}
+	p := newPipeline(&stuckWriter{Store: st, id: "A"}, &queueFake{}, &healthFake{}, ft).WithContext(ctx)
+	hs := chunk("4915111@s.whatsapp.net", webMsg("A", "", false, text("a")), webMsg("C", "", false, text("c")))
+	hs.Data.Conversations = append(hs.Data.Conversations, chunk("120363@g.us", webMsg("D", "3@lid", false, text("d"))).Data.Conversations...)
+	stored, _, err := p.ImportHistory(t.Context(), hs)
+	if err == nil || stored != 0 {
+		t.Fatalf("stored=%d err=%v, want 0 and the abandoned write's error", stored, err)
+	}
+	if got := rows(t, st, "SELECT id FROM messages"); len(got) != 0 {
+		t.Fatalf("messages=%v written after shutdown", got)
 	}
 }
