@@ -176,13 +176,13 @@ UNION ALL SELECT 'media', COUNT(*) FROM media;
 ### 1. Before pairing
 
 - [ ] Record the iOS version (Settings → General → About), the WhatsApp version (WhatsApp → Settings → Help → App Info) and the date and time. iOS ____; WhatsApp ____; date/time ____.
-- [ ] Configure exclusions, time zone and ntfy (setup guide sections 5 and 6). A test notification reached the phone: `curl -d test https://ntfy.sh/<topic>` showed `test`, and `archiver run` on the unpaired folder showed **WhatsApp Archiver is not paired** and exited with code 3. Result: ____
+- [ ] Configure exclusions, time zone and ntfy (setup guide sections 5 and 6). A test notification reached the phone: `curl -d test https://ntfy.sh/<topic>` showed `test`, and `archiver run` on the unpaired folder showed **WhatsApp Archiver is not paired** and exited with code 3 (safe only before pairing: never run `archiver run` in a terminal once the service is installed). Result: ____
 
 ### 2. Pair once with recording (spike 1 starts)
 
 The recorder writes **every** event the archiver receives, excluded chats included, as readable JSON files, and every history chunk whole. Keep the folder on the server (it is created with mode 0700), never copy it elsewhere unscrubbed, and delete it in step 10. The history chunks make it large; check `df -h /var/lib/whatsapp-archiver` first.
 
-- [ ] Pair with the pair command of setup guide section 7, adding the option `--record /var/lib/whatsapp-archiver/rec` (the service may only write inside the data folder). Leave it running 10+ minutes, then Ctrl-C. Pairing time (date/time of the scan): ____
+- [ ] Pair with the pair command of setup guide section 7, adding the option `--record /var/lib/whatsapp-archiver/rec` (the service may only write inside the data folder). Leave it running 10+ minutes; press Ctrl-C only after no `history chunk imported` line has appeared for several minutes. Pairing time (date/time of the scan): ____
 - [ ] Start the service recording for the first day only. Do section 8 of the setup guide up to and including `sudo systemctl daemon-reload`, but do not enable it yet. Then `sudo systemctl edit archiver`, put this in the editor, save and leave:
 
   ```
@@ -224,7 +224,7 @@ Use a WhatsApp group with exactly one other person, created for this. Do not @-m
 ### 7. Unlink
 
 - [ ] On the phone: Settings → Linked Devices → the archiver's entry → Log Out. Expected within a minute: ntfy **WhatsApp logged out**; `status` shows `state: logged_out (…)`. Result: ____
-- [ ] Re-pair: `sudo systemctl stop archiver`; the pair command of setup guide section 7 (without `--record`); 10+ minutes; Ctrl-C; `sudo systemctl start archiver`. This triggers a second full history sync. Expected: no `already paired` error and `Paired. Capture is running.`; `status` shows `connected` and more `chunks`. Result: ____
+- [ ] Re-pair: `sudo systemctl stop archiver`; the pair command of setup guide section 7 (without `--record`); 10+ minutes, and Ctrl-C only after no `history chunk imported` line has appeared for several minutes; `sudo systemctl start archiver`. This triggers a second full history sync. Expected: no `already paired` error and `Paired. Capture is running.`; `status` shows `connected` and more `chunks`. Result: ____
 
 ### 8. LID dedup (spike 5)
 
@@ -251,12 +251,11 @@ Use a WhatsApp group with exactly one other person, created for this. Do not @-m
 
   ```sh
   sudo -u whatsapp-archiver sh -c 'mkdir -p /var/lib/whatsapp-archiver/rec-group && cd /var/lib/whatsapp-archiver/rec && grep -l "TEST-GROUP-ADDRESS" *.json | xargs -I{} cp {} ../rec-group/'
-  sudo tar -C /var/lib/whatsapp-archiver -czf /tmp/rec-group.tgz rec-group
-  sudo chown hamza: /tmp/rec-group.tgz
-  sudo chmod 0600 /tmp/rec-group.tgz
+  (umask 077 && rm -f /tmp/rec-group.tgz && sudo tar -C /var/lib/whatsapp-archiver -czf - rec-group > /tmp/rec-group.tgz)
+  ls -l /tmp/rec-group.tgz
   ```
 
-  Replace `TEST-GROUP-ADDRESS` with the address from step 3. History chunks are not picked (their content is encoded); the synthetic scenario covers history.
+  Replace `TEST-GROUP-ADDRESS` with the address from step 3. Expected from `ls -l`: `-rw-------` and owner `hamza`; `umask 077` makes the archive unreadable to other users from the moment it is created. History chunks are not picked (their content is encoded); the synthetic scenario covers history.
 - [ ] **Raw recordings and the scrub key must never be placed inside the repository** (`.gitignore` does not cover them, and a `git add -A` would commit real push names and numbers). On the Mac, work in a folder outside it. Run this from the repository folder; `REPO` remembers where the Linux and Mac programs are (use the `darwin-amd64` build on an Intel Mac):
 
   ```sh

@@ -67,12 +67,15 @@ ls .cache/build
 
 Expected: the list includes `archiver-linux-amd64`, `archiver-linux-arm64`, `archiver-darwin-arm64`, `archiver-darwin-amd64` and `archiver-windows-amd64.exe`.
 
-Copy the Linux program that matches `uname -m` (amd64 for `x86_64`, arm64 for `aarch64`) and the service file to the server:
+Copy the Linux program that matches `uname -m` on the server and the service file to the server. Run only one of the first two lines: the `amd64` line when `uname -m` printed `x86_64`, the `arm64` line when it printed `aarch64`:
 
 ```sh
 scp .cache/build/archiver-linux-amd64 hamza@SERVER:/tmp/archiver
+scp .cache/build/archiver-linux-arm64 hamza@SERVER:/tmp/archiver
 scp deploy/archiver.service hamza@SERVER:/tmp/archiver.service
 ```
+
+The wrong one fails later with `Exec format error` (section 12).
 
 Expected: one progress line per file ending in `100%`.
 
@@ -183,7 +186,7 @@ Notes:
 - **Direct chats**: write the phone-number form. When WhatsApp later shows the same person under a `…@lid` address, the exclusion covers it as soon as the archiver has seen the link between the two addresses, which arrives with the messages and with history. **Groups**: WhatsApp never shows a group's address, so it cannot be listed before pairing. After the first capture `archiver chats` lists the groups and their addresses (section 8); add the ones to exclude then. Rows stored before that stay in the database. If a group must never be stored, do a practice pairing first: pair as in section 7 with a throw-away data folder (`--data /var/tmp/practice`; it needs no `config.yaml` and stores everything it sees), run `archiver chats --data /var/tmp/practice`, then unlink the device in WhatsApp (Settings → Linked Devices) and delete the folder with `sudo rm -r /var/tmp/practice`. It costs one extra pairing.
 - After editing the file later, `ls -l` must still show the owner `whatsapp-archiver` and `-rw-------`; repeat the `chown` and `chmod` above if not.
 
-Check the file and test ntfy through the archiver itself. `run` reads the configuration, finds that the phone is not paired yet, sends one alert and exits without contacting WhatsApp:
+Check the file and test ntfy through the archiver itself. `run` reads the configuration, finds that the phone is not paired yet, sends one alert and exits without contacting WhatsApp. This test is safe only now, before pairing: **never run `archiver run` in a terminal once the service is installed**, because after pairing it connects with the same login as the service:
 
 ```sh
 sudo ls -l /var/lib/whatsapp-archiver
@@ -210,7 +213,7 @@ sudo -u whatsapp-archiver /opt/whatsapp-archiver/archiver pair --data /var/lib/w
 
 Expected: `Scan the QR code from WhatsApp → Linked Devices.`, then a square QR code. On the iPhone open WhatsApp → Settings → Linked Devices → Link a Device and scan it. A code expires after a short time; the message "QR code timed out; run archiver pair again." means start again. If it says `already paired`, this data folder already holds a login.
 
-After the scan: `Paired. Capture is running.` Lines of JSON (the log) scroll by; that is normal. Lines such as `{"time":"…","level":"INFO","msg":"history chunk imported","progress":40,"stored":…,"skipped":…}` show WhatsApp sending your old messages in pieces. **Leave it running for at least ten minutes**, then press Ctrl-C. The program must be running while history arrives, because nothing is stored otherwise. Ctrl-C stops it.
+After the scan: `Paired. Capture is running.` Lines of JSON (the log) scroll by; that is normal. Lines such as `{"time":"…","level":"INFO","msg":"history chunk imported","progress":40,"stored":…,"skipped":…}` show WhatsApp sending your old messages in pieces. **Leave it running for at least ten minutes, and press Ctrl-C only after no `history chunk imported` line has appeared for several minutes**; a large history can take an hour or more. The program must be running while history arrives, because nothing is stored otherwise. Ctrl-C stops it; it first finishes the piece being stored, which can take up to 30 seconds.
 
 ## 8. Start the service
 
@@ -276,7 +279,8 @@ Each alert is sent at most once every 6 hours while the problem lasts, and a `<t
 | No WhatsApp events | Connected, but nothing for `no_events_after` (6 hours). A quiet night is normal; otherwise look at the log and restart. |
 | Phone inactive | Your phone has not sent anything for `phone_quiet_after` (10 days). WhatsApp unlinks devices after 14 days of phone inactivity: open WhatsApp on the phone and send a message. |
 | Disk space low | Less than `disk_free_min_gb` (5 GB) free in the data folder. |
-| Archive write failed | A database write failed and is being retried. Look for the error in the log; usually disk full or wrong file owner. |
+| Archive write failed | A database write keeps failing and is being retried. The alert names no chat; the error is in the log (`journalctl -u archiver`, line `write failing`). Usually disk full or wrong file owner. |
+| Archive read failed | Looking up a chat's other address for the `exclude:` list keeps failing and is being retried; nothing of that chat is stored meanwhile. The error is in the log; the causes are the same as for a failed write. |
 | Recovered panic | A bug was caught and capture went on. Keep the log lines for a bug report. |
 | Backup failed | The nightly snapshot did not work. Check that the backup folder exists, belongs to `whatsapp-archiver` and has space. |
 
@@ -361,4 +365,6 @@ Expected: `command -v rsync` prints `/usr/bin/rsync` (if it prints another path,
 | `systemctl status` shows `inactive` / `failed` with `status=3` and the not-paired message | The service was started before pairing. Pair (section 7), then `sudo systemctl start archiver`. systemd does not retry exit code 3 on purpose. |
 | `no archive at …/archive.db: run archiver first` from `status` | The `--data` path is wrong, or nothing has been captured there yet. |
 | `already paired` from `pair` | The data folder already has a login. To pair again after an unlink, stop the service and run `pair`; if it still says this, ask for help before deleting `session.db`. |
+| `exclude entry "…" is not a chat address` | A line of `exclude:` is not written as `<digits>@s.whatsapp.net`, `<digits>@lid` or `<id>@g.us` (no `+`, no spaces). Correct it; the archiver does not start until then. |
+| `Exec format error` when the program or the service starts | The wrong Linux build was copied. Copy `archiver-linux-arm64` when `uname -m` prints `aarch64`, `archiver-linux-amd64` when it prints `x86_64` (section 3). |
 | `Text file busy` while installing a new program | The service is still running: `sudo systemctl stop archiver` first. |
