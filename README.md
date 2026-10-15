@@ -70,7 +70,7 @@ The first `make check` is slow because it builds the Go cache from scratch.
 
 ## Running it
 
-Pairing and running against a real account is covered step by step in [docs/phase0-setup.md](docs/phase0-setup.md), written for someone who has never used a Linux server (it covers both Ubuntu Server over SSH and Ubuntu Desktop at the keyboard): install Ubuntu, create a locked-down service user, configure ntfy, write the config, pair, start the systemd service, update and restore. The manual acceptance checklist for the first real run is [docs/phase0-acceptance.md](docs/phase0-acceptance.md).
+Pairing and running against a real account is covered step by step in [docs/phase0-setup.md](docs/phase0-setup.md), written for someone who has never used a Linux server (it covers both Ubuntu Server over SSH and Ubuntu Desktop at the keyboard): install Ubuntu, create a locked-down service user, configure ntfy, write the config, pair, start the systemd service, update and restore. The manual acceptance checklist for the first real run is [docs/phase0-acceptance.md](docs/phase0-acceptance.md). If you would rather have Claude Code do the setup for you over SSH, [docs/claude-code-deploy.md](docs/claude-code-deploy.md) explains how to give it a limited login and which steps still need you.
 
 Do not run `pair` or `run` against a real account until you have read the setup guide's configuration section. Never run `run` in a terminal once the service is installed: it would use the same login as the service.
 

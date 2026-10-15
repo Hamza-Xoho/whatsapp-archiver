@@ -9,3 +9,4 @@
 .claude-flow/
 .DS_Store
 /.superpowers/
+/.claude/settings.local.json
