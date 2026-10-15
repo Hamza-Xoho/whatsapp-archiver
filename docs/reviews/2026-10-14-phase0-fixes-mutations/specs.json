@@ -1525,8 +1525,8 @@
  {
   "name": "h14r1-bytes-suffix",
   "file": "internal/ingest/scrub.go",
-  "old": "\"secret\", \"token\", \"bytes\"}",
-  "new": "\"secret\", \"token\"}",
+  "old": "\"secret\", \"token\", \"bytes\", \"snapshot\"}",
+  "new": "\"secret\", \"token\", \"snapshot\"}",
   "pkgs": "./internal/ingest/",
   "rf": "H14-r1"
  },
