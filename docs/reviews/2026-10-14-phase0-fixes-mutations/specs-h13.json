@@ -211,8 +211,8 @@
   "name": "h13-serve-open2",
   "rf": "H13",
   "file": "cmd/archiver/main.go",
-  "old": "\tdefer func() { _ = st.Close() }()\n\tclient, err := wa.Open(ctx, cfg, log)",
-  "new": "\tdefer func() { _ = st.Close() }()\n\tst2, err := store.Open(filepath.Join(cfg.DataDir, \"archive.db\"))\n\tif err != nil {\n\t\treturn err\n\t}\n\tdefer func() { _ = st2.Close() }()\n\tclient, err := wa.Open(ctx, cfg, log)",
+  "old": "\tclient, err := wa.Open(ctx, cfg, log)\n",
+  "new": "\tst2, err := store.Open(filepath.Join(cfg.DataDir, \"archive.db\"))\n\tif err != nil {\n\t\treturn err\n\t}\n\t_ = st2\n\tclient, err := wa.Open(ctx, cfg, log)\n",
   "pkgs": "./cmd/archiver/"
  },
  {
