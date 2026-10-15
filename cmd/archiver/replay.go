@@ -122,7 +122,7 @@ func replay(dir, data, own, ownLID string, errOut io.Writer) (int, string, error
 	}
 	defer func() { _ = st.Close() }()
 	ctx := context.Background()
-	aliases := func(jid string) []string { v, _ := st.Aliases(ctx, jid); return v }
+	aliases := func(jid string) ([]string, error) { return st.Aliases(ctx, jid) }
 	log := slog.New(slog.NewJSONHandler(errOut, nil))
 	p := ingest.NewPipeline(st, ingest.NewFilter(cfg.Exclude, aliases), noMedia{}, noHealth{}, log).WithHistoryParser(wa.NewHistoryParser(pn, lid))
 	if err = ingest.Replay(ctx, p, evts); err != nil {
