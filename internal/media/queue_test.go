@@ -36,10 +36,9 @@ func TestDocumentDownloads(t *testing.T) {
 	if err := q.Enqueue(t.Context(), store.Media{ChatJID: "g@g.us", MessageID: "A", Type: "document", MIME: "application/pdf", State: "pending"}); err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithCancel(t.Context())
-	go q.Run(ctx)
-	time.Sleep(50 * time.Millisecond)
-	cancel()
+	stop := start(t, q)
+	eventually(t, "document done", func() bool { return row(t, st, "g@g.us", "A").State == "done" })
+	stop() // waits for Run to return, so reading the fake afterwards is race-free
 	job, _ := st.MediaByID(t.Context(), "g@g.us", "A")
 	if job.State != "done" || d.calls != 1 {
 		t.Fatalf("job=%+v calls=%d", job, d.calls)

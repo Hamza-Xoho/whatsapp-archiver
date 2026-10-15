@@ -32,6 +32,7 @@ type HealthSink interface {
 	Panic(string)
 }
 type Pipeline struct {
+	ctx    context.Context // the serve context: Handle's retry loops end with it
 	writer Writer
 	filter *Filter
 	queue  MediaQueue
@@ -53,13 +54,21 @@ func NewPipeline(w Writer, f *Filter, q MediaQueue, h HealthSink, log *slog.Logg
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Pipeline{writer: w, filter: f, queue: q, health: h, log: log, now: time.Now, sleep: sleepContext}
+	return &Pipeline{ctx: context.Background(), writer: w, filter: f, queue: q, health: h, log: log, now: time.Now, sleep: sleepContext}
 }
 
 // WithClock replaces the time source and the back-off sleep; tests use it to run retries on a fake clock.
 func (p *Pipeline) WithClock(now func() time.Time, sleep func(time.Duration)) *Pipeline {
 	p.now = now
 	p.sleep = func(_ context.Context, d time.Duration) { sleep(d) }
+	return p
+}
+
+// WithContext sets the context Handle runs its writes under. serve passes its own, so that SIGTERM ends a write
+// retry loop; the event is then not stored, which is acceptable because the process is exiting. The default is
+// context.Background().
+func (p *Pipeline) WithContext(ctx context.Context) *Pipeline {
+	p.ctx = ctx
 	return p
 }
 
@@ -75,8 +84,12 @@ func sleepContext(ctx context.Context, d time.Duration) {
 }
 
 // persist runs one write so that it is never dropped: it retries with back-off, reports WriteFailed once when the
-// policy gives up, then keeps retrying at the longest interval until the write succeeds or ctx ends.
+// policy gives up, then keeps retrying at the longest interval until the write succeeds or the retrying is stopped.
+// Retrying stops when ctx or the pipeline's serve context ends (a back-off sleep, at most writeMaxWait, is not
+// interrupted by the latter); that context never cancels a write attempt itself (fn runs under the caller's context),
+// so a healthy write at SIGTERM completes and only a failing one is abandoned.
 func (p *Pipeline) persist(ctx context.Context, what string, fn func() error) error {
+	stopped := func() bool { return ctx.Err() != nil || p.ctx.Err() != nil }
 	policy := retry.Policy{Max: writeAttempts, Base: writeBase, Sleep: func(d time.Duration) { p.sleep(ctx, d) }, Permanent: isPermanent}
 	_, err := retry.Do(ctx, policy, fn)
 	if err == nil {
@@ -86,7 +99,7 @@ func (p *Pipeline) persist(ctx context.Context, what string, fn func() error) er
 	if isPermanent(err) {
 		return p.rejected(what, err)
 	}
-	for ctx.Err() == nil {
+	for !stopped() {
 		p.sleep(ctx, writeMaxWait)
 		if err = fn(); err == nil {
 			return nil
@@ -117,7 +130,7 @@ func (p *Pipeline) rejected(what string, err error) error {
 
 func (p *Pipeline) Handle(evt any) {
 	guard.Run(p.log, "handler", func(string, any) { p.health.Panic("handler") }, func() {
-		ctx := context.Background()
+		ctx := context.WithoutCancel(p.ctx) // writes are not cancelled by SIGTERM; persist stops retrying on p.ctx
 		now := p.now()
 		logErr := func(err error) {
 			if err != nil {
