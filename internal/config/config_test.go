@@ -68,3 +68,50 @@ func TestLoadRejectsBadVersionOverride(t *testing.T) {
 		t.Fatalf("error = %v", err)
 	}
 }
+
+// M10: an exclude entry that is not a chat address would silently exclude nothing, so Load rejects it and names it.
+func TestLoadRejectsExcludeEntryThatIsNotAChatAddress(t *testing.T) {
+	for _, bad := range []string{"+4915111222333", "4915111222333", "4915111222333@whatsapp.net", "Family group", "+4915111222333@s.whatsapp.net", "abc@lid", "4915111222333@s.whatsapp.net "} {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		if err := os.WriteFile(path, []byte("exclude:\n  - \"441234567890@s.whatsapp.net\"\n  - \""+bad+"\"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := config.Load(path)
+		if err == nil || !strings.Contains(err.Error(), `"`+bad+`"`) || !strings.Contains(err.Error(), "@s.whatsapp.net") || !strings.Contains(err.Error(), "@lid") || !strings.Contains(err.Error(), "@g.us") {
+			t.Fatalf("entry %q: error = %v, want it named with the expected forms", bad, err)
+		}
+	}
+}
+
+// M10: the three chat address forms load.
+func TestLoadAcceptsChatAddresses(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	good := []string{"441234567890@s.whatsapp.net", "204871@lid", "120363111@g.us", "441234567890-1500000000@g.us"}
+	if err := os.WriteFile(path, []byte("exclude: [\""+strings.Join(good, "\", \"")+"\"]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := config.Load(path)
+	if err != nil || strings.Join(c.Exclude, ",") != strings.Join(good, ",") {
+		t.Fatalf("exclude=%v err=%v", c, err)
+	}
+}
+
+// M10: the configuration example of the setup guide loads.
+func TestSetupGuideConfigExampleLoads(t *testing.T) {
+	guide, err := os.ReadFile("../../docs/phase0-setup.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, rest, ok := strings.Cut(string(guide), "```yaml\n")
+	example, _, closed := strings.Cut(rest, "```")
+	if !ok || !closed || !strings.Contains(example, "exclude:") {
+		t.Fatal("no yaml example with an exclude list in docs/phase0-setup.md")
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err = os.WriteFile(path, []byte(example), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = config.Load(path); err != nil {
+		t.Fatalf("the guide's example does not load: %v", err)
+	}
+}
