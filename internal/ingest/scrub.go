@@ -193,11 +193,12 @@ func (sc scrubber) scrubValue(kind protoreflect.Kind, v protoreflect.Value, fiel
 }
 
 // clearedBytesField names the bytes fields cleared by Scrub: keys, key data, secrets, tokens and sender keys, and
-// serialized or compressed payloads (inline history, resent messages, LID migration mappings) that cannot be walked.
+// serialized or compressed payloads (inline history, resent messages, LID migration mappings, app-state snapshots)
+// that cannot be walked.
 // Fixtures never need them.
 func clearedBytesField(name string) bool {
 	n := strings.ToLower(name)
-	for _, suffix := range []string{"key", "keydata", "secret", "token", "bytes"} {
+	for _, suffix := range []string{"key", "keydata", "secret", "token", "bytes", "snapshot"} {
 		if strings.HasSuffix(n, suffix) {
 			return true
 		}
