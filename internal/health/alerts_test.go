@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -170,7 +172,23 @@ func TestWriteFailedAndPanicAlertOncePerSixHours(t *testing.T) {
 	r.advance(5 * time.Hour)
 	r.m.WriteFailed(errors.New("disk I/O error"))
 	r.m.Panic("handler")
-	wantBodies(t, r.sent(), "disk I/O error", "handler", "disk I/O error", "handler")
+	wantBodies(t, r.sent(), "see the journal", "handler", "see the journal", "handler")
+}
+
+// I1: a failure alert's body is fixed text; the error, which can name a chat (even the LID alias of an excluded one),
+// stays in the journal. A failed read has its own, accurate title.
+func TestFailureAlertsCarryNoErrorTextAndNameReads(t *testing.T) {
+	r := newRig(t, config.AlertConfig{})
+	r.m.WriteFailed(errors.New("write message in 777777@lid: database is locked"))
+	r.m.WriteFailed(fmt.Errorf("alias lookup for 888888@lid: %w", ErrRead))
+	bodies := r.sent()
+	want := "A write or read is failing; see the journal"
+	if len(bodies) != 2 || bodies[0] != want || bodies[1] != want {
+		t.Fatalf("bodies=%q, want two of %q", bodies, want)
+	}
+	if got := r.n.titles; !slices.Equal(got, []string{"Archive write failed", "Archive read failed"}) {
+		t.Fatalf("titles=%q", got)
+	}
 }
 
 func TestFailedBackupAlertNamesErrorThenRecovers(t *testing.T) {

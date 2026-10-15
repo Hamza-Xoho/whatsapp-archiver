@@ -3,6 +3,7 @@ package health
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -110,6 +111,10 @@ func (m *Monitor) banBody(detail string) string {
 	until := m.clock.Now().Add(d).UTC().Format(time.RFC3339)
 	return "Temporarily banned for " + d.String() + " (until " + until + "); capture is paused"
 }
+
+// ErrRead marks a failed archive read, such as the exclusion filter's alias lookup.
+var ErrRead = errors.New("archive read failed")
+
 func (m *Monitor) WriteFailed(err error) {
 	m.gate.fire("write_failed", "Archive write failed", err.Error())
 }

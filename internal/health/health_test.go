@@ -10,9 +10,10 @@ import (
 	"whatsapp-archiver/internal/config"
 )
 
-type note struct{ bodies []string }
+type note struct{ titles, bodies []string }
 
-func (n *note) Notify(_ context.Context, _, body string) error {
+func (n *note) Notify(_ context.Context, title, body string) error {
+	n.titles = append(n.titles, title)
 	n.bodies = append(n.bodies, body)
 	return nil
 }
