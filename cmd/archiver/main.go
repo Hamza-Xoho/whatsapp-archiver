@@ -123,6 +123,8 @@ func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) er
 	if recordDir != "" {
 		handler = ingest.NewRecorder(recordDir).Wrap(handler)
 	}
+	handlers := &inFlight{}
+	handler = handlers.wrap(handler)
 	if pairing {
 		_, _ = fmt.Fprintln(out, "Scan the QR code from WhatsApp → Linked Devices.")
 	}
@@ -131,8 +133,9 @@ func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) er
 		mon.Run,
 		func(ctx context.Context) { backup.Schedule(ctx, cfg, systemClock{}, mon.BackupResult) },
 	}
-	// Shutdown order: cancel ctx, client.Run returns, the loops are joined, then the client and the store are closed.
-	return runService(ctx, cancel, func(ctx context.Context) error { return client.Run(ctx, handler, pairing) }, loops, client.Close, st.Close)
+	// Shutdown order: cancel ctx, client.Run returns, the loops are joined, the event handler in flight is waited for
+	// (at most handlerDrainBound), then the client and the store are closed.
+	return runService(ctx, cancel, func(ctx context.Context) error { return client.Run(ctx, handler, pairing) }, loops, handlers.drain, client.Close, st.Close)
 }
 
 // storeAliases is the exclusion filter's alias lookup: the other forms (LID or phone) of a chat known to the store.

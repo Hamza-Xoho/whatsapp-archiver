@@ -64,9 +64,9 @@ func (p *Pipeline) WithClock(now func() time.Time, sleep func(time.Duration)) *P
 	return p
 }
 
-// WithContext sets the context Handle runs its writes under. serve passes its own, so that SIGTERM ends a write
-// retry loop; the event is then not stored, which is acceptable because the process is exiting. The default is
-// context.Background().
+// WithContext sets the serve context. When it ends (SIGTERM), a write that is still failing stops being retried and
+// that event is not stored, which is acceptable because the process is exiting; each write attempt runs under
+// context.WithoutCancel, so a healthy write at SIGTERM completes. The default is context.Background().
 func (p *Pipeline) WithContext(ctx context.Context) *Pipeline {
 	p.ctx = ctx
 	return p
