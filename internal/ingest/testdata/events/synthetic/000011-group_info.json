@@ -1,0 +1,35 @@
+{
+  "kind": "group_info",
+  "info": {
+    "JID": "10000000100@g.us",
+    "Notify": "",
+    "Sender": "20000000001@lid",
+    "SenderPN": "10000000001@s.whatsapp.net",
+    "Timestamp": "2025-10-09T09:03:20Z",
+    "Name": {
+      "Name": "Synthetic Group Renamed",
+      "NameSetAt": "2025-10-09T09:03:20Z",
+      "NameSetBy": "20000000001@lid",
+      "NameSetByPN": ""
+    },
+    "Topic": null,
+    "Locked": null,
+    "Announce": null,
+    "Ephemeral": null,
+    "MembershipApprovalMode": null,
+    "Delete": null,
+    "Link": null,
+    "Unlink": null,
+    "NewInviteLink": null,
+    "PrevParticipantVersionID": "",
+    "ParticipantVersionID": "",
+    "JoinReason": "",
+    "Join": null,
+    "Leave": null,
+    "Promote": null,
+    "Demote": null,
+    "Suspended": false,
+    "Unsuspended": false,
+    "UnknownChanges": null
+  }
+}
