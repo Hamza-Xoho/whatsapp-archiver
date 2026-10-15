@@ -84,8 +84,12 @@ func sleepContext(ctx context.Context, d time.Duration) {
 }
 
 // persist runs one write so that it is never dropped: it retries with back-off, reports WriteFailed once when the
-// policy gives up, then keeps retrying at the longest interval until the write succeeds or ctx ends.
+// policy gives up, then keeps retrying at the longest interval until the write succeeds or the retrying is stopped.
+// Retrying stops when ctx or the pipeline's serve context ends (a back-off sleep, at most writeMaxWait, is not
+// interrupted by the latter); that context never cancels a write attempt itself (fn runs under the caller's context),
+// so a healthy write at SIGTERM completes and only a failing one is abandoned.
 func (p *Pipeline) persist(ctx context.Context, what string, fn func() error) error {
+	stopped := func() bool { return ctx.Err() != nil || p.ctx.Err() != nil }
 	policy := retry.Policy{Max: writeAttempts, Base: writeBase, Sleep: func(d time.Duration) { p.sleep(ctx, d) }, Permanent: isPermanent}
 	_, err := retry.Do(ctx, policy, fn)
 	if err == nil {
@@ -95,7 +99,7 @@ func (p *Pipeline) persist(ctx context.Context, what string, fn func() error) er
 	if isPermanent(err) {
 		return p.rejected(what, err)
 	}
-	for ctx.Err() == nil {
+	for !stopped() {
 		p.sleep(ctx, writeMaxWait)
 		if err = fn(); err == nil {
 			return nil
@@ -126,7 +130,7 @@ func (p *Pipeline) rejected(what string, err error) error {
 
 func (p *Pipeline) Handle(evt any) {
 	guard.Run(p.log, "handler", func(string, any) { p.health.Panic("handler") }, func() {
-		ctx := p.ctx
+		ctx := context.WithoutCancel(p.ctx) // writes are not cancelled by SIGTERM; persist stops retrying on p.ctx
 		now := p.now()
 		logErr := func(err error) {
 			if err != nil {
