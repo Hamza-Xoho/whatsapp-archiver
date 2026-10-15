@@ -7,10 +7,36 @@ The archiver is a program that stays logged in to WhatsApp as an extra "linked d
 ## 0. How to read this guide
 
 - **On the Mac** means a Terminal window on your Mac, in this repository's folder.
-- **On the server** means a Terminal window where you have connected to the server with SSH (section 2).
+- **On the server** means a Terminal window where you have connected to the server with SSH (section 2). If the PC has Ubuntu Desktop and you sit at it, it means a Terminal on that PC; read "Using Ubuntu Desktop instead of Ubuntu Server" below first.
 - `sudo` runs one command as the administrator. It asks for your server password the first time.
 - `SERVER` stands for the server's name or IP address. `hamza` stands for your user name on the server. Replace both.
 - `whatsapp-archiver` is a separate, powerless user that the archiver runs as. Run the archiver itself only as that user (`sudo -u whatsapp-archiver …`). If you run it as root by mistake, it creates root-owned files that the service cannot read; the fix is `sudo chown -R whatsapp-archiver:whatsapp-archiver /var/lib/whatsapp-archiver`.
+
+## Using Ubuntu Desktop instead of Ubuntu Server
+
+If you would rather have a screen, a mouse and ordinary windows, install **Ubuntu Desktop 26.04 LTS** on the PC instead of the server edition. It is the same Ubuntu, so every command in this guide works unchanged. The differences:
+
+1. **Section 1:** download Ubuntu Desktop 26.04 LTS from ubuntu.com, write it to a USB stick with balenaEtcher and follow the installer. A "Minimal installation" is enough. There is no OpenSSH question; the user you create in the installer can use `sudo`.
+2. **Section 2 (SSH):** skip the `ssh` command. Press Ctrl-Alt-T to open a Terminal on the PC itself. Everywhere the guide says "on the server", type the commands in that Terminal. Run the rest of section 2 as written (`uname -m`, the time zone and the `apt` lines), leaving out `ssh`. `SERVER` is never needed.
+3. **Section 3 (copy the program):** the program has to get from your Mac onto this PC. Pick one way and do the rest of section 3 (`make build-all` on the Mac) as written.
+   - **USB stick.** On the Mac copy `archiver-linux-amd64` (or `archiver-linux-arm64`, matching `uname -m`) and `deploy/archiver.service` onto a stick. Plug it into the PC, then in the PC's Terminal run `ls /media/$USER/` to see the stick's name and copy the files (replace `STICK` with that name):
+
+     ```sh
+     cp /media/$USER/STICK/archiver-linux-amd64 /tmp/archiver
+     cp /media/$USER/STICK/archiver.service /tmp/archiver.service
+     ```
+
+   - **Over the network.** On the PC run `sudo apt install -y openssh-server` and `hostname -I` (the first number is `SERVER`), then use the `scp` lines in section 3 from the Mac.
+4. **Never let the PC sleep.** A desktop suspends itself after a while, and a suspended PC captures nothing. On the PC run:
+
+   ```sh
+   sudo systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target
+   systemctl is-enabled sleep.target
+   ```
+
+   Expected: the last command prints `masked`. This also means closing a laptop's lid no longer suspends it. Leave the PC plugged in. In Settings → Power you may also set Screen Blank to any value; the screen turning off is harmless.
+5. **Section 7 (pairing):** maximise the Terminal window (double-click its title bar) so the QR code is not cut.
+6. **Updates and restarts:** Ubuntu may ask to restart after an update. That is fine once section 8 is done, because the service starts again by itself after a reboot. Do not restart while the first history sync from section 7 is still running.
 
 ## 1. Install the server
 
