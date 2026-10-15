@@ -284,18 +284,21 @@ func (s *Store) NextExpiredMedia(ctx context.Context) (*Media, error) {
 func (s *Store) Aliases(ctx context.Context, jid string) ([]string, error) {
 	rows, err := s.read.QueryContext(ctx, aliasesQuery, jid)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("query aliases of %s: %w", jid, err)
 	}
 	defer func() { _ = rows.Close() }()
 	var out []string
 	for rows.Next() {
 		var v string
 		if err = rows.Scan(&v); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("scan aliases of %s: %w", jid, err)
 		}
 		out = append(out, v)
 	}
-	return out, rows.Err()
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("read aliases of %s: %w", jid, err)
+	}
+	return out, nil
 }
 func (s *Store) OpenGapCount(ctx context.Context) (int, error) {
 	var n int

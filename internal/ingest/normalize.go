@@ -94,9 +94,18 @@ func normalizeContent(msg *waE2E.Message, r *Result) {
 		r.Message = nil
 		r.Media = nil
 	}
-	if x := msg.GetSecretEncryptedMessage(); x.GetSecretEncType() == waE2E.SecretEncryptedMessage_MESSAGE_EDIT {
-		r.Kind = KindEdit // the new content is encrypted with the message secret; target and raw proto are kept
-		r.Event = event(r, x.GetTargetMessageKey().GetID(), "edit", "")
+	if x := msg.GetSecretEncryptedMessage(); x != nil {
+		// The content is encrypted with the message secret; target and raw proto are kept. A MESSAGE_EDIT is an edit;
+		// every other type (poll edit, event edit, ...) is a secret_encrypted event named by its type.
+		target := x.GetTargetMessageKey().GetID()
+		if x.GetSecretEncType() == waE2E.SecretEncryptedMessage_MESSAGE_EDIT {
+			r.Kind = KindEdit
+			r.Event = event(r, target, "edit", "")
+		} else {
+			r.Kind = KindSecretEncrypted
+			r.Event = event(r, target, string(KindSecretEncrypted), x.GetSecretEncType().String())
+			r.Event.NewText = ""
+		}
 		r.Message = nil
 		r.Media = nil
 	}

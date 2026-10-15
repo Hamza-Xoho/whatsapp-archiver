@@ -98,6 +98,16 @@ func (p *Pipeline) persist(ctx context.Context, what string, fn func() error) er
 	return fmt.Errorf("%s: %w", what, err)
 }
 
+// keep evaluates the exclusion filter under persist: a failed alias lookup is retried (and alerted once through
+// WriteFailed) until it answers, so an excluded chat is never stored and a kept one is never dropped.
+func (p *Pipeline) keep(ctx context.Context, chat string, kind Kind) (keep bool, err error) {
+	err = p.persist(ctx, "check exclusion of "+chat, func() (e error) {
+		keep, e = p.filter.Keep(chat, kind)
+		return e
+	})
+	return keep && err == nil, err
+}
+
 // rejected logs and returns a write that can never succeed.
 func (p *Pipeline) rejected(what string, err error) error {
 	err = fmt.Errorf("%s: %w", what, err)
@@ -157,8 +167,8 @@ func (p *Pipeline) Ingest(ctx context.Context, r Result) error {
 			return err
 		}
 	}
-	if !p.filter.Keep(r.Chat.JID, r.Kind) {
-		return nil
+	if keep, err := p.keep(ctx, r.Chat.JID, r.Kind); err != nil || !keep {
+		return err
 	}
 	write := func() error {
 		if r.Chat.JID != "" {

@@ -2,6 +2,7 @@ package ingest_test
 
 import (
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -198,6 +199,58 @@ func TestSecretEncryptedEditIsAnEdit(t *testing.T) {
 	}
 	if got := rows(t, st, `SELECT kind,target_id,new_text,length(raw_proto)>0 FROM message_events`); !slices.Equal(got, []string{"edit|ORIG||1"}) {
 		t.Fatalf("message_events=%v", got)
+	}
+}
+
+// Every SecretEncryptedMessage type other than MESSAGE_EDIT (POLL_EDIT, EVENT_EDIT, POLL_ADD_OPTION, MESSAGE_SCHEDULE,
+// UNKNOWN or an absent type) is a message event of kind secret_encrypted, Value = the type name, target = the target
+// message; the payload is encrypted with the message secret, so NewText stays empty. It is never a message row.
+func TestSecretEncryptedNonEditIsAnEventNotAMessage(t *testing.T) {
+	type tc struct {
+		name string
+		typ  *waE2E.SecretEncryptedMessage_SecretEncType
+	}
+	var cases []tc
+	for number, name := range waE2E.SecretEncryptedMessage_SecretEncType_name {
+		if typ := waE2E.SecretEncryptedMessage_SecretEncType(number); typ != waE2E.SecretEncryptedMessage_MESSAGE_EDIT {
+			cases = append(cases, tc{name, typ.Enum()})
+		}
+	}
+	cases = append(cases, tc{"UNKNOWN", nil}) // no type on the wire reads as UNKNOWN
+	slices.SortFunc(cases, func(a, b tc) int { return strings.Compare(a.name, b.name) })
+	have := map[string]bool{}
+	for _, c := range cases {
+		have[c.name] = true
+	}
+	for _, name := range []string{"POLL_EDIT", "EVENT_EDIT", "POLL_ADD_OPTION", "MESSAGE_SCHEDULE", "UNKNOWN"} {
+		if !have[name] {
+			t.Fatalf("pinned enum has no %s: cases=%v", name, cases)
+		}
+	}
+	st := testkit.Store(t)
+	p := ingest.NewPipeline(st, ingest.NewFilter(nil, nil), &queueFake{}, &healthFake{}, quiet())
+	var want []string
+	for _, c := range cases {
+		target := "TARGET-" + c.name
+		msg := &waE2E.Message{SecretEncryptedMessage: &waE2E.SecretEncryptedMessage{
+			TargetMessageKey: &waCommon.MessageKey{ID: proto.String(target)}, EncPayload: []byte("cipher"), EncIV: []byte("iv"), SecretEncType: c.typ,
+		}}
+		r := ingest.FromMessage(messageEvent("g@g.us", "SE-"+c.name, msg), "live", time.Unix(20, 0))
+		if r.Kind != ingest.Kind("secret_encrypted") || r.Message != nil || r.Media != nil || r.Event == nil {
+			t.Fatalf("%s: kind=%s message=%+v event=%+v", c.name, r.Kind, r.Message, r.Event)
+		}
+		if e := r.Event; e.Kind != "secret_encrypted" || e.TargetID != target || e.Value != c.name || e.NewText != "" || e.Timestamp != 10 || len(e.RawProto) == 0 {
+			t.Fatalf("%s: event=%+v", c.name, e)
+		}
+		p.Handle(messageEvent("g@g.us", "SE-"+c.name, msg))
+		want = append(want, "secret_encrypted|"+target+"|"+c.name+"||1")
+	}
+	slices.Sort(want)
+	if got := rows(t, st, `SELECT count(*) FROM messages`); !slices.Equal(got, []string{"0"}) {
+		t.Fatalf("messages=%v", got)
+	}
+	if got := rows(t, st, `SELECT kind,target_id,value,new_text,length(raw_proto)>0 FROM message_events ORDER BY target_id`); !slices.Equal(got, want) {
+		t.Fatalf("message_events=%v, want %v", got, want)
 	}
 }
 

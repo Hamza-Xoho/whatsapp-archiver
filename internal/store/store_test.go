@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -270,5 +271,35 @@ func TestCoverageReportsOldestPerChat(t *testing.T) {
 	c, err := s.HistoryCoverage(ctx)
 	if err != nil || c.Chunks != 2 || c.LastProgress != 90 || c.LastChunkTime != 101 || len(c.OldestByChat) != 2 || c.OldestByChat["g@g.us"] != 3 || c.OldestByChat["1234@lid"] != 4 {
 		t.Fatalf("coverage=%+v err=%v", c, err)
+	}
+}
+
+// H1: a phone number known under several lids has all of them as aliases; none is picked as "the" canonical one.
+func TestAliasesUnionForPhoneWithSeveralLIDs(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	for _, lid := range []string{"1@lid", "2@lid"} {
+		if _, err := s.InsertIDMapping(ctx, store.IDMapping{LID: lid, PN: "9@s.whatsapp.net", Source: "test", FirstSeen: time.Unix(2, 0)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.Aliases(ctx, "9@s.whatsapp.net")
+	if err != nil || len(got) != 2 || got[0] != "1@lid" || got[1] != "2@lid" {
+		t.Fatalf("aliases of the phone=%v err=%v", got, err)
+	}
+	// From either lid: the phone number and the other lid's phone numbers, never the lid itself.
+	got, err = s.Aliases(ctx, "2@lid")
+	if err != nil || len(got) != 1 || got[0] != "9@s.whatsapp.net" {
+		t.Fatalf("aliases of a lid=%v err=%v", got, err)
+	}
+}
+
+// A failed alias lookup names what failed, so the alert and the log say which chat could not be checked.
+func TestAliasesErrorIsWrappedWithContext(t *testing.T) {
+	s := open(t)
+	_ = s.Close()
+	_, err := s.Aliases(context.Background(), "1@lid")
+	if err == nil || !strings.Contains(err.Error(), "aliases of 1@lid") {
+		t.Fatalf("err=%v", err)
 	}
 }
