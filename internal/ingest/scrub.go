@@ -23,6 +23,14 @@ var jidPattern = regexp.MustCompile(`([0-9]+(?:-[0-9]+)?)((?:\.[0-9]+)?(?::[0-9]
 // barePhone is a whole string that is a phone number; it is replaced only in identifier-named fields.
 var barePhone = regexp.MustCompile(`^\+?[0-9]{8,}$`)
 
+// Numbers inside text: a mention token (@<number or LID>), a vCard waid and a vCard TEL value.
+var (
+	mentionPattern = regexp.MustCompile(`@([0-9]{8,})`)
+	waidPattern    = regexp.MustCompile(`waid=([0-9]+)`)
+	telPattern     = regexp.MustCompile(`(?im)^((?:[a-z0-9-]+\.)?TEL[^:\r\n]*:)([^\r\n]*)`)
+	nonDigits      = regexp.MustCompile(`[^0-9]`)
+)
+
 // Scrub copies the recorded files in `in` to `out`, replacing every phone number, LID and group ID in the JSON and
 // in every protobuf string field with a stable fake, and clearing key material. Text is kept.
 func Scrub(in, out string) error {
@@ -75,7 +83,14 @@ func scrubJSON(v any, field string) any {
 	switch x := v.(type) {
 	case map[string]any:
 		for k, val := range x {
-			x[k] = scrubJSON(val, k)
+			switch _, isString := val.(string); {
+			case k == "Certificate": // a verified-name certificate: signed bytes with the business details
+				x[k] = nil
+			case k == "Content" && isString: // the base64 content of an unknown group change node
+				x[k] = ""
+			default:
+				x[k] = scrubJSON(val, k)
+			}
 		}
 	case []any:
 		for i, val := range x {
@@ -117,7 +132,7 @@ func scrubMessage(m protoreflect.Message) {
 	for _, fd := range fields {
 		name := string(fd.Name())
 		switch v := m.Get(fd); {
-		case fd.Kind() == protoreflect.BytesKind && keyMaterialField(name):
+		case fd.Kind() == protoreflect.BytesKind && clearedBytesField(name):
 			m.Clear(fd)
 		case fd.IsMap():
 			scrubMap(v.Map(), fd, name)
@@ -165,25 +180,41 @@ func scrubValue(kind protoreflect.Kind, v protoreflect.Value, field string) (pro
 	return v, false
 }
 
-// keyMaterialField names the bytes fields cleared by Scrub: keys, key data, secrets, tokens and sender keys.
+// clearedBytesField names the bytes fields cleared by Scrub: keys, key data, secrets, tokens and sender keys, and
+// serialized or compressed payloads (inline history, resent messages, LID migration mappings) that cannot be walked.
 // Fixtures never need them.
-func keyMaterialField(name string) bool {
+func clearedBytesField(name string) bool {
 	n := strings.ToLower(name)
-	for _, suffix := range []string{"key", "keydata", "secret", "token"} {
+	for _, suffix := range []string{"key", "keydata", "secret", "token", "bytes"} {
 		if strings.HasSuffix(n, suffix) {
 			return true
 		}
 	}
-	return strings.Contains(n, "senderkeydistribution")
+	return strings.Contains(n, "senderkeydistribution") || strings.Contains(n, "payload")
 }
 
-// scrubString replaces every JID's user part, keeping agent, device and server; a whole-string phone number is
-// replaced too when the field name says it holds an identifier.
+// scrubString replaces every JID's user part, keeping agent, device and server, and every number in a vCard TEL
+// value, a waid or a mention token with the same fake, so a mention in the text still matches its mentionedJID.
+// A whole-string phone number is replaced too when the field name says it holds an identifier.
 func scrubString(s, field string) string {
 	s = jidPattern.ReplaceAllStringFunc(s, func(match string) string {
 		p := jidPattern.FindStringSubmatch(match)
 		return fakeUser(p[1]) + p[2] + "@" + p[3]
 	})
+	s = telPattern.ReplaceAllStringFunc(s, func(match string) string {
+		p := telPattern.FindStringSubmatch(match)
+		digits := nonDigits.ReplaceAllString(p[2], "")
+		if digits == "" {
+			return match
+		}
+		plus := ""
+		if strings.HasPrefix(strings.TrimSpace(p[2]), "+") {
+			plus = "+"
+		}
+		return p[1] + plus + fakeUser(digits)
+	})
+	s = waidPattern.ReplaceAllStringFunc(s, func(match string) string { return "waid=" + fakeUser(match[len("waid="):]) })
+	s = mentionPattern.ReplaceAllStringFunc(s, func(match string) string { return "@" + fakeUser(match[1:]) })
 	if identifierField(field) && barePhone.MatchString(s) {
 		plus := ""
 		if strings.HasPrefix(s, "+") {
