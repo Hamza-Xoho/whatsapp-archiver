@@ -1,0 +1,130 @@
+[
+ {
+  "name": "h14-device",
+  "rf": "H14",
+  "file": "internal/ingest/scrub.go",
+  "old": "((?:\\.[0-9]+)?(?::[0-9]+)?)@(s\\.whatsapp",
+  "new": "()@(s\\.whatsapp",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h14-proto",
+  "rf": "H14",
+  "file": "internal/ingest/scrub.go",
+  "old": "\tscrubMessage(msg.ProtoReflect())\n",
+  "new": "\t_ = msg.ProtoReflect()\n",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h14-kind",
+  "rf": "H14",
+  "file": "internal/ingest/record.go",
+  "old": "case *events.GroupInfo:\n\t\treturn \"group_info\", e, nil",
+  "new": "case *events.GroupInfo:\n\t\treturn \"\", nil, nil",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h14-ts",
+  "rf": "H14",
+  "file": "internal/ingest/record.go",
+  "old": "return \"message\", e.Info, raw",
+  "new": "return \"message\", types.MessageInfo{MessageSource: e.Info.MessageSource, ID: e.Info.ID, PushName: e.Info.PushName}, raw",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h14-dump",
+  "rf": "H14",
+  "file": "internal/store/dump.go",
+  "old": "map[string]bool{\"received_at\": true, \"first_seen\": true}",
+  "new": "map[string]bool{\"first_seen\": true}",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h14-order",
+  "rf": "H14",
+  "file": "internal/store/dump.go",
+  "old": "\" FROM \"+table+\" ORDER BY \"+list",
+  "new": "\" FROM \"+table",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h14-bare",
+  "rf": "H14",
+  "file": "internal/ingest/scrub.go",
+  "old": "if identifierField(field) && barePhone.MatchString(s) {",
+  "new": "if false && barePhone.MatchString(s) {",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h14-keys",
+  "rf": "H14",
+  "file": "internal/ingest/scrub.go",
+  "old": "\t\t\tm.Clear(fd)\n",
+  "new": "\t\t\t_ = fd\n",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h14-group",
+  "rf": "H14",
+  "file": "internal/ingest/scrub.go",
+  "old": "|lid|g\\.us|c\\.us|",
+  "new": "|lid|c\\.us|",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h14-seq",
+  "rf": "H14",
+  "file": "internal/ingest/record.go",
+  "old": "r.seq = lastSeq(r.dir)",
+  "new": "r.seq = 0",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h14-partial",
+  "rf": "H14",
+  "file": "internal/ingest/record.go",
+  "old": "AllowPartial: true}.Marshal(payload)",
+  "new": "}.Marshal(payload)",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h14-unwrap",
+  "rf": "H14",
+  "file": "internal/ingest/replay.go",
+  "old": "return (&events.Message{Info: mi, RawMessage: raw}).UnwrapRaw(), err",
+  "new": "return &events.Message{Info: mi, RawMessage: raw, Message: raw}, err",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h14-logerr",
+  "rf": "H14",
+  "file": "internal/ingest/record.go",
+  "old": "r.log.Error(\"event not recorded\"",
+  "new": "r.log.Debug(\"event not recorded\"",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h14-fresh",
+  "rf": "H14",
+  "file": "cmd/archiver/replay.go",
+  "old": "if _, err = os.Stat(path); !errors.Is(err, fs.ErrNotExist) {",
+  "new": "if _, err = os.Stat(path); false && !errors.Is(err, fs.ErrNotExist) {",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "h14-dumpcli",
+  "rf": "H14",
+  "file": "cmd/archiver/replay.go",
+  "old": "\t\t_, _ = fmt.Fprint(out, raw)\n",
+  "new": "",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "h14-history-cli",
+  "rf": "H14",
+  "file": "cmd/archiver/replay.go",
+  "old": ".WithHistoryParser(wa.NewHistoryParser(pn, lid))",
+  "new": "; _ = wa.NewHistoryParser(pn, lid)",
+  "pkgs": "./cmd/archiver/"
+ }
+]
