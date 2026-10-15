@@ -96,19 +96,21 @@ func run(args []string, out, errOut io.Writer) int {
 	return 0
 }
 func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) error {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// ctx ends on SIGTERM and also when client.Run returns by itself; the pipeline and every loop stop on it.
+	ctx, cancel := context.WithCancel(sigCtx)
+	defer cancel()
 	log := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	st, err := store.Open(filepath.Join(cfg.DataDir, "archive.db"))
 	if err != nil {
 		return err
 	}
-	defer func() { _ = st.Close() }()
 	client, err := wa.Open(ctx, cfg, log)
 	if err != nil {
+		_ = st.Close()
 		return err
 	}
-	defer func() { _ = client.Close() }()
 	var notifier health.Notifier
 	if cfg.Alerts.Ntfy != nil {
 		notifier = health.NewNtfy(cfg.Alerts.Ntfy)
@@ -116,18 +118,21 @@ func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) er
 	mon := health.NewMonitor(cfg, notifier, systemClock{}, health.DiskFree, client.VersionInUse).WithVersionReason(client.VersionReason).WithLogger(log)
 	aliases := func(jid string) ([]string, error) { return st.Aliases(context.Background(), jid) }
 	queue := media.NewQueue(cfg.DataDir, cfg.Media, st, client, systemClock{}, log, mon.Panic)
-	pipeline := ingest.NewPipeline(st, ingest.NewFilter(cfg.Exclude, aliases), queue, mon, log).WithHistoryParser(client.HistoryParser())
+	pipeline := ingest.NewPipeline(st, ingest.NewFilter(cfg.Exclude, aliases), queue, mon, log).WithHistoryParser(client.HistoryParser()).WithContext(ctx)
 	handler := pipeline.Handle
 	if recordDir != "" {
 		handler = ingest.NewRecorder(recordDir).Wrap(handler)
 	}
-	go queue.Run(ctx)
-	go mon.Run(ctx)
-	go backup.Schedule(ctx, cfg, systemClock{}, mon.BackupResult)
 	if pairing {
 		_, _ = fmt.Fprintln(out, "Scan the QR code from WhatsApp → Linked Devices.")
 	}
-	return client.Run(ctx, handler, pairing)
+	loops := []func(context.Context){
+		queue.Run,
+		mon.Run,
+		func(ctx context.Context) { backup.Schedule(ctx, cfg, systemClock{}, mon.BackupResult) },
+	}
+	// Shutdown order: cancel ctx, client.Run returns, the loops are joined, then the client and the store are closed.
+	return runService(ctx, cancel, func(ctx context.Context) error { return client.Run(ctx, handler, pairing) }, loops, client.Close, st.Close)
 }
 
 const notPairedHint = "not paired: run `archiver pair` in a terminal first"
