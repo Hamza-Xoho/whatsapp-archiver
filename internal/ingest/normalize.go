@@ -23,6 +23,9 @@ func FromMessage(evt *events.Message, source string, received time.Time) Result 
 		rawMsg = evt.Message
 	}
 	raw, _ := proto.Marshal(rawMsg)
+	if raw == nil {
+		raw = []byte{} // a bodyless message is stored with an empty raw_proto; the column is NOT NULL
+	}
 	info := evt.Info
 	chat := info.Chat.String()
 	sender := info.Sender.String()

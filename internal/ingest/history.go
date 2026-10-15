@@ -100,6 +100,12 @@ func (p *Pipeline) ImportHistory(ctx context.Context, evt *events.HistorySync) (
 			if item == nil || item.GetMessage() == nil {
 				continue
 			}
+			if web := item.GetMessage(); web.GetMessage() == nil {
+				// A stub (revoke, ciphertext, group change marker …) has no body to archive.
+				p.log.Info("history stub skipped", "chat", chat, "id", web.GetKey().GetID(), "stub", web.GetMessageStubType().String())
+				skipped++
+				continue
+			}
 			message, parseErr := p.parse(chatJID, item.GetMessage())
 			if parseErr != nil {
 				p.log.Warn("history message not parsed", "chat", chat, "id", item.GetMessage().GetKey().GetID(), "err", parseErr)
@@ -115,8 +121,12 @@ func (p *Pipeline) ImportHistory(ctx context.Context, evt *events.HistorySync) (
 				skipped++
 				continue
 			}
-			if err = p.Ingest(ctx, r); err != nil {
-				return
+			if ingestErr := p.Ingest(ctx, r); ingestErr != nil {
+				if !isPermanent(ingestErr) {
+					return stored, skipped, ingestErr // only a stopped context ends the chunk early
+				}
+				skipped++ // persist has logged the rejected write at Error and reported it once
+				continue
 			}
 			stored++
 		}
