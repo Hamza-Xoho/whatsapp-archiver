@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Mutation runner (set MUT_REPO=<worktree> to mutate a worktree's HEAD) for phase-0 fixes.
-usage: run.py SPEC.json [NAME ...]
+usage: run.py SPEC.json [NAME ...]   (MUT_GOCACHE=<dir> keeps the Go build cache of the mutants out of the shared .cache/gocache)
 SPEC.json: list of {"name","rf","file","old","new","count"?(default 1),"pkgs"?(default "./...")}
 Each mutant is applied alone to a fresh copy of the committed HEAD (git archive), with shared module/build caches,
 then `go test -count=1 <pkgs>` runs. Prints KILLED / SURVIVED / INVALID / NOMATCH per mutant and a summary."""
@@ -23,7 +23,7 @@ for s in specs:
         print(f"[{s['name']}] NOMATCH ({n} matches, wanted {s.get('count',1)}) in {s['file']}"); res[s["name"]] = "NOMATCH"; shutil.rmtree(d); continue
     open(p, "w").write(src.replace(s["old"], s["new"]))
     env = dict(os.environ, GOPATH=os.path.join(TOOLS, ".cache/gopath"), GOMODCACHE=os.path.join(TOOLS, ".cache/gomod"),
-               GOCACHE=os.path.join(TOOLS, ".cache/gocache"), GOTOOLCHAIN="local", GOFLAGS="-mod=readonly")
+               GOCACHE=os.environ.get("MUT_GOCACHE") or os.path.join(TOOLS, ".cache/gocache"), GOTOOLCHAIN="local", GOFLAGS="-mod=readonly")
     r = subprocess.run(f"{GO} test -count=1 {s.get('pkgs','./...')} 2>&1", shell=True, cwd=d, text=True, capture_output=True, env=env, timeout=1200)
     out = r.stdout
     if re.search(r"\[build failed\]|\[setup failed\]", out) or (r.returncode != 0 and not re.search(r"^--- FAIL", out, re.M) and re.search(r"^# ", out, re.M)):
