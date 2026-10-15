@@ -2234,5 +2234,13 @@
   "rf": "FW-M10",
   "file": "internal/config/config.go",
   "pkgs": "./internal/config/"
+ },
+ {
+  "name": "fw-h14-snapshot",
+  "rf": "FW-H14",
+  "file": "internal/ingest/scrub.go",
+  "old": "\"token\", \"bytes\", \"snapshot\"}",
+  "new": "\"token\", \"bytes\"}",
+  "pkgs": "./internal/ingest/"
  }
 ]
