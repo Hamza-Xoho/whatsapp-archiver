@@ -2178,5 +2178,61 @@
   "new": "f.closing = false //",
   "rf": "FW-I2",
   "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "fw-m10-novalidate",
+  "old": "\t\tif !chatAddress.MatchString(entry) {",
+  "new": "\t\tif false && !chatAddress.MatchString(entry) {",
+  "rf": "FW-M10",
+  "file": "internal/config/config.go",
+  "pkgs": "./internal/config/"
+ },
+ {
+  "name": "fw-m10-unanchored",
+  "old": "`^(\\d+@s\\.whatsapp\\.net|\\d+@lid|\\d+(-\\d+)?@g\\.us)$`",
+  "new": "`(\\d+@s\\.whatsapp\\.net|\\d+@lid|\\d+(-\\d+)?@g\\.us)`",
+  "rf": "FW-M10",
+  "file": "internal/config/config.go",
+  "pkgs": "./internal/config/"
+ },
+ {
+  "name": "fw-m10-anyuser",
+  "old": "`^(\\d+@s\\.whatsapp\\.net|\\d+@lid|",
+  "new": "`^([^@]+@s\\.whatsapp\\.net|[^@]+@lid|",
+  "rf": "FW-M10",
+  "file": "internal/config/config.go",
+  "pkgs": "./internal/config/"
+ },
+ {
+  "name": "fw-m10-nooldgroup",
+  "old": "\\d+(-\\d+)?@g\\.us",
+  "new": "\\d+@g\\.us",
+  "rf": "FW-M10",
+  "file": "internal/config/config.go",
+  "pkgs": "./internal/config/"
+ },
+ {
+  "name": "fw-m10-nolid",
+  "old": "|\\d+@lid|",
+  "new": "|",
+  "rf": "FW-M10",
+  "file": "internal/config/config.go",
+  "pkgs": "./internal/config/"
+ },
+ {
+  "name": "fw-m10-noentry",
+  "old": "exclude entry %q is not a chat address",
+  "new": "exclude entry %.0q is not a chat address",
+  "rf": "FW-M10",
+  "file": "internal/config/config.go",
+  "pkgs": "./internal/config/"
+ },
+ {
+  "name": "fw-m10-noforms",
+  "old": "write <digits>@s.whatsapp.net (phone number, digits only), <digits>@lid or <id>@g.us",
+  "new": "write a chat address",
+  "rf": "FW-M10",
+  "file": "internal/config/config.go",
+  "pkgs": "./internal/config/"
  }
 ]
