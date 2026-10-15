@@ -124,13 +124,16 @@ func replay(dir, data, own, ownLID string, errOut io.Writer) (int, string, error
 	ctx := context.Background()
 	aliases := func(jid string) ([]string, error) { return st.Aliases(ctx, jid) }
 	log := slog.New(slog.NewJSONHandler(errOut, nil))
-	p := ingest.NewPipeline(st, ingest.NewFilter(cfg.Exclude, aliases), noMedia{}, noHealth{}, log).WithHistoryParser(wa.NewHistoryParser(pn, lid))
+	p := ingest.NewPipeline(replayWriter(st), ingest.NewFilter(cfg.Exclude, aliases), noMedia{}, noHealth{}, log).WithHistoryParser(wa.NewHistoryParser(pn, lid))
 	if err = ingest.Replay(ctx, p, evts); err != nil {
 		return 0, "", err
 	}
 	raw, err := ingest.DumpRaw(st)
 	return len(evts), raw, err
 }
+
+// replayWriter is what the replay pipeline writes to; tests replace it with a failing store.
+var replayWriter = func(st *store.Store) ingest.Writer { return st }
 
 // noMedia drops media jobs: a replay downloads nothing.
 type noMedia struct{}
