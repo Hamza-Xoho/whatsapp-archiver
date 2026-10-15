@@ -11,7 +11,7 @@
   "name": "h14-proto",
   "rf": "H14",
   "file": "internal/ingest/scrub.go",
-  "old": "\tscrubMessage(msg.ProtoReflect())\n",
+  "old": "\tsc.scrubMessage(msg.ProtoReflect())\n",
   "new": "\t_ = msg.ProtoReflect()\n",
   "pkgs": "./internal/ingest/"
  },
@@ -126,5 +126,117 @@
   "old": ".WithHistoryParser(wa.NewHistoryParser(pn, lid))",
   "new": "; _ = wa.NewHistoryParser(pn, lid)",
   "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "h14r1-bytes-suffix",
+  "file": "internal/ingest/scrub.go",
+  "old": "\"secret\", \"token\", \"bytes\"}",
+  "new": "\"secret\", \"token\"}",
+  "pkgs": "./internal/ingest/",
+  "rf": "H14-r1"
+ },
+ {
+  "name": "h14r1-payload",
+  "file": "internal/ingest/scrub.go",
+  "old": " || strings.Contains(n, \"payload\")",
+  "new": "",
+  "pkgs": "./internal/ingest/",
+  "rf": "H14-r1"
+ },
+ {
+  "name": "h14r1-cert",
+  "file": "internal/ingest/scrub.go",
+  "old": "\t\t\t\tx[k] = nil\n",
+  "new": "\t\t\t\tx[k] = sc.scrubJSON(val, k)\n",
+  "pkgs": "./internal/ingest/",
+  "rf": "H14-r1"
+ },
+ {
+  "name": "h14r1-content",
+  "file": "internal/ingest/scrub.go",
+  "old": "case k == \"Content\" && isString:",
+  "new": "case false && isString:",
+  "pkgs": "./internal/ingest/",
+  "rf": "H14-r1"
+ },
+ {
+  "name": "h14r1-mention",
+  "file": "internal/ingest/scrub.go",
+  "old": "\ts = mentionPattern.ReplaceAllStringFunc(s, func(match string) string { return \"@\" + sc.fakeUser(match[1:]) })\n",
+  "new": "",
+  "pkgs": "./internal/ingest/",
+  "rf": "H14-r1"
+ },
+ {
+  "name": "h14r1-waid",
+  "file": "internal/ingest/scrub.go",
+  "old": "\ts = waidPattern.ReplaceAllStringFunc(s, func(match string) string { return \"waid=\" + sc.fakeUser(match[len(\"waid=\"):]) })\n",
+  "new": "",
+  "pkgs": "./internal/ingest/",
+  "rf": "H14-r1"
+ },
+ {
+  "name": "h14r1-tel",
+  "file": "internal/ingest/scrub.go",
+  "old": "return p[1] + plus + sc.fakeUser(digits)",
+  "new": "return match + plus",
+  "pkgs": "./internal/ingest/",
+  "rf": "H14-r1"
+ },
+ {
+  "name": "h14r1-barehash",
+  "file": "internal/ingest/scrub.go",
+  "old": "mac := hmac.New(sha256.New, sc.key)",
+  "new": "mac := sha256.New(); _ = hmac.New",
+  "pkgs": "./internal/ingest/",
+  "rf": "H14-r1"
+ },
+ {
+  "name": "h14r1-nokey",
+  "file": "internal/ingest/scrub.go",
+  "old": "mac := hmac.New(sha256.New, sc.key)",
+  "new": "mac := hmac.New(sha256.New, nil)",
+  "pkgs": "./internal/ingest/",
+  "rf": "H14-r1"
+ },
+ {
+  "name": "h14r1-keymode",
+  "file": "internal/ingest/scrub.go",
+  "old": "os.O_EXCL, 0o600)",
+  "new": "os.O_EXCL, 0o644)",
+  "pkgs": "./internal/ingest/ ./cmd/archiver/",
+  "rf": "H14-r1"
+ },
+ {
+  "name": "h14r1-keyreuse",
+  "file": "internal/ingest/scrub.go",
+  "old": "if errors.Is(err, fs.ErrNotExist) {",
+  "new": "if err == nil || errors.Is(err, fs.ErrNotExist) {",
+  "pkgs": "./internal/ingest/ ./cmd/archiver/",
+  "rf": "H14-r1"
+ },
+ {
+  "name": "h14r1-shortkey",
+  "file": "internal/ingest/scrub.go",
+  "old": "if len(key) < scrubKeySize {\n\t\treturn fmt.Errorf(\"scrub key must",
+  "new": "if false {\n\t\treturn fmt.Errorf(\"scrub key must",
+  "pkgs": "./internal/ingest/",
+  "rf": "H14-r1"
+ },
+ {
+  "name": "h14r1-shortfile",
+  "file": "internal/ingest/scrub.go",
+  "old": "if len(key) < scrubKeySize {\n\t\treturn nil, fmt.Errorf(",
+  "new": "if false {\n\t\treturn nil, fmt.Errorf(",
+  "pkgs": "./internal/ingest/",
+  "rf": "H14-r1"
+ },
+ {
+  "name": "h14r1-defaultkey",
+  "file": "cmd/archiver/replay.go",
+  "old": "*keyFile = filepath.Join(dir, \"archiver\", \"scrub.key\")",
+  "new": "*keyFile = filepath.Join(dir, \"scrub.key\")",
+  "pkgs": "./cmd/archiver/",
+  "rf": "H14-r1"
  }
 ]
