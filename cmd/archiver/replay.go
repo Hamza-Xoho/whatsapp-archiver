@@ -20,20 +20,11 @@ import (
 	"whatsapp-archiver/internal/wa"
 )
 
-// runFixtureTool runs `scrub <in> <out>` or `replay <events-dir> [--data <dir>] [--own <jid>] [--own-lid <jid>]`.
+// runFixtureTool runs `scrub [--key-file <path>] <in> <out>` or `replay <events-dir> [--data <dir>] [--own <jid>] [--own-lid <jid>]`.
 // Neither opens a WhatsApp session.
 func runFixtureTool(cmd string, args []string, out, errOut io.Writer) int {
 	if cmd == "scrub" {
-		if len(args) != 2 {
-			_, _ = fmt.Fprintln(errOut, "usage: archiver scrub <recorded-dir> <scrubbed-dir>")
-			return 2
-		}
-		if err := ingest.Scrub(args[0], args[1]); err != nil {
-			_, _ = fmt.Fprintln(errOut, err)
-			return 1
-		}
-		_, _ = fmt.Fprintf(out, "scrubbed %s into %s\n", args[0], args[1])
-		return 0
+		return runScrub(args, out, errOut)
 	}
 	flags := flag.NewFlagSet(cmd, flag.ContinueOnError)
 	flags.SetOutput(errOut)
@@ -66,6 +57,39 @@ func runFixtureTool(cmd string, args []string, out, errOut io.Writer) int {
 		return 1
 	}
 	_, _ = fmt.Fprintf(out, "replayed %d events\nraw dump: %s\n", n, path)
+	return 0
+}
+
+// runScrub runs `scrub [--key-file <path>] <in> <out>`. The fakes are keyed with the key file, by default
+// <user config dir>/archiver/scrub.key, created on first use; it must never be committed.
+func runScrub(args []string, out, errOut io.Writer) int {
+	flags := flag.NewFlagSet("scrub", flag.ContinueOnError)
+	flags.SetOutput(errOut)
+	keyFile := flags.String("key-file", "", "secret key of the fakes (default <user config dir>/archiver/scrub.key)")
+	if err := flags.Parse(args); err != nil || flags.NArg() != 2 {
+		_, _ = fmt.Fprintln(errOut, "usage: archiver scrub [--key-file <path>] <recorded-dir> <scrubbed-dir>")
+		return 2
+	}
+	in, dst := flags.Arg(0), flags.Arg(1)
+	err := func() error {
+		if *keyFile == "" {
+			dir, err := os.UserConfigDir()
+			if err != nil {
+				return err
+			}
+			*keyFile = filepath.Join(dir, "archiver", "scrub.key")
+		}
+		key, err := ingest.LoadScrubKey(*keyFile)
+		if err != nil {
+			return err
+		}
+		return ingest.Scrub(in, dst, key)
+	}()
+	if err != nil {
+		_, _ = fmt.Fprintln(errOut, err)
+		return 1
+	}
+	_, _ = fmt.Fprintf(out, "scrubbed %s into %s (key %s)\n", in, dst, *keyFile)
 	return 0
 }
 
