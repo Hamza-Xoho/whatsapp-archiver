@@ -5,6 +5,9 @@ import (
 	"math"
 	"testing"
 
+	"go.mau.fi/whatsmeow/proto/waE2E"
+	"google.golang.org/protobuf/proto"
+	"whatsapp-archiver/internal/ingest"
 	"whatsapp-archiver/internal/store"
 	"whatsapp-archiver/internal/testkit"
 )
@@ -48,5 +51,25 @@ func TestHandleStopsRetryingWhenTheServeContextEnds(t *testing.T) {
 	}
 	if h.failed != 1 || messageCount(t, st) != 0 {
 		t.Fatalf("WriteFailed=%d stored=%d, want 1 and 0", h.failed, messageCount(t, st))
+	}
+}
+
+// M5 round 1: the serve context only ends the retry loop. At SIGTERM a healthy write still completes: the event, its
+// id mapping and its media job are stored, and no write failure is reported.
+func TestHandleStoresHealthyEventAfterTheServeContextEnded(t *testing.T) {
+	st := testkit.Store(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel() // SIGTERM has already arrived
+	h := &healthFake{}
+	q := &queueFake{}
+	p := ingest.NewPipeline(st, ingest.NewFilter(nil, nil), q, h, quiet()).WithContext(ctx)
+	e := messageEvent("1234@lid", "IMG", &waE2E.Message{ImageMessage: &waE2E.ImageMessage{Mimetype: proto.String("image/jpeg")}})
+	e.Info.RecipientAlt = jid("9665@s.whatsapp.net")
+	p.Handle(e)
+	if got := rows(t, st, "SELECT id FROM messages"); len(got) != 1 || h.failed != 0 || h.seen != 1 || len(q.items) != 1 {
+		t.Fatalf("stored=%v writeFailed=%d seen=%d media=%d, want 1 message, no failure, 1 media job", got, h.failed, h.seen, len(q.items))
+	}
+	if got := rows(t, st, "SELECT lid FROM id_mappings"); len(got) != 1 {
+		t.Fatalf("mappings=%v", got)
 	}
 }
