@@ -256,9 +256,22 @@ Use a WhatsApp group with exactly one other person, created for this. Do not @-m
   sudo chmod 0600 /tmp/rec-group.tgz
   ```
 
-  Replace `TEST-GROUP-ADDRESS` with the address from step 3. On the Mac: `scp hamza@SERVER:/tmp/rec-group.tgz .` then `tar -xzf rec-group.tgz`. History chunks are not picked (their content is encoded); the synthetic scenario covers history.
-- [ ] On the Mac follow `.claude/skills/record-fixtures/SKILL.md` from its step 3: scrub (`.cache/build/archiver-darwin-arm64 scrub rec-group rec-scrubbed`, or the `darwin-amd64` build on an Intel Mac), read every file of `rec-scrubbed`, replay it (`archiver replay rec-scrubbed --data /tmp/replay-check --dump`), read every line of the dump, log that review in `PROGRESS.md`, commit the corpus into `internal/ingest/testdata/events/<scenario>/` with its golden (`testdata/golden/<scenario>.sql`) and confirm `make test` passes (`TestReplayMatchesGolden`). Each kind from step 3 is in the corpus: ____
-- [ ] Delete every unscrubbed copy: on the server `sudo rm -r /var/lib/whatsapp-archiver/rec /var/lib/whatsapp-archiver/rec-group /tmp/rec-group.tgz`; on the Mac `rec-group` and `rec-group.tgz`. The `--record` option is gone from the service (`systemctl cat archiver` shows the original `ExecStart`). Result: ____
+  Replace `TEST-GROUP-ADDRESS` with the address from step 3. History chunks are not picked (their content is encoded); the synthetic scenario covers history.
+- [ ] **Raw recordings and the scrub key must never be placed inside the repository** (`.gitignore` does not cover them, and a `git add -A` would commit real push names and numbers). On the Mac, work in a folder outside it. Run this from the repository folder; `REPO` remembers where the Linux and Mac programs are (use the `darwin-amd64` build on an Intel Mac):
+
+  ```sh
+  REPO=$PWD
+  mkdir -p ~/rec-work && cd ~/rec-work
+  scp hamza@SERVER:/tmp/rec-group.tgz .
+  tar -xzf rec-group.tgz
+  "$REPO/.cache/build/archiver-darwin-arm64" scrub ~/rec-work/rec-group ~/rec-work/rec-scrubbed
+  "$REPO/.cache/build/archiver-darwin-arm64" replay ~/rec-work/rec-scrubbed --data ~/rec-work/replay-check --dump
+  cd "$REPO"
+  ```
+
+  Expected: `scrubbed … into … (key …/archiver/scrub.key)` (the key is created outside the repository, in `~/Library/Application Support/archiver/`), then `replayed N events` and the dump. This follows `.claude/skills/record-fixtures/SKILL.md` steps 3 and 4. Read every file of `~/rec-work/rec-scrubbed` and every line of the dump.
+- [ ] Only the reviewed, scrubbed folder goes into the repository: `cp -R ~/rec-work/rec-scrubbed internal/ingest/testdata/events/<scenario>`; log the line-by-line review in `PROGRESS.md`; create the golden once as the skill's step 5 says (`testdata/golden/<scenario>.sql`); confirm `make test` passes (`TestReplayMatchesGolden`) and `git status` lists only `internal/ingest/testdata/...` and `PROGRESS.md`. Each kind from step 3 is in the corpus: ____
+- [ ] Delete every unscrubbed copy: on the server `sudo rm -r /var/lib/whatsapp-archiver/rec /var/lib/whatsapp-archiver/rec-group /tmp/rec-group.tgz`; on the Mac `rm -r ~/rec-work`. The `--record` option is gone from the service (`systemctl cat archiver` shows the original `ExecStart`). Result: ____
 
 ### 11. Backup restore
 
