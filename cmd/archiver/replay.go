@@ -124,9 +124,13 @@ func replay(dir, data, own, ownLID string, errOut io.Writer) (int, string, error
 	ctx := context.Background()
 	aliases := func(jid string) ([]string, error) { return st.Aliases(ctx, jid) }
 	log := slog.New(slog.NewJSONHandler(errOut, nil))
-	p := ingest.NewPipeline(replayWriter(st), ingest.NewFilter(cfg.Exclude, aliases), noMedia{}, noHealth{}, log).WithHistoryParser(wa.NewHistoryParser(pn, lid))
+	h := &replayHealth{}
+	p := ingest.NewPipeline(replayWriter(st), ingest.NewFilter(cfg.Exclude, aliases), noMedia{}, h, log).WithHistoryParser(wa.NewHistoryParser(pn, lid))
 	if err = ingest.Replay(ctx, p, evts); err != nil {
 		return 0, "", err
+	}
+	if h.writeFailed > 0 || h.panics > 0 {
+		return 0, "", fmt.Errorf("replay incomplete: %d write failures and %d recovered panics were reported (see the log above); the archive lacks those events", h.writeFailed, h.panics)
 	}
 	raw, err := ingest.DumpRaw(st)
 	return len(evts), raw, err
@@ -141,10 +145,11 @@ type noMedia struct{}
 func (noMedia) Enqueue(context.Context, store.Media) error  { return nil }
 func (noMedia) OnRetry(context.Context, *events.MediaRetry) {}
 
-// noHealth ignores health reports: a replay has no connection to monitor.
-type noHealth struct{}
+// replayHealth ignores connection reports (a replay has no connection) and counts failures, which make the replay
+// fail instead of reporting a short result as a success. Replay handles events one at a time.
+type replayHealth struct{ writeFailed, panics int }
 
-func (noHealth) Seen(time.Time, bool)    {}
-func (noHealth) SetState(string, string) {}
-func (noHealth) WriteFailed(error)       {}
-func (noHealth) Panic(string)            {}
+func (*replayHealth) Seen(time.Time, bool)    {}
+func (*replayHealth) SetState(string, string) {}
+func (h *replayHealth) WriteFailed(error)     { h.writeFailed++ }
+func (h *replayHealth) Panic(string)          { h.panics++ }
