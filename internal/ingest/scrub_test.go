@@ -60,7 +60,7 @@ func scrubbedFiles(t *testing.T, dir string) (texts, protos []string) {
 func scrub(t *testing.T, in string) string {
 	t.Helper()
 	out := t.TempDir()
-	if err := ingest.Scrub(in, out); err != nil {
+	if err := ingest.Scrub(in, out, testKey); err != nil {
 		t.Fatal(err)
 	}
 	return out

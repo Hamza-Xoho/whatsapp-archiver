@@ -46,6 +46,7 @@ func recordFixture(t *testing.T) string {
 
 // H14 (b): `archiver scrub <in> <out>` writes a scrubbed copy that still loads.
 func TestScrubCommandWritesScrubbedCopy(t *testing.T) {
+	isolateConfigDir(t)
 	in, out := recordFixture(t), filepath.Join(t.TempDir(), "scrubbed")
 	var stdout, stderr bytes.Buffer
 	if code := run([]string{"scrub", in, out}, &stdout, &stderr); code != 0 {
@@ -129,5 +130,63 @@ func TestReplayCommandDumpMatchesGolden(t *testing.T) {
 	written, err := os.ReadFile(path)
 	if err != nil || string(written) != string(golden) || !strings.Contains(stdout.String(), path) {
 		t.Fatalf("stdout=%q, %s matches golden: %v (err %v)", stdout.String(), path, string(written) == string(golden), err)
+	}
+}
+
+// isolateConfigDir points os.UserConfigDir at a temporary folder, so the default scrub key is never the real one.
+func isolateConfigDir(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "xdg"))
+	t.Setenv("AppData", filepath.Join(home, "appdata"))
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// scrubbedSender scrubs the fixture with the given extra arguments and returns the fake of the live sender.
+func scrubbedSender(t *testing.T, in string, extra ...string) string {
+	t.Helper()
+	out := filepath.Join(t.TempDir(), "scrubbed")
+	var stdout, stderr bytes.Buffer
+	if code := run(append(append([]string{"scrub"}, extra...), in, out), &stdout, &stderr); code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, stderr.String())
+	}
+	evts, err := ingest.Load(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return evts[0].(*events.Message).Info.Sender.User
+}
+
+// Fix round 1, I3: the fakes are keyed. Without --key-file the key is <config dir>/archiver/scrub.key, created
+// once with mode 0600 and reused; --key-file overrides it; another key gives other fakes.
+func TestScrubCommandKeyFile(t *testing.T) {
+	config := isolateConfigDir(t)
+	in := recordFixture(t)
+	first := scrubbedSender(t, in)
+	defaultKey := filepath.Join(config, "archiver", "scrub.key")
+	info, err := os.Stat(defaultKey)
+	if err != nil {
+		t.Fatalf("default key not created: %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("key mode %v, want 0600", info.Mode().Perm())
+	}
+	if again := scrubbedSender(t, in); again != first {
+		t.Errorf("second run with the same key: %s, first %s", again, first)
+	}
+	other := filepath.Join(t.TempDir(), "other.key")
+	if fake := scrubbedSender(t, in, "--key-file", other); fake == first {
+		t.Errorf("another key gives the same fake %s", fake)
+	}
+	if again := scrubbedSender(t, in, "--key-file", other); again == first {
+		t.Errorf("--key-file not reused")
+	}
+	if info, err = os.Stat(other); err != nil || info.Mode().Perm() != 0o600 {
+		t.Errorf("--key-file not created with 0600: %v %v", info, err)
 	}
 }

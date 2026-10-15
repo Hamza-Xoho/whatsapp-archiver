@@ -28,7 +28,7 @@ func TestScrubRemovesIdentifiers(t *testing.T) {
 	if err := os.WriteFile(p, []byte(`{"jid":"123456@s.whatsapp.net","lid":"98765@lid"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := ingest.Scrub(in, out); err != nil {
+	if err := ingest.Scrub(in, out, testKey); err != nil {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(filepath.Join(out, "x.json"))
