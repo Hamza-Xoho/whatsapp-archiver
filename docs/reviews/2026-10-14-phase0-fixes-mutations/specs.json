@@ -2034,5 +2034,61 @@
   "old": "\t\t\t\tif !isPermanent(ingestErr) {",
   "new": "\t\t\t\tif false && !isPermanent(ingestErr) {",
   "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "fw-i1-writebody",
+  "rf": "FW-I1",
+  "file": "internal/health/health.go",
+  "old": "m.gate.fire(\"write_failed\", \"Archive write failed\", failingBody)",
+  "new": "m.gate.fire(\"write_failed\", \"Archive write failed\", err.Error())",
+  "pkgs": "./internal/health/"
+ },
+ {
+  "name": "fw-i1-readbody",
+  "rf": "FW-I1",
+  "file": "internal/health/health.go",
+  "old": "m.gate.fire(\"read_failed\", \"Archive read failed\", failingBody)",
+  "new": "m.gate.fire(\"read_failed\", \"Archive read failed\", err.Error())",
+  "pkgs": "./internal/health/ ./cmd/archiver/"
+ },
+ {
+  "name": "fw-i1-readtitle",
+  "rf": "FW-I1",
+  "file": "internal/health/health.go",
+  "old": "if errors.Is(err, ErrRead) {",
+  "new": "if false && errors.Is(err, ErrRead) {",
+  "pkgs": "./internal/health/ ./cmd/archiver/"
+ },
+ {
+  "name": "fw-i1-readkey",
+  "rf": "FW-I1",
+  "file": "internal/health/health.go",
+  "old": "m.gate.fire(\"read_failed\",",
+  "new": "m.gate.fire(\"write_failed\",",
+  "pkgs": "./internal/health/"
+ },
+ {
+  "name": "fw-i1-wrapread",
+  "rf": "FW-I1",
+  "file": "cmd/archiver/main.go",
+  "old": "return nil, fmt.Errorf(\"%w: %w\", health.ErrRead, err)",
+  "new": "return nil, err",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "fw-i1-aliasesnil",
+  "rf": "FW-I1",
+  "file": "cmd/archiver/main.go",
+  "old": "return nil, fmt.Errorf(\"%w: %w\", health.ErrRead, err)",
+  "new": "return nil, nil",
+  "pkgs": "./cmd/archiver/"
+ },
+ {
+  "name": "fw-i1-logerr",
+  "rf": "FW-I1",
+  "file": "internal/ingest/pipeline.go",
+  "old": "\tp.log.Error(\"write failing, retrying until it succeeds\", \"what\", what, \"err\", err)",
+  "new": "\t_ = what",
+  "pkgs": "./internal/ingest/"
  }
 ]
