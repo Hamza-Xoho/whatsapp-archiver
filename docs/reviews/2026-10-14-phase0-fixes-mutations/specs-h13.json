@@ -252,8 +252,16 @@
   "name": "h13-handle-background",
   "rf": "H13",
   "file": "internal/ingest/pipeline.go",
-  "old": "\t\tctx := p.ctx\n\t\tnow := p.now()",
-  "new": "\t\tctx := context.Background()\n\t\tnow := p.now()",
+  "old": "\tfor !stopped() {",
+  "new": "\t_ = stopped\n\tfor ctx.Err() == nil {",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "h13r1-writes-cancellable",
+  "rf": "H13",
+  "file": "internal/ingest/pipeline.go",
+  "old": "ctx := context.WithoutCancel(p.ctx) //",
+  "new": "ctx := p.ctx //",
   "pkgs": "./internal/ingest/"
  },
  {
