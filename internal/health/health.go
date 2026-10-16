@@ -55,7 +55,25 @@ func NewMonitor(cfg *config.Config, n Notifier, c Clock, disk func(string) (uint
 	now := c.Now()
 	m := &Monitor{cfg: cfg, n: n, clock: c, diskFree: disk, version: version, started: now, downSince: now, queue: make(chan alert, 16), log: slog.Default()}
 	m.gate = &alertGate{now: c.Now, send: m.notify, fired: map[string]time.Time{}}
+	m.learnActiveAlerts()
 	return m
+}
+
+// learnActiveAlerts marks the alerts that were active when the previous process stopped as fired, so that
+// the connection coming back sends their "recovered" message. Without this, a restart clears the gate and the
+// recovery is never sent.
+func (m *Monitor) learnActiveAlerts() {
+	data, err := os.ReadFile(filepath.Join(m.cfg.DataDir, "health.json"))
+	if err != nil {
+		return
+	}
+	var prev Snapshot
+	if json.Unmarshal(data, &prev) != nil {
+		return
+	}
+	if _, ok := stateTitles[prev.State]; ok {
+		m.gate.fired[prev.State] = prev.UpdatedAt
+	}
 }
 
 // WithVersionReason sets where the reason for the version in use comes from; health.json records it with the version.
