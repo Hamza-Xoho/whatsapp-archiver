@@ -96,6 +96,27 @@ func TestStateAlertRecoversWhenConnected(t *testing.T) {
 	wantBodies(t, r.sent(), "", "ecovered")
 }
 
+// A restart must not lose the recovery: the outdated alert was sent by the previous process, so the
+// new one has to learn it from health.json, or the "recovered" message is never sent.
+func TestRecoveredAfterRestartWhenPreviousStateWasAlert(t *testing.T) {
+	dir := t.TempDir()
+	prev, err := json.Marshal(Snapshot{State: "client_outdated", UpdatedAt: time.Unix(1_700_000_000, 0).UTC()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "health.json"), prev, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	n := &note{}
+	c := &clock{time.Unix(1_700_000_600, 0).UTC()}
+	cfg := &config.Config{DataDir: dir}
+	m := NewMonitor(cfg, n, c, func(string) (uint64, error) { return 99 << 30, nil }, func() string { return "2.3000.1050611685" })
+	stop := running(t, m)
+	m.SetState("connected", "")
+	stop()
+	wantBodies(t, n.bodies, "client outdated")
+}
+
 func TestDisconnectedLongerThanThresholdAlerts(t *testing.T) {
 	r := newRig(t, config.AlertConfig{DisconnectedAfter: 15 * time.Minute})
 	r.m.SetState("connected", "")
