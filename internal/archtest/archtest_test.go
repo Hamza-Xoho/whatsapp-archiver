@@ -260,6 +260,10 @@ func TestWAWrapperAndEscapeBypassesAreFlagged(t *testing.T) {
 		{"exported field", "field.go", wm + "type S struct{ C *whatsmeow.Client }\n", "client-escape", "Client"},
 		{"exported var", "var.go", wm + "var C *whatsmeow.Client\n", "client-escape", "Client"},
 		{"exported var of slice", "var2.go", wm + "var Cs []*whatsmeow.Client\n", "client-escape", "Client"},
+		{"exported any result", "anyres.go", "package wa\n\nfunc Raw() any { return nil }\n", "exported-any", "any"},
+		{"exported interface{} result", "anyiface.go", "package wa\n\nfunc Raw() interface{} { return nil }\n", "exported-any", "any"},
+		{"exported any var", "anyvar.go", "package wa\n\nvar C any\n", "exported-any", "any"},
+		{"exported any field", "anyfield.go", "package wa\n\ntype S struct{ C any }\n", "exported-any", "any"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -289,7 +293,7 @@ func TestWAWrapperAndEscapeBypassesAreFlagged(t *testing.T) {
 }
 
 func TestWAUnexportedClientFieldAndAllowedInterfaceMethodsPass(t *testing.T) {
-	const src = "package wa\n\nimport \"go.mau.fi/whatsmeow\"\n\ntype c struct{ client *whatsmeow.Client }\n\nfunc (x *c) get() *whatsmeow.Client { return x.client }\n\ntype proxy interface{ SetProxyAddress(string) error }\n"
+	const src = "package wa\n\nimport \"go.mau.fi/whatsmeow\"\n\ntype c struct{ client *whatsmeow.Client }\n\nfunc (x *c) get() *whatsmeow.Client { return x.client }\n\nfunc (x *c) hold(h func(any)) any { return nil }\n\ntype proxy interface{ SetProxyAddress(string) error }\n"
 	root := t.TempDir()
 	path := filepath.Join(root, "internal", "wa", "ok.go")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
