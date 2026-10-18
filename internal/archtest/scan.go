@@ -179,12 +179,27 @@ func mentionsClient(expr ast.Expr, wm string) bool {
 	return found
 }
 
+// anyType reports whether the type expression is any or an empty interface: a declared type that could hold the
+// raw client without naming it, so mentionsClient cannot see it.
+func anyType(expr ast.Expr) bool {
+	switch e := expr.(type) {
+	case *ast.Ident:
+		return e.Name == "any"
+	case *ast.InterfaceType:
+		return e.Methods == nil || len(e.Methods.List) == 0
+	}
+	return false
+}
+
 // escapes reports, for internal/wa files, interface or constraint methods with a
 // banned name and any way the raw client can leave the package.
 func escapes(set *token.FileSet, rel string, node ast.Node, wm string, rules Rules, exempt func(string) bool) []Violation {
 	var out []Violation
 	add := func(pos token.Pos, rule string) {
 		out = append(out, violation(set, pos, rel, rule, "Client"))
+	}
+	addAny := func(pos token.Pos) {
+		out = append(out, violation(set, pos, rel, "exported-any", "any"))
 	}
 	switch n := node.(type) {
 	case *ast.InterfaceType:
@@ -202,15 +217,16 @@ func escapes(set *token.FileSet, rel string, node ast.Node, wm string, rules Rul
 		}
 	case *ast.StructType:
 		for _, f := range n.Fields.List {
-			if !mentionsClient(f.Type, wm) {
-				continue
-			}
 			exported := false
 			for _, name := range f.Names {
 				exported = exported || name.IsExported()
 			}
 			if len(f.Names) == 0 || exported { // embedded, or an exported field
-				add(f.Pos(), "client-escape")
+				if mentionsClient(f.Type, wm) {
+					add(f.Pos(), "client-escape")
+				} else if exported && anyType(f.Type) {
+					addAny(f.Pos())
+				}
 			}
 		}
 	case *ast.FuncDecl:
@@ -218,14 +234,21 @@ func escapes(set *token.FileSet, rel string, node ast.Node, wm string, rules Rul
 			for _, r := range n.Type.Results.List {
 				if mentionsClient(r.Type, wm) {
 					add(r.Pos(), "client-escape")
+				} else if anyType(r.Type) {
+					addAny(r.Pos())
 				}
 			}
 		}
 	case *ast.ValueSpec:
-		if n.Type != nil && mentionsClient(n.Type, wm) {
+		if n.Type != nil {
 			for _, name := range n.Names {
-				if name.IsExported() {
+				if !name.IsExported() {
+					continue
+				}
+				if mentionsClient(n.Type, wm) {
 					add(name.Pos(), "client-escape")
+				} else if anyType(n.Type) {
+					addAny(name.Pos())
 				}
 			}
 		}
