@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -316,5 +317,83 @@ func TestRetentionFailureKeepsNewSnapshot(t *testing.T) {
 	}
 	if verr := Verify(report.Snapshot); verr != nil {
 		t.Fatalf("new snapshot was not kept: %v", verr)
+	}
+}
+
+func TestSourceConnectionIsReadOnly(t *testing.T) {
+	data := t.TempDir()
+	st, err := store.Open(filepath.Join(data, "archive.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = st.Close()
+	db, err := openSource(filepath.Join(data, "archive.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	_, err = db.Exec("CREATE TABLE x(y)")
+	if err == nil || !strings.Contains(err.Error(), "readonly") {
+		t.Fatalf("write through the source handle: err = %v, want an error containing readonly", err)
+	}
+}
+
+func TestVacuumIntoWorksOnReadOnlySource(t *testing.T) {
+	cfg, st := seededConfig(t, t.TempDir(), 2, 5)
+	_ = st.Close()
+	db, err := openSource(filepath.Join(cfg.DataDir, "archive.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	target := filepath.Join(t.TempDir(), "copy.db")
+	if _, err = db.Exec("VACUUM INTO ?", target); err != nil {
+		t.Fatalf("VACUUM INTO on the read-only source: %v", err)
+	}
+	if err = Verify(target); err != nil {
+		t.Fatal(err)
+	}
+	if got := countMessages(t, target); got != 5 {
+		t.Fatalf("snapshot has %d messages, want 5", got)
+	}
+}
+
+// A WAL archive whose -wal holds committed frames and whose -shm is absent must still snapshot.
+func TestSnapshotOfWALArchiveWithoutShmVerifies(t *testing.T) {
+	src := t.TempDir()
+	st, err := store.Open(filepath.Join(src, "archive.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	for i := 0; i < 12; i++ {
+		if _, err = st.InsertMessage(context.Background(), store.Message{ChatJID: "g@g.us", ID: fmt.Sprint("W", i), Source: "live", Timestamp: int64(i), ReceivedAt: int64(i), RawProto: []byte("x")}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	walInfo, err := os.Stat(filepath.Join(src, "archive.db-wal"))
+	if err != nil || walInfo.Size() == 0 {
+		t.Fatalf("test setup: want a non-empty -wal next to the open archive, got %v", err)
+	}
+	data := t.TempDir()
+	for _, name := range []string{"archive.db", "archive.db-wal"} {
+		b, readErr := os.ReadFile(filepath.Join(src, name))
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if err = os.WriteFile(filepath.Join(data, name), b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg := &config.Config{DataDir: data, Backup: config.BackupConfig{Destination: t.TempDir(), Keep: 2}}
+	report, err := Run(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = Verify(report.Snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if got := countMessages(t, report.Snapshot); got != 12 {
+		t.Fatalf("snapshot has %d messages, want 12", got)
 	}
 }
