@@ -10,3 +10,6 @@
 .DS_Store
 /.superpowers/
 /.claude/settings.local.json
+
+# Private testing logs (never commit)
+/docs/testing-status-*.md

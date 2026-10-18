@@ -414,140 +414,7 @@ Two cycles. A: every planned, Table 1 and Review Focus test exists. B: goleak, `
 
 ### Cycle A: gap list (mechanical)
 
-Script (run from the repo root): collect every backticked `Test*` name from `docs/prior-art.md` lines 8-26 (Table 1), review section 4, section 7 (item 15 marked `S7-15`), then `grep -rl "^func <Name>(" --include='*_test.go' cmd internal`. 115 names: 104 found before H13, 9 missing before plus 2 name variants (below); after H13 113 found. `T1` = Table 1, `S4` = section 4, `S7` = section 7 fix plan.
-
-Still not found by name, with the reason:
-- `TestSessionNeverBackedUp` (S4 "✓ (merged)"): merged into `TestSnapshotVerifiesAndNeverIncludesSession`, which plants a `session.db` and asserts the snapshot folder lacks it. Not duplicated.
-- `TestUnknownEventIgnored` (S4): spelling variant of `TestUnknownEventIsIgnored` (S7 item 15), which exists now.
-
-"Needs behaviour, deferred": audio voice-note detection (section 4, Task 3 "audio voice note"). `normalizeContent` assigns `"audio"` in both branches of the PTT check (the dead branch of review mutant `y7`), the media rules know no separate voice-note type, so there is nothing to pin beyond `TestDocumentAudioAndVideoMedia` (voice note and plain audio both yield an `audio` media row). Not built.
-
-Section 4 rows without a test name, mapped to tests (new ones marked *):
-- Task 3 document / audio / video: `TestDocumentAudioAndVideoMedia`*. Ephemeral / view-once unwrap: `TestHistoryEphemeralAndDocumentCaptionAreUnwrapped`, `TestHistoryViewOnceIsUnwrapped`*, and the "new unwrapped" case of `TestProtocolEditOldAndNewFormats`. Edit with unknown target: `TestEventsForUnknownTargetAreStored`* (edit, revoke, reaction; no message row invented). Group info, participants, archive, mute: the `chatevents_test.go` tests (H7). Scope for every kind: `TestScopeDropsExcludedChatForEveryKind`*. Scope other direction: `TestExcludeLIDMatchesPhoneForm`*.
-- Task 5: `TestHandleRecoversPanic`*, `TestMappingFromAltJIDStoredBeforeFilter`*, `TestSameMessageUnderLIDAndPhoneStoredOnce`*, `TestFromMeUpdatesPhoneActivity`*, `TestUnknownEventIsIgnored`*, plus `TestHandleRoutesMediaRetryToTheQueue`* (review mutant `y4`, survived at the review and again at H13 start: `h13-route-mediaretry`). Goleak: cycle B.
-- Task 6 two conversations (3 kept, 2 excluded): `TestHistoryChunkSplitsKeptAndExcludedConversations`*. Late chunk: `TestHistoryMessagesOfLateChunkAreStored`*.
-- Task 7 sticker skipped, 150 MB video skipped with no download, Enqueue returns immediately: `TestEnqueueRecordsDecisionWithoutDownloading`* (the rule-level `decide` tests could not see an Enqueue that ignored them). Fails twice then succeeds: `TestAttemptsCountedAcrossRetries`. Always fails: `TestAlwaysFailingDownloadFailsAfterTwentyAttempts` (the M4 ruling replaced the plan's 5). Others exist (H3, H4, H11).
-- Task 2 `TestNoUpdateOrDeleteOnRawTables`* and `TestOnlyOneWriteConnection`* (store) with `TestServeOpensTheArchiveOnce`* (cmd). Tasks 8-11 rows exist (H10, H14, H15, H16, H17).
-
-Full table:
-
-| Test | Listed in | Before H13 | After | File |
-|---|---|---|---|---|
-| `TestAliasLearnedLaterCollapsesInView` | S4 | found | found | internal/store/store_test.go |
-| `TestAllowListedFileStillRejectsSendMessage` | S7 | found | found | internal/archtest/archtest_test.go |
-| `TestAlternateJIDCreatesMapping` | S4 | found | found | internal/ingest/normalize_test.go |
-| `TestArchiveOnAndOffAreDistinct` | S7 | found | found | internal/ingest/chatevents_test.go |
-| `TestAttemptsCountedAcrossRetries` | S7 | found | found | internal/media/backoff_test.go |
-| `TestChatEventsStored` | T1 | found | found | internal/ingest/chatevents_test.go |
-| `TestChatStatsOldestNewest` | S4 | found | found | internal/store/store_test.go |
-| `TestChatsGolden` | S7 | found | found | cmd/archiver/status_test.go |
-| `TestClassifyDownloadErr` | S4 | found | found | internal/wa/wa_test.go |
-| `TestClientOutdatedSameVersionWaits30Minutes` | S7 | found | found | internal/wa/reconnect_test.go |
-| `TestCoverageReportsOldestPerChat` | S4 | found | found | internal/store/store_test.go |
-| `TestDecideVersion` | S4 | found | found | internal/wa/wa_test.go |
-| `TestDisconnectedLongerThanThresholdAlerts` | S7 | found | found | internal/health/alerts_test.go |
-| `TestDocumentDownloads` | S4 | found | found | internal/media/queue_test.go |
-| `TestDuplicateEventIsNotARetryableError` | S7 | found | found | internal/ingest/backoff_test.go |
-| `TestEmptyOrPartialChunkDoesNotPanic` | T1 | found | found | internal/ingest/history_test.go |
-| `TestEnqueueFailureIsRetried` | S7 | found | found | internal/ingest/writeretry_test.go |
-| `TestEventForUnknownMessageIsStored` | S4 | found | found | internal/store/store_test.go |
-| `TestExcludeLIDMatchesPhoneForm` | S7-15 | missing | found | internal/ingest/gaps_test.go |
-| `TestExcludedChatNameNotStoredFromHistory` | S7 | found | found | internal/ingest/history_test.go |
-| `TestExpiredMediaRetryCompletes` | T1 | found | found | internal/media/rerequest_test.go |
-| `TestExpiredRequestsAreRateLimited` | T1 | found | found | internal/media/ratelimit_test.go |
-| `TestFailedSnapshotLeavesNoFolder` | S7 | found | found | internal/backup/backup_test.go |
-| `TestFromMeUpdatesPhoneActivity` | S7-15 | missing | found | internal/ingest/gaps_test.go |
-| `TestGuardRecoversPanic` | S4 | found | found | internal/guard/guard_test.go |
-| `TestHandleDropsExcludedChat` | S4 | found | found | internal/ingest/pipeline_test.go |
-| `TestHandleRecoversPanic` | T1 | missing | found | internal/ingest/gaps_test.go |
-| `TestHandleStoresKeptMessage` | S4 | found | found | internal/ingest/pipeline_test.go |
-| `TestHandleWriteFailureRetriesUntilStored` | S4 | found | found | internal/ingest/writeretry_test.go |
-| `TestHealthJSONRoundTrip` | S7 | found | found | internal/health/alerts_test.go |
-| `TestHistoryEditIsStillAnEvent` | S7 | found | found | internal/ingest/history_test.go |
-| `TestHistoryEphemeralAndDocumentCaptionAreUnwrapped` | S7 | found | found | internal/ingest/history_test.go |
-| `TestHistoryFromMeMessageHasOwnJIDAsSender` | S7 | found | found | internal/ingest/history_test.go |
-| `TestHistoryMessagesOfLateChunkAreStored` | S7-15 | missing | found | internal/ingest/gaps_test.go |
-| `TestHistoryPropsUseConfiguredLimits` | S4 | found | found | internal/wa/wa_test.go |
-| `TestHistoryPushNameIsStored` | S7 | found | found | internal/ingest/history_test.go |
-| `TestHistoryThenLiveNoDuplicate` | T1 | found | found | internal/ingest/history_test.go |
-| `TestIDMappingIsIdempotent` | S4 | found | found | internal/store/store_test.go |
-| `TestImageAndStickerMedia` | S4 | found | found | internal/ingest/normalize_test.go |
-| `TestImportHistoryRetriesLedgerWrite` | S7 | found | found | internal/ingest/writeretry_test.go |
-| `TestInsertMessageCostDoesNotGrowWithTableSize` | S7 | found | found | internal/store/insert_cost_test.go |
-| `TestInsertMessageIsIdempotent` | S4 | found | found | internal/store/store_test.go |
-| `TestInsertMessageUnderKnownAliasIsDuplicate` | S4 | found | found | internal/store/store_test.go |
-| `TestKeepTwoLeavesTwoSnapshots` | S7 | found | found | internal/backup/backup_test.go |
-| `TestLateChunkAfterCompleteIsStored` | T1 | found | found | internal/ingest/history_test.go |
-| `TestLiveMediaBeforeHistoryBacklog` | S7 | found | found | internal/media/worker_test.go |
-| `TestLiveMessageKeepsKnownChatName` | S7 | found | found | internal/ingest/history_test.go |
-| `TestLoadDefaults` | S4 | found | found | internal/config/config_test.go |
-| `TestLoadKeepsDefaultsForMissingFields` | S4 | found | found | internal/config/config_test.go |
-| `TestLoadRejectsBadVersionOverride` | S4 | found | found | internal/config/config_test.go |
-| `TestLoadRejectsUnknownKey` | S4 | found | found | internal/config/config_test.go |
-| `TestLoggedOutStopsTheReconnectLoop` | S7 | found | found | internal/wa/reconnect_test.go |
-| `TestMappingFromAltJIDStoredBeforeFilter` | S7-15 | missing | found | internal/ingest/gaps_test.go |
-| `TestMappingWriteFailureIsRetried` | S7 | found | found | internal/ingest/writeretry_test.go |
-| `TestMappingsInChunkApplyToItsMessages` | T1 | found | found | internal/ingest/history_test.go |
-| `TestMediaMetadataRecorded` | S7-15 | found | found | internal/media/worker_test.go |
-| `TestNoUpdateOrDeleteOnRawTables` | S7-15 | missing | found | internal/store/rawtables_test.go |
-| `TestNonRevokeProtocolMessageIsNotARevoke` | S7 | found | found | internal/ingest/protocol_test.go |
-| `TestNonsensicalHistoryTimestampStoredAsGiven` | T1 | found | found | internal/ingest/history_test.go |
-| `TestOnlyOneWriteConnection` | S7-15 | missing | found | internal/store/rawtables_test.go |
-| `TestOpenGapClosesWhenMessageArrives` | S4 | found | found | internal/store/store_test.go |
-| `TestOutdatedAfterConnectedTriggersRefresh` | S7 | found | found | internal/wa/reconnect_test.go |
-| `TestOutdatedAlertNamesVersion` | S7 | found | found | internal/health/alerts_test.go |
-| `TestPendingAndDownloadingRowsRecoverAfterRestart` | S7 | found | found | internal/media/worker_test.go |
-| `TestPhoneQuietAlert` | S7 | found | found | internal/health/alerts_test.go |
-| `TestPlainTextNormalizes` | S4 | found | found | internal/ingest/normalize_test.go |
-| `TestPollVoteCurrentAndNewVersions` | T1 | found | found | internal/ingest/protocol_test.go |
-| `TestProtocolEditOldAndNewFormats` | T1 | found | found | internal/ingest/protocol_test.go |
-| `TestRecordLoadRoundTripForEachKind` | S7 | found | found | internal/ingest/record_test.go |
-| `TestRecoveredMessageAfterEventsResume` | S7 | found | found | internal/health/alerts_test.go |
-| `TestReopenRunsMigrationsOnce` | S4 | found | found | internal/store/store_test.go |
-| `TestReplayMatchesGolden` | S4 | found | found | internal/ingest/golden_test.go |
-| `TestReplyAndForwarded` | S4 | found | found | internal/ingest/normalize_test.go |
-| `TestRepoHasNoViolations` | S4 | found | found | internal/archtest/archtest_test.go |
-| `TestRequestMediaRetryReceivesMessageInfoAndKey` | S7 | found | found | internal/wa/rerequest_test.go |
-| `TestRetentionOnlyRemovesSnapshotFolders` | S7 | found | found | internal/backup/backup_test.go |
-| `TestRetryGivesUpAtMax` | S4 | found | found | internal/retry/retry_test.go |
-| `TestRetryStopsOnSuccess` | S4 | found | found | internal/retry/retry_test.go |
-| `TestRevokeNormalizes` | S7 | found | found | internal/ingest/protocol_test.go |
-| `TestRunWithUnpairedSessionFileSaysPairFirst` | S7 | found | found | cmd/archiver/main_test.go |
-| `TestRunWithoutSessionSaysPairFirst` | S4 | found | found | cmd/archiver/main_test.go |
-| `TestSameGroupInfoTwiceIsOneRow` | S7 | found | found | internal/ingest/chatevents_test.go |
-| `TestSameMessageUnderLIDAndPhoneStoredOnce` | T1 | missing | found | internal/ingest/gaps_test.go |
-| `TestScanAllowsRetryReceiptInAllowListedFile` | S4 | found | found | internal/archtest/archtest_test.go |
-| `TestScanFlagsBannedCall` | S4 | found | found | internal/archtest/archtest_test.go |
-| `TestScanFlagsClientImportOutsideWA` | S4 | found | found | internal/archtest/archtest_test.go |
-| `TestScanFlagsEveryBannedPrefixMethod` | S7 | found | found | internal/archtest/archtest_test.go |
-| `TestScheduleFiresOnceAtConfiguredTime` | S7 | found | found | internal/backup/backup_test.go |
-| `TestScopeAlwaysSkipsNoise` | S4 | found | found | internal/ingest/scope_test.go |
-| `TestScopeExcludesDirectAndAlias` | S4 | found | found | internal/ingest/scope_test.go |
-| `TestScrubDeviceSuffixedJID` | S7 | found | found | internal/ingest/scrub_test.go |
-| `TestScrubRemovesIdentifiers` | S4 | found | found | internal/ingest/replay_test.go |
-| `TestScrubRemovesNumbersInsideProtobuf` | S7 | found | found | internal/ingest/scrub_test.go |
-| `TestSessionDSNEnablesForeignKeys` | S4 | found | found | internal/wa/wa_test.go |
-| `TestSessionNeverBackedUp` | S4 | missing | MISSING |  |
-| `TestSnapshotDuringConcurrentInserts` | S7 | found | found | internal/backup/backup_test.go |
-| `TestSnapshotRowCountMatchesSource` | S7 | found | found | internal/backup/backup_test.go |
-| `TestSnapshotVerifiesAndNeverIncludesSession` | S4 | found | found | internal/backup/backup_test.go |
-| `TestStatusDoesNotWriteArchive` | S7 | found | found | cmd/archiver/status_test.go |
-| `TestStatusGolden` | S7 | found | found | cmd/archiver/status_test.go |
-| `TestStreamReplacedBacksOff` | S7 | found | found | internal/wa/reconnect_test.go |
-| `TestTempBanAlertIncludesExpiry` | S7 | found | found | internal/health/alerts_test.go |
-| `TestTemporaryBanPausesCapture` | S7 | found | found | internal/wa/reconnect_test.go |
-| `TestTimestampStoredAsGiven` | S4 | found | found | internal/store/store_test.go |
-| `TestTransientFailureIsRetriedAfterBackoff` | S7 | found | found | internal/media/backoff_test.go |
-| `TestTwoDistinctChunksWithSameProgressAreBothLedgered` | S7 | found | found | internal/ingest/history_test.go |
-| `TestUndecryptableIsDeterministic` | S4 | found | found | internal/ingest/normalize_test.go |
-| `TestUndecryptableThenResentClosesGap` | T1 | found | found | internal/ingest/pipeline_test.go |
-| `TestUnknownEventIgnored` | S4 | missing | MISSING |  |
-| `TestUnknownEventIsIgnored` | S7-15 | missing | found | internal/ingest/gaps_test.go |
-| `TestVerifyRejectsTruncated` | S4 | found | found | internal/backup/backup_test.go |
-| `TestVersionPrints` | S4 | found | found | cmd/archiver/main_test.go |
-| `TestWorkerPanicMarksRowFailedAndIsCounted` | S7 | found | found | internal/media/worker_test.go |
-| `TestWriteErrorIsReturned` | S4 | found | found | internal/store/store_test.go |
-| `TestWriteRetryBacksOff` | S7 | found | found | internal/ingest/backoff_test.go |
+The gap list and the full test table (115 names, before and after H13) moved to [docs/reviews/2026-10-19-h13-gap-table.md](docs/reviews/2026-10-19-h13-gap-table.md).
 
 ### Cycle A: tests and mutations
 
@@ -588,3 +455,33 @@ Full table:
 - H14: snapshot red `792d67f`, fix `8283610` (`snapshot` suffix cleared), SKILL note `f9d04a7`; replay red `487f1be`, fix `4823a25` (`replay` fails with "replay incomplete: …" when WriteFailed or Panic were reported; `replayWriter` seam for the test).
 - Docs `0e28406`: Ctrl-C only after no `history chunk imported` line for several minutes, never `archiver run` in a terminal once installed, `umask 077` for the recording archive, both Linux `scp` lines and the `Exec format error` row, alert rows for read/write failure, the exclude error row.
 - Mutations: new `fw-*` specs (C1 9, I1 7, I2 11, M10 7, H14 5) all KILLED; repaired `rf5b-health` and `h14r1-bytes-suffix` (anchors moved). `make check` green at every fix commit.
+
+## Open before phase 1 (recorded 19 Oct 2026, for continuing later)
+
+Carried over from the acceptance run on the server. Testing status and the step-by-step log are in the private `docs/testing-status-2026-10-19.md` (git-ignored).
+
+### Fixed this session (not merged)
+
+- Recovered alert after restart: after a restart the "recovered" message never fired, because `alertGate.fired` is in memory. Fix: `NewMonitor` reads the previous `health.json` and marks its alert state fired (`learnActiveAlerts`, `internal/health/health.go`). Red `a619f38` (`TestRecoveredAfterRestartWhenPreviousStateWasAlert`), fix `1e52a6d`, on branch `fix/recovered-after-restart`, not pushed. Deployed to ryzen 18 Oct 22:04; the old binary is kept as `/opt/whatsapp-archiver/archiver.prev`. Side effect: a restart while an alert is active no longer re-sends it within 6 hours.
+
+### Open code work
+
+- [x] `archiver status` cost (19 Oct, `chatStatsQuery` in `internal/store/views.go`): one pass per aggregate instead of four per-chat correlated subqueries. Scale archive (200k messages, 32k media, 200 chats): 36.4 s wall and ~19.4 s CPU before, 5.7 s wall and ~5.5 s CPU after; `status` output identical. Tests `TestChatStatsMatchesPreviousQuery`, `TestChatStatsDoesNotRescanPerChat`. Still linear: the `messages_resolved` window runs once in `ChatStats` and once in `HistoryCoverage`; removing the second needs a decision (not done). Live archive not measured.
+- [ ] History "complete" label: test `TestHistoryCompleteWhenAnyChunkReachesHundred` (`internal/store/history_label_test.go`) pins the current rule (any chunk at 100). Proposed: complete when the latest history sync's last chunk reports 100, and "back to" per chat, not the global minimum. Decision open.
+- Decided (19 Oct, by the controller at Hamza's request; code in the working tree, not committed): (a) ack only after an event is stored: `AddEventHandlerWithSuccessStatus`, and `EnableDecryptedEventBuffer` on, so a redelivered message is decrypted from the buffer (plaintext is nulled once the event is stored; hashes purged after 14 days). Test `TestOpenBuffersDecryptedEventsUntilStored`. (b) history stubs archived as message events, kind `stub`, value = stub type; no message row; `open_gaps` unchanged; a history CIPHERTEXT stub is not an open gap. (c) `--record` writes no event of an excluded chat (aliases included) and no history conversation or phone-number mapping of one. (d) message secrets (`MessageContextInfo.MessageSecret`, `BotMessageSecret`, also inside wrappers) are cleared from every raw proto written from now on; rows already in archive.db still hold them (open, see below).
+- Open, needs Hamza: (1) a server-side scrub of message secrets already in `archive.db` on ryzen (a data change, not done). (2) history chunks are not gated by the ack change: an import interrupted by shutdown is still acked, so its messages can be lost; fix needs a ledger/ack ordering change. (3) merging `fix/recovered-after-restart` into `main` (not done; standing rule). (4) deploying the new binary (not done).
+- [x] `backup` opens `archive.db` read-only (`openSource`, `mode=ro`, no `immutable`). Tests `TestSourceConnectionIsReadOnly`, `TestVacuumIntoWorksOnReadOnlySource`, `TestSnapshotOfWALArchiveWithoutShmVerifies`.
+- [x] Small gaps: goleak `TestMain` in `wa`, `store`, `backup`; `go mod tidy` (only indirect markers and `go.sum` lines); exported-`any` rule `exported-any` in `internal/archtest` (red cases in `TestWAWrapperAndEscapeBypassesAreFlagged`; an untyped `var C = any(client)` is still not seen). The 500-line limit is met (H13 gap table moved to `docs/reviews/2026-10-19-h13-gap-table.md`).
+
+### Operations (not code)
+
+- Backups and the database share one SSD (`/dev/sdb2`). Plan: move `backup.destination` and the media copy to the 698 GB drive at `/mnt/data`.
+- Ryzen ethernet fixed: `dhcp4: true` added to `/etc/netplan/00-installer-config.yaml` (backup `.bak-before-dhcp`). Address `192.168.0.104`; reachable as `ryzen.local`. The main router is the compound's, so no DHCP reservation is possible; the Deco is in access-point mode.
+- Remote desktop (GNOME RDP) needs a monitor attached and a graphical session running.
+- The media copy timer (04:30 nightly) has not been checked to run.
+
+### Acceptance steps still needed before phase 1
+
+- Step 2 and step 4 were skipped (step 2 blocks the test corpus in step 10; step 4 gates phase 1).
+- Steps 6 to 10, 12 and 13 not run. Step 9 can run now; step 12 needs seven days of running.
+- Step 3: the 100 MB video skip untested; sha256 file check not run; "nothing on anyone's phone" not checked.
