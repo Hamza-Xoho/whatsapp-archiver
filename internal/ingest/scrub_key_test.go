@@ -41,7 +41,7 @@ func TestScrubFakeIsKeyed(t *testing.T) {
 	in := t.TempDir()
 	e := messageEvent("1@g.us", "A", text("x"))
 	e.Info.Sender = jid(phoneA + ":12@s.whatsapp.net")
-	ingest.NewRecorder(in).Wrap(func(any) {})(e)
+	ingest.NewRecorder(in).Wrap(func(any) bool { return true })(e)
 	first, again := scrubbedSenderWith(t, in, testKey), scrubbedSenderWith(t, in, testKey)
 	other := scrubbedSenderWith(t, in, bytes.Repeat([]byte{8}, 32))
 	if first != again {

@@ -82,7 +82,7 @@ func TestScrubRemovesNumbersInsideProtobuf(t *testing.T) {
 		Conversations: []*waHistorySync.Conversation{{ID: proto.String(lidA + "@lid"), AuthAgentObaPhoneNumber: proto.String(phoneB), Messages: []*waHistorySync.HistorySyncMsg{{
 			Message: &waWeb.WebMessageInfo{Key: &waCommon.MessageKey{RemoteJID: proto.String(lidA + "@lid"), Participant: proto.String(phoneA + ":3@s.whatsapp.net"), ID: proto.String("H")}, Message: text("history text")}}}}},
 	}
-	rec := ingest.NewRecorder(in).Wrap(func(any) {})
+	rec := ingest.NewRecorder(in).Wrap(func(any) bool { return true })
 	rec(e)
 	rec(&events.HistorySync{Data: hs})
 	rec(&events.Archive{JID: jid(groupA + "@g.us"), Timestamp: time.Unix(5, 0), Action: &waSyncAction.ArchiveChatAction{Archived: proto.Bool(true)}})
@@ -139,7 +139,7 @@ func TestScrubDeviceSuffixedJID(t *testing.T) {
 	e.Info.SenderAlt = jid(lidA + ":3@lid")
 	e.Info.RecipientAlt = jid(phoneA + "@s.whatsapp.net")
 	e.Info.BroadcastListOwner = jid(phoneB + ".1:7@hosted")
-	ingest.NewRecorder(in).Wrap(func(any) {})(e)
+	ingest.NewRecorder(in).Wrap(func(any) bool { return true })(e)
 	out := scrub(t, in)
 	texts, _ := scrubbedFiles(t, out)
 	for _, original := range []string{phoneA, phoneB, lidA} {
@@ -177,7 +177,7 @@ func TestScrubClearsKeyMaterial(t *testing.T) {
 		MessageContextInfo:           &waE2E.MessageContextInfo{MessageSecret: []byte("message-secret-bytes")},
 		Conversation:                 proto.String("text kept"),
 	}
-	ingest.NewRecorder(in).Wrap(func(any) {})(messageEvent(groupA+"@g.us", "K", msg))
+	ingest.NewRecorder(in).Wrap(func(any) bool { return true })(messageEvent(groupA+"@g.us", "K", msg))
 	_, protos := scrubbedFiles(t, scrub(t, in))
 	for _, secret := range []string{"app-state-key-bytes", "sender-key-bytes", "message-secret-bytes", groupA} {
 		if strings.Contains(protos[0], secret) {

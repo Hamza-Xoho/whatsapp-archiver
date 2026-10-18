@@ -3,6 +3,7 @@ package wa
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -72,6 +73,7 @@ func Open(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Client, e
 	inner := whatsmeow.NewClient(device, wal.Sub("Client"))
 	inner.AutomaticMessageRerequestFromPhone = true
 	inner.SynchronousAck = true
+	inner.EnableDecryptedEventBuffer = true
 	c := &Client{client: inner, container: container, cfg: cfg, log: log, sock: inner, sleep: sleepCtx}
 	c.ver.Store(&clientVersion{version, reason})
 	c.refresh = c.refreshVersion
@@ -111,7 +113,7 @@ func (c *Client) Close() error {
 	return err
 }
 
-func (c *Client) Run(ctx context.Context, h func(any), pairing bool) error {
+func (c *Client) Run(ctx context.Context, h func(any) bool, pairing bool) error {
 	if pairing && c.Paired() {
 		return fmt.Errorf("already paired")
 	}
@@ -130,14 +132,21 @@ func (c *Client) Run(ctx context.Context, h func(any), pairing bool) error {
 		go printQR(ctx, qr)
 	}
 	ctl := make(chan any, 8)
-	c.client.AddEventHandler(func(evt any) {
-		h(evt)
+	c.client.AddEventHandlerWithSuccessStatus(eventHandler(h, pairing, os.Stdout, ctl))
+	return c.reconnect(ctx, ctl)
+}
+
+// eventHandler adapts h to whatsmeow. It returns h's verdict, so whatsmeow acknowledges an event only when h reports
+// it stored; the pairing line and the control events are handled whatever the verdict.
+func eventHandler(h func(any) bool, pairing bool, out io.Writer, ctl chan<- any) whatsmeow.EventHandlerWithSuccessStatus {
+	return func(evt any) bool {
+		ok := h(evt)
 		if line := pairLine(evt); pairing && line != "" {
-			_, _ = fmt.Fprintln(os.Stdout, line)
+			_, _ = fmt.Fprintln(out, line)
 		}
 		forwardControl(ctl, evt)
-	})
-	return c.reconnect(ctx, ctl)
+		return ok
+	}
 }
 
 // forwardControl hands the reconnect loop the events its policy acts on, never blocking the handler.

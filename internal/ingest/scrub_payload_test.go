@@ -62,7 +62,7 @@ func TestScrubClearsPayloadBytes(t *testing.T) {
 	_, _ = zw.Write(mustMarshal(t, &waHistorySync.HistorySync{Conversations: []*waHistorySync.Conversation{{ID: proto.String(phoneA + "@s.whatsapp.net")}}}))
 	_ = zw.Close()
 	resent := mustMarshal(t, &waWeb.WebMessageInfo{Key: &waCommon.MessageKey{RemoteJID: proto.String(phoneA + "@s.whatsapp.net"), ID: proto.String("R")}, Message: text("resent text")})
-	rec := ingest.NewRecorder(in).Wrap(func(any) {})
+	rec := ingest.NewRecorder(in).Wrap(func(any) bool { return true })
 	rec(messageEvent("1@s.whatsapp.net", "N", &waE2E.Message{ProtocolMessage: &waE2E.ProtocolMessage{Type: waE2E.ProtocolMessage_HISTORY_SYNC_NOTIFICATION.Enum(),
 		HistorySyncNotification: &waE2E.HistorySyncNotification{InitialHistBootstrapInlinePayload: inline.Bytes()}}}))
 	rec(messageEvent("1@s.whatsapp.net", "P", &waE2E.Message{ProtocolMessage: &waE2E.ProtocolMessage{Type: waE2E.ProtocolMessage_PEER_DATA_OPERATION_REQUEST_RESPONSE_MESSAGE.Enum(),
@@ -98,7 +98,7 @@ var mentionText = regexp.MustCompile(`^hi @(\d+) and @(\d+) call$`)
 func TestScrubRewritesMentionsAndVCards(t *testing.T) {
 	const number, lid = "10000000001", "123456789012345"
 	in := t.TempDir()
-	rec := ingest.NewRecorder(in).Wrap(func(any) {})
+	rec := ingest.NewRecorder(in).Wrap(func(any) bool { return true })
 	rec(messageEvent("1@g.us", "M", &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{Text: proto.String("hi @" + number + " and @" + lid + " call"),
 		ContextInfo: &waE2E.ContextInfo{MentionedJID: []string{number + "@s.whatsapp.net", lid + "@lid"}}}}))
 	vcard := "BEGIN:VCARD\nVERSION:3.0\nFN:Alice\nTEL;type=CELL;type=VOICE;waid=" + phoneA + ":+49 151 23456789\nEND:VCARD"
@@ -139,7 +139,7 @@ func TestScrubClearsCollectionSnapshot(t *testing.T) {
 	zw := zlib.NewWriter(&snapshot)
 	_, _ = zw.Write([]byte(`["mute","` + phoneA + `@s.whatsapp.net"]`))
 	_ = zw.Close()
-	rec := ingest.NewRecorder(in).Wrap(func(any) {})
+	rec := ingest.NewRecorder(in).Wrap(func(any) bool { return true })
 	rec(messageEvent("1@s.whatsapp.net", "S", &waE2E.Message{ProtocolMessage: &waE2E.ProtocolMessage{Type: waE2E.ProtocolMessage_PEER_DATA_OPERATION_REQUEST_RESPONSE_MESSAGE.Enum(),
 		PeerDataOperationRequestResponseMessage: &waE2E.PeerDataOperationRequestResponseMessage{PeerDataOperationResult: []*waE2E.PeerDataOperationRequestResponseMessage_PeerDataOperationResult{{
 			SyncdSnapshotFatalRecoveryResponse: &waE2E.PeerDataOperationRequestResponseMessage_PeerDataOperationResult_SyncDSnapshotFatalRecoveryResponse{

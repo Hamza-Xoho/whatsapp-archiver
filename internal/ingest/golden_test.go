@@ -97,7 +97,7 @@ func syntheticEvents() []any {
 
 func recordInto(t *testing.T, dir string, evts []any) {
 	t.Helper()
-	wrapped := ingest.NewRecorder(dir).Wrap(func(any) {})
+	wrapped := ingest.NewRecorder(dir).Wrap(func(any) bool { return true })
 	for _, e := range evts {
 		wrapped(e)
 	}

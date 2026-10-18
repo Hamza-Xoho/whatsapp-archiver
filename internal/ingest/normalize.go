@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/proto/waWeb"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
@@ -22,7 +23,7 @@ func FromMessage(evt *events.Message, source string, received time.Time) Result 
 	if rawMsg == nil {
 		rawMsg = evt.Message
 	}
-	raw, _ := proto.Marshal(rawMsg)
+	raw, _ := proto.Marshal(withoutMessageSecrets(rawMsg))
 	if raw == nil {
 		raw = []byte{} // a bodyless message is stored with an empty raw_proto; the column is NOT NULL
 	}
@@ -34,6 +35,34 @@ func FromMessage(evt *events.Message, source string, received time.Time) Result 
 	normalizeContent(evt.Message, &r)
 	r.Mappings = messageMappings(info, received)
 	return r
+}
+
+// withoutMessageSecrets returns a copy of msg without the message secrets in its context, the one on the message and
+// the ones on the messages it wraps (ephemeral, view-once, edited, document with caption). The secrets are key
+// material, and the raw proto is stored in the backed-up archive.
+func withoutMessageSecrets(msg *waE2E.Message) *waE2E.Message {
+	if msg == nil {
+		return nil
+	}
+	clean := proto.Clone(msg).(*waE2E.Message)
+	clearMessageSecrets(clean)
+	return clean
+}
+
+func clearMessageSecrets(msg *waE2E.Message) {
+	if msg == nil {
+		return
+	}
+	if ci := msg.GetMessageContextInfo(); ci != nil {
+		ci.MessageSecret = nil
+		ci.BotMessageSecret = nil
+	}
+	for _, wrapper := range []*waE2E.FutureProofMessage{
+		msg.GetEphemeralMessage(), msg.GetViewOnceMessage(), msg.GetViewOnceMessageV2(),
+		msg.GetViewOnceMessageV2Extension(), msg.GetDocumentWithCaptionMessage(), msg.GetEditedMessage(),
+	} {
+		clearMessageSecrets(wrapper.GetMessage())
+	}
 }
 
 func normalizeContent(msg *waE2E.Message, r *Result) {
@@ -188,6 +217,19 @@ func FromUndecryptable(evt *events.UndecryptableMessage, received time.Time) Res
 	id := string(evt.Info.ID)
 	e := store.MessageEvent{ChatJID: chat, TargetID: id, Kind: string(KindUndecryptable), EventID: stableID(chat, id, string(KindUndecryptable)), SenderJID: evt.Info.Sender.String(), Timestamp: evt.Info.Timestamp.Unix(), ReceivedAt: received.Unix(), Value: string(evt.DecryptFailMode)}
 	return Result{Kind: KindUndecryptable, Chat: store.Chat{JID: chat}, Sender: store.Participant{JID: evt.Info.Sender.String()}, Event: &e, FromMe: evt.Info.IsFromMe, Received: received}
+}
+
+// FromStub normalises a history message with no body (a revoke, a group change, a ciphertext marker). It is a stub
+// event under its key ID, never a message row. Its raw proto is the WebMessageInfo without the message secret, which
+// is key material and is never stored (archive.db is backed up).
+func FromStub(evt *events.Message, web *waWeb.WebMessageInfo, received time.Time) Result {
+	info := evt.Info
+	chat, sender, id := info.Chat.String(), info.Sender.String(), string(info.ID)
+	clean := proto.Clone(web).(*waWeb.WebMessageInfo)
+	clean.MessageSecret = nil
+	raw, _ := proto.MarshalOptions{Deterministic: true, AllowPartial: true}.Marshal(clean)
+	e := store.MessageEvent{ChatJID: chat, TargetID: id, Kind: string(KindStub), EventID: id, SenderJID: sender, Timestamp: info.Timestamp.Unix(), ReceivedAt: received.Unix(), Value: web.GetMessageStubType().String(), RawProto: raw}
+	return Result{Kind: KindStub, Chat: store.Chat{JID: chat}, Sender: store.Participant{JID: sender, DisplayName: info.PushName}, Event: &e, Mappings: messageMappings(info, received), FromMe: info.IsFromMe, Received: received}
 }
 
 func messageMappings(info types.MessageInfo, seen time.Time) []store.IDMapping {

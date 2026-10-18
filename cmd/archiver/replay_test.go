@@ -35,7 +35,7 @@ func mustJID(t *testing.T, s string) types.JID {
 func recordFixture(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	rec := ingest.NewRecorder(dir).Wrap(func(any) {})
+	rec := ingest.NewRecorder(dir).Wrap(func(any) bool { return true })
 	rec(&events.Message{Info: types.MessageInfo{MessageSource: types.MessageSource{Chat: mustJID(t, "10000000100@g.us"), Sender: mustJID(t, "4915123456789:12@s.whatsapp.net"), IsGroup: true},
 		ID: "LIVE1", PushName: "Alice", Timestamp: time.Unix(1_700_000_000, 0)}, Message: &waE2E.Message{Conversation: proto.String("hello")}})
 	rec(&events.HistorySync{Data: &waHistorySync.HistorySync{Progress: proto.Uint32(100), Conversations: []*waHistorySync.Conversation{{ID: proto.String("20000000003@lid"),

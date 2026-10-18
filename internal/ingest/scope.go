@@ -26,8 +26,18 @@ func (f *Filter) Keep(chatJID string, kind Kind) (bool, error) {
 	case KindPresence, KindTyping, KindReceipt, KindCall:
 		return false, nil
 	}
+	excluded, err := f.Excluded(chatJID)
+	if err != nil {
+		return false, err
+	}
+	return !excluded, nil
+}
+
+// Excluded reports whether the chat is in the exclusion list, directly or through one of its aliases. It is the
+// exclusion part of Keep, shared with the recorder; a failed alias lookup is an error, never an answer.
+func (f *Filter) Excluded(chatJID string) (bool, error) {
 	if _, ok := f.exclude[chatJID]; ok {
-		return false, nil
+		return true, nil
 	}
 	if f.aliases != nil {
 		aliases, err := f.aliases(chatJID)
@@ -36,9 +46,9 @@ func (f *Filter) Keep(chatJID string, kind Kind) (bool, error) {
 		}
 		for _, alias := range aliases {
 			if _, ok := f.exclude[alias]; ok {
-				return false, nil
+				return true, nil
 			}
 		}
 	}
-	return true, nil
+	return false, nil
 }

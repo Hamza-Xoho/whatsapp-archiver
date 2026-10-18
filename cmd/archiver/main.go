@@ -118,10 +118,11 @@ func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) er
 	mon := health.NewMonitor(cfg, notifier, systemClock{}, health.DiskFree, client.VersionInUse).WithVersionReason(client.VersionReason).WithLogger(log)
 	aliases := storeAliases(st)
 	queue := media.NewQueue(cfg.DataDir, cfg.Media, st, client, systemClock{}, log, mon.Panic)
-	pipeline := ingest.NewPipeline(st, ingest.NewFilter(cfg.Exclude, aliases), queue, mon, log).WithHistoryParser(client.HistoryParser()).WithContext(ctx)
+	filter := ingest.NewFilter(cfg.Exclude, aliases)
+	pipeline := ingest.NewPipeline(st, filter, queue, mon, log).WithHistoryParser(client.HistoryParser()).WithContext(ctx)
 	handler := pipeline.Handle
 	if recordDir != "" {
-		handler = ingest.NewRecorder(recordDir).Wrap(handler)
+		handler = ingest.NewRecorder(recordDir).WithFilter(filter).Wrap(handler)
 	}
 	handlers := &inFlight{}
 	handler = handlers.wrap(handler)

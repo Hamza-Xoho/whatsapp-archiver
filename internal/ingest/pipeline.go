@@ -109,8 +109,11 @@ func (p *Pipeline) persist(ctx context.Context, what string, fn func() error) er
 			return p.rejected(what, err)
 		}
 	}
-	return fmt.Errorf("%s: %w", what, err)
+	return fmt.Errorf("%s: %w: %w", what, errStopped, err)
 }
+
+// errStopped marks a write that persist abandoned because the serve context ended before the write succeeded.
+var errStopped = errors.New("stopped before the write succeeded")
 
 // keep evaluates the exclusion filter under persist: a failed alias lookup is retried (and alerted once through
 // WriteFailed) until it answers, so an excluded chat is never stored and a kept one is never dropped.
@@ -129,13 +132,20 @@ func (p *Pipeline) rejected(what string, err error) error {
 	return err
 }
 
-func (p *Pipeline) Handle(evt any) {
+// Handle processes one whatsmeow event and reports whether whatsmeow may acknowledge it. It returns false only when
+// the serve context ended before the event was stored, so whatsmeow leaves the event unacknowledged. A stored event
+// and a permanent rejection (logged and alerted by persist) both return true.
+func (p *Pipeline) Handle(evt any) (ack bool) {
+	ack = true
 	guard.Run(p.log, "handler", func(string, any) { p.health.Panic("handler") }, func() {
 		ctx := context.WithoutCancel(p.ctx) // writes are not cancelled by SIGTERM; persist stops retrying on p.ctx
 		now := p.now()
 		logErr := func(err error) {
 			if err != nil {
 				p.log.Error("event not stored", "type", fmt.Sprintf("%T", evt), "err", err)
+				if errors.Is(err, errStopped) {
+					ack = false
+				}
 			}
 		}
 		switch e := evt.(type) {
@@ -170,6 +180,7 @@ func (p *Pipeline) Handle(evt any) {
 			p.log.Debug("ignored event", "type", fmt.Sprintf("%T", evt))
 		}
 	})
+	return ack
 }
 
 func (p *Pipeline) Ingest(ctx context.Context, r Result) error {

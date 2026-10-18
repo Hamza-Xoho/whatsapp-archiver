@@ -12,7 +12,7 @@ func TestRecordLoadMessageRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	var got any
 	r := ingest.NewRecorder(dir)
-	r.Wrap(func(v any) { got = v })(messageEvent("123@lid", "A", text("hello")))
+	r.Wrap(func(v any) bool { got = v; return true })(messageEvent("123@lid", "A", text("hello")))
 	events, err := ingest.Load(dir)
 	if err != nil || len(events) != 1 {
 		t.Fatalf("events=%d err=%v", len(events), err)

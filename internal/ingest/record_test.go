@@ -116,7 +116,7 @@ func TestRecordLoadRoundTripForEachKind(t *testing.T) {
 	dir := t.TempDir()
 	evts := everyKind()
 	var passed []any
-	wrapped := ingest.NewRecorder(dir).Wrap(func(v any) { passed = append(passed, v) })
+	wrapped := ingest.NewRecorder(dir).Wrap(func(v any) bool { passed = append(passed, v); return true })
 	for _, e := range evts {
 		wrapped(e)
 	}
@@ -154,8 +154,8 @@ func TestRecordLoadRoundTripForEachKind(t *testing.T) {
 // A second recorder on the same folder (pair, then run, both with --record) continues the sequence.
 func TestRecorderContinuesAfterExistingFiles(t *testing.T) {
 	dir := t.TempDir()
-	ingest.NewRecorder(dir).Wrap(func(any) {})(messageEvent("1@lid", "A", text("first")))
-	ingest.NewRecorder(dir).Wrap(func(any) {})(messageEvent("1@lid", "B", text("second")))
+	ingest.NewRecorder(dir).Wrap(func(any) bool { return true })(messageEvent("1@lid", "A", text("first")))
+	ingest.NewRecorder(dir).Wrap(func(any) bool { return true })(messageEvent("1@lid", "B", text("second")))
 	loaded, err := ingest.Load(dir)
 	if err != nil || len(loaded) != 2 {
 		t.Fatalf("loaded %d events, err %v; want both recordings", len(loaded), err)
@@ -174,7 +174,7 @@ func TestRecorderWriteFailureIsLoggedAndEventPassedOn(t *testing.T) {
 	var logs bytes.Buffer
 	evt := messageEvent("1@lid", "A", text("x"))
 	var got any
-	ingest.NewRecorder(filepath.Join(blocked, "rec")).WithLogger(slog.New(slog.NewTextHandler(&logs, nil))).Wrap(func(v any) { got = v })(evt)
+	ingest.NewRecorder(filepath.Join(blocked, "rec")).WithLogger(slog.New(slog.NewTextHandler(&logs, nil))).Wrap(func(v any) bool { got = v; return true })(evt)
 	if got != evt {
 		t.Fatal("event not passed on")
 	}

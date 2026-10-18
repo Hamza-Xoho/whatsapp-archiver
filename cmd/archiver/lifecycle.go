@@ -46,18 +46,18 @@ type inFlight struct {
 }
 
 // wrap returns h counted as in flight while it runs. Once drain has started, an arriving event is not handled: the
-// store is about to close.
-func (f *inFlight) wrap(h func(any)) func(any) {
-	return func(evt any) {
+// store is about to close, so its verdict is false and whatsmeow leaves it unacknowledged.
+func (f *inFlight) wrap(h func(any) bool) func(any) bool {
+	return func(evt any) bool {
 		f.mu.Lock()
 		if f.closing {
 			f.mu.Unlock()
-			return
+			return false
 		}
 		f.wg.Add(1)
 		f.mu.Unlock()
 		defer f.wg.Done()
-		h(evt)
+		return h(evt)
 	}
 }
 
