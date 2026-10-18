@@ -43,7 +43,7 @@ func Run(ctx context.Context, cfg *config.Config) (report Report, err error) {
 		}
 	}()
 	target := filepath.Join(folder, "archive.db")
-	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(cfg.DataDir, "archive.db"))+"?_pragma=busy_timeout(5000)")
+	db, err := openSource(filepath.Join(cfg.DataDir, "archive.db"))
 	if err != nil {
 		return report, fmt.Errorf("open archive: %w", err)
 	}
@@ -108,6 +108,12 @@ func retain(dest string, keep int) error {
 		snaps = snaps[1:]
 	}
 	return nil
+}
+
+// openSource opens the live archive read-only. The service may be writing in WAL mode,
+// so immutable=1 is deliberately not used: it would let readers ignore the -wal file.
+func openSource(path string) (*sql.DB, error) {
+	return sql.Open("sqlite", "file:"+filepath.ToSlash(path)+"?mode=ro&_pragma=busy_timeout(5000)")
 }
 func Schedule(ctx context.Context, cfg *config.Config, clock Clock, onResult func(Report, error)) {
 	for {
