@@ -11,6 +11,7 @@ import (
 
 	"go.mau.fi/whatsmeow/proto/waWeb"
 	"go.mau.fi/whatsmeow/types/events"
+	"google.golang.org/protobuf/proto"
 	"whatsapp-archiver/internal/ingest"
 	"whatsapp-archiver/internal/store"
 	"whatsapp-archiver/internal/testkit"
@@ -43,19 +44,23 @@ func stubChunk() *events.HistorySync {
 	return hs
 }
 
-// C1: a bodyless history stub (CIPHERTEXT, REVOKE, GROUP_PARTICIPANT_ADD …) is skipped and logged at Info with its
-// stub type; the rest of its conversation and the later conversations of the chunk are stored.
+// C1: a bodyless history stub (CIPHERTEXT, REVOKE, GROUP_PARTICIPANT_ADD …) is archived as a stub event, logged at Info
+// with its stub type; no message row is made for it. The rest of its conversation and the later conversations of the
+// chunk are stored.
 func TestHistoryStubIsSkippedAndTheChunkGoesOn(t *testing.T) {
 	st := testkit.Store(t)
 	var buf bytes.Buffer
 	h := &healthFake{}
 	p := ingest.NewPipeline(st, ingest.NewFilter(nil, nil), &queueFake{}, h, slog.New(slog.NewTextHandler(&buf, nil))).WithHistoryParser(historyParser())
 	stored, skipped, err := p.ImportHistory(t.Context(), stubChunk())
-	if err != nil || stored != 3 || skipped != 1 || h.failed != 0 {
-		t.Fatalf("stored=%d skipped=%d err=%v writeFailed=%d, want 3, 1, nil, 0", stored, skipped, err, h.failed)
+	if err != nil || stored != 4 || skipped != 0 || h.failed != 0 {
+		t.Fatalf("stored=%d skipped=%d err=%v writeFailed=%d, want 4, 0, nil, 0", stored, skipped, err, h.failed)
 	}
 	if got := strings.Join(rows(t, st, "SELECT id FROM messages ORDER BY id"), ","); got != "A,C,D" {
 		t.Fatalf("messages=%s", got)
+	}
+	if got := strings.Join(rows(t, st, "SELECT chat_jid,target_id,kind,value FROM message_events"), ","); got != "4915111@s.whatsapp.net|STUB|stub|CIPHERTEXT" {
+		t.Fatalf("message_events=%s", got)
 	}
 	var stubLine string
 	for _, line := range strings.Split(buf.String(), "\n") {
@@ -65,6 +70,115 @@ func TestHistoryStubIsSkippedAndTheChunkGoesOn(t *testing.T) {
 	}
 	if !strings.Contains(stubLine, "level=INFO") || !strings.Contains(stubLine, "CIPHERTEXT") {
 		t.Fatalf("stub log line=%q, want an INFO line naming the stub type", stubLine)
+	}
+}
+
+// stubOf is a bodyless history message of one stub type, as WhatsApp sends revokes, group changes and ciphertext markers.
+func stubOf(id, participant string, stub waWeb.WebMessageInfo_StubType) *waWeb.WebMessageInfo {
+	m := webMsg(id, participant, false, nil)
+	m.MessageStubType = stub.Enum()
+	return m
+}
+
+// A history revoke stub is one stub event under its key ID, with the stub type as its value, and no message row.
+func TestHistoryRevokeStubIsArchivedAsStubEvent(t *testing.T) {
+	st := testkit.Store(t)
+	p := historyPipeline(st, ingest.NewFilter(nil, nil), &queueFake{})
+	stored, skipped, err := p.ImportHistory(t.Context(), chunk("g@g.us", stubOf("REV", "3@lid", waWeb.WebMessageInfo_REVOKE)))
+	if err != nil || stored != 1 || skipped != 0 {
+		t.Fatalf("stored=%d skipped=%d err=%v, want 1, 0, nil", stored, skipped, err)
+	}
+	if got := strings.Join(rows(t, st, "SELECT chat_jid,target_id,kind,event_id,sender_jid,value FROM message_events"), ","); got != "g@g.us|REV|stub|REV|3@lid|REVOKE" {
+		t.Fatalf("message_events=%s", got)
+	}
+	if got := rows(t, st, "SELECT id FROM messages"); len(got) != 0 {
+		t.Fatalf("messages=%v, want none for a stub", got)
+	}
+}
+
+// A history group-change stub is one stub event whose value names the group change type.
+func TestHistoryGroupChangeStubIsArchivedAsStubEvent(t *testing.T) {
+	st := testkit.Store(t)
+	p := historyPipeline(st, ingest.NewFilter(nil, nil), &queueFake{})
+	stored, skipped, err := p.ImportHistory(t.Context(), chunk("g@g.us", stubOf("ADD", "3@lid", waWeb.WebMessageInfo_GROUP_PARTICIPANT_ADD)))
+	if err != nil || stored != 1 || skipped != 0 {
+		t.Fatalf("stored=%d skipped=%d err=%v, want 1, 0, nil", stored, skipped, err)
+	}
+	if got := strings.Join(rows(t, st, "SELECT chat_jid,target_id,kind,value FROM message_events"), ","); got != "g@g.us|ADD|stub|GROUP_PARTICIPANT_ADD" {
+		t.Fatalf("message_events=%s", got)
+	}
+	if got := rows(t, st, "SELECT id FROM messages"); len(got) != 0 {
+		t.Fatalf("messages=%v, want none for a stub", got)
+	}
+}
+
+// A history ciphertext stub is a stub event with value CIPHERTEXT. It is not a gap: open_gaps is kind undecryptable only.
+func TestHistoryCiphertextStubIsStubEventAndNotAnOpenGap(t *testing.T) {
+	st := testkit.Store(t)
+	p := historyPipeline(st, ingest.NewFilter(nil, nil), &queueFake{})
+	if _, _, err := p.ImportHistory(t.Context(), chunk("4915111@s.whatsapp.net", stubOf("CT", "", waWeb.WebMessageInfo_CIPHERTEXT))); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(rows(t, st, "SELECT chat_jid,target_id,kind,value FROM message_events"), ","); got != "4915111@s.whatsapp.net|CT|stub|CIPHERTEXT" {
+		t.Fatalf("message_events=%s", got)
+	}
+	if gaps := rows(t, st, "SELECT target_id FROM open_gaps"); len(gaps) != 0 {
+		t.Fatalf("open_gaps=%v, want none for a history ciphertext stub", gaps)
+	}
+}
+
+// The scope filter applies to stubs: a stub of an excluded chat leaves no row of any kind, while a stub of a kept chat
+// in the same chunk is archived.
+func TestHistoryStubInExcludedChatIsNotStored(t *testing.T) {
+	st := testkit.Store(t)
+	p := historyPipeline(st, ingest.NewFilter([]string{"secret@g.us"}, nil), &queueFake{})
+	hs := chunk("g@g.us", stubOf("KEPT", "3@lid", waWeb.WebMessageInfo_REVOKE))
+	hs.Data.Conversations = append(hs.Data.Conversations, chunk("secret@g.us", stubOf("SECRET", "4@lid", waWeb.WebMessageInfo_REVOKE)).Data.Conversations...)
+	stored, skipped, err := p.ImportHistory(t.Context(), hs)
+	if err != nil || stored != 1 || skipped != 1 {
+		t.Fatalf("stored=%d skipped=%d err=%v, want 1, 1, nil", stored, skipped, err)
+	}
+	if got := strings.Join(rows(t, st, "SELECT chat_jid,target_id FROM message_events"), ","); got != "g@g.us|KEPT" {
+		t.Fatalf("message_events=%s", got)
+	}
+	if chats, participants := rows(t, st, "SELECT jid FROM chats WHERE jid='secret@g.us'"), rows(t, st, "SELECT jid FROM participants WHERE jid='4@lid'"); len(chats)+len(participants) != 0 {
+		t.Fatalf("excluded chat left chats=%v participants=%v", chats, participants)
+	}
+}
+
+// Re-importing a chunk that holds a stub does not store the stub a second time.
+func TestHistoryStubReimportedIsStoredOnce(t *testing.T) {
+	st := testkit.Store(t)
+	p := historyPipeline(st, ingest.NewFilter(nil, nil), &queueFake{})
+	for i := 0; i < 2; i++ {
+		if _, _, err := p.ImportHistory(t.Context(), chunk("g@g.us", stubOf("REV", "3@lid", waWeb.WebMessageInfo_REVOKE))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := strings.Join(rows(t, st, "SELECT target_id,kind FROM message_events"), ","); got != "REV|stub" {
+		t.Fatalf("message_events=%s, want one stub row", got)
+	}
+}
+
+// The stub's raw proto is the WebMessageInfo, but never its message secret: that is key material, and archive.db is backed up.
+func TestHistoryStubRawProtoHoldsNoMessageSecret(t *testing.T) {
+	st := testkit.Store(t)
+	p := historyPipeline(st, ingest.NewFilter(nil, nil), &queueFake{})
+	stub := stubOf("REV", "3@lid", waWeb.WebMessageInfo_REVOKE)
+	stub.MessageSecret = []byte("message-secret-0123456789abcdef")
+	if _, _, err := p.ImportHistory(t.Context(), chunk("g@g.us", stub)); err != nil {
+		t.Fatal(err)
+	}
+	raw := rows(t, st, "SELECT raw_proto FROM message_events")
+	if len(raw) != 1 {
+		t.Fatalf("message_events raw_proto rows=%d, want 1", len(raw))
+	}
+	var got waWeb.WebMessageInfo
+	if err := proto.Unmarshal([]byte(raw[0]), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.GetKey().GetID() != "REV" || got.GetMessageStubType() != waWeb.WebMessageInfo_REVOKE || len(got.GetMessageSecret()) != 0 {
+		t.Fatalf("raw proto id=%q stub=%v secret=%d bytes, want REV, REVOKE, none", got.GetKey().GetID(), got.GetMessageStubType(), len(got.GetMessageSecret()))
 	}
 }
 

@@ -1,7 +1,9 @@
 package wa
 
 import (
+	"bytes"
 	"errors"
+	"io"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,6 +15,7 @@ import (
 	wmstore "go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
+	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -80,5 +83,24 @@ func TestClassifyDownloadErr(t *testing.T) {
 	other := errors.New("network")
 	if !errors.Is(classifyDownloadErr(other), other) {
 		t.Fatal("other error lost")
+	}
+}
+
+// B2: the adapter hands whatsmeow the handler's verdict and still prints the pairing line and forwards control events.
+func TestEventHandlerPassesVerdictAndKeepsSideEffects(t *testing.T) {
+	ctl := make(chan any, 2)
+	var out bytes.Buffer
+	for _, want := range []bool{true, false} {
+		h := eventHandler(func(any) bool { return want }, true, &out, ctl)
+		if got := h(&events.PairSuccess{}); got != want {
+			t.Fatalf("verdict=%v, want %v", got, want)
+		}
+	}
+	if !strings.Contains(out.String(), "Paired. Capture is running.") {
+		t.Fatalf("pairing output=%q", out.String())
+	}
+	eventHandler(func(any) bool { return false }, false, io.Discard, ctl)(&events.Connected{})
+	if len(ctl) != 1 {
+		t.Fatalf("control events forwarded=%d, want 1", len(ctl))
 	}
 }

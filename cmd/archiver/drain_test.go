@@ -20,7 +20,12 @@ func TestRunServiceWaitsForTheHandlerInFlightBeforeClosing(t *testing.T) {
 	handled := make(chan struct{})
 	go func() { // whatsmeow's dispatching goroutine
 		defer close(handled)
-		handlers.wrap(func(any) { close(started); time.Sleep(100 * time.Millisecond); tr.add("handler done") })(nil)
+		handlers.wrap(func(any) bool {
+			close(started)
+			time.Sleep(100 * time.Millisecond)
+			tr.add("handler done")
+			return true
+		})(nil)
 	}()
 	<-started
 	ctx, cancel := context.WithCancel(t.Context())
@@ -50,7 +55,7 @@ func TestHandlerDrainIsBounded(t *testing.T) {
 	handled := make(chan struct{})
 	go func() {
 		defer close(handled)
-		handlers.wrap(func(any) { close(started); <-release })(nil)
+		handlers.wrap(func(any) bool { close(started); <-release; return true })(nil)
 	}()
 	defer func() { close(release); <-handled }()
 	<-started
@@ -77,9 +82,21 @@ func TestEventArrivingDuringShutdownIsNotHandled(t *testing.T) {
 		t.Fatal(err)
 	}
 	handled := false
-	handlers.wrap(func(any) { handled = true })(nil)
+	handlers.wrap(func(any) bool { handled = true; return true })(nil)
 	if handled {
 		t.Fatal("an event that arrived after shutdown began was handled")
+	}
+}
+
+// B2: an event that arrives after shutdown began is not handled, so its verdict is false and whatsmeow does not
+// acknowledge it.
+func TestEventArrivingDuringShutdownIsNotAcked(t *testing.T) {
+	handlers := &inFlight{}
+	if err := handlers.drain(); err != nil {
+		t.Fatal(err)
+	}
+	if handlers.wrap(func(any) bool { return true })(nil) {
+		t.Fatal("an event that arrived after shutdown began was acknowledged")
 	}
 }
 

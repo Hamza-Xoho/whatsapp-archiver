@@ -273,3 +273,60 @@ func TestAliasLookupErrorNeverLeaksExcludedChat(t *testing.T) {
 		})
 	}
 }
+
+// withEndedServe returns a pipeline whose serve context has already ended.
+func withEndedServe(t *testing.T, p *ingest.Pipeline) *ingest.Pipeline {
+	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	return p.WithContext(ctx)
+}
+
+// B2: Handle's verdict is what whatsmeow acknowledges. A write still failing when the serve context ends leaves the
+// event unstored, so Handle reports false and the event is not acknowledged.
+func TestHandleReturnsFalseWhenStoppedBeforeStored(t *testing.T) {
+	st := testkit.Store(t)
+	w := newFlakyWriter(st, "InsertMessage", 1<<30)
+	p := withEndedServe(t, newPipeline(w, &queueFake{}, &healthFake{}, newFakeTime()))
+	if ack := p.Handle(messageEvent("g@g.us", "A", text("important"))); ack {
+		t.Fatal("an event that was never stored was acknowledged")
+	}
+	if n := messageCount(t, st); n != 0 {
+		t.Fatalf("messages stored=%d", n)
+	}
+}
+
+// B2: a stopped media row also leaves the event unacknowledged, because the event is not fully stored.
+func TestHandleReturnsFalseWhenStoppedBeforeMediaEnqueued(t *testing.T) {
+	st := testkit.Store(t)
+	p := withEndedServe(t, newPipeline(st, &flakyQueue{failures: 1 << 30}, &healthFake{}, newFakeTime()))
+	if ack := p.Handle(messageEvent("g@g.us", "IMG", &waE2E.Message{ImageMessage: &waE2E.ImageMessage{Mimetype: proto.String("image/jpeg")}})); ack {
+		t.Fatal("an event whose media row was never stored was acknowledged")
+	}
+}
+
+// B2: an event that is stored is acknowledged, including one stored after the serve context has ended (a healthy
+// write at SIGTERM completes).
+func TestHandleReturnsTrueWhenStored(t *testing.T) {
+	st := testkit.Store(t)
+	p := withEndedServe(t, newPipeline(st, &queueFake{}, &healthFake{}, newFakeTime()))
+	if ack := p.Handle(messageEvent("g@g.us", "A", text("important"))); !ack {
+		t.Fatal("a stored event was not acknowledged")
+	}
+	if n := messageCount(t, st); n != 1 {
+		t.Fatalf("messages stored=%d", n)
+	}
+}
+
+// B2: a permanent rejection is logged and alerted once, and the event is still acknowledged: retrying it can never
+// succeed.
+func TestHandleReturnsTrueForPermanentRejection(t *testing.T) {
+	h := &healthFake{}
+	p := newPipeline(&constraintWriter{Store: testkit.Store(t)}, &queueFake{}, h, newFakeTime())
+	if ack := p.Handle(messageEvent("g@g.us", "A", text("rejected"))); !ack {
+		t.Fatal("a permanently rejected event was not acknowledged")
+	}
+	if h.failed != 1 {
+		t.Fatalf("WriteFailed=%d", h.failed)
+	}
+}
