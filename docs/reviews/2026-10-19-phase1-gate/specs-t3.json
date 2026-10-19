@@ -78,5 +78,21 @@
   "new": "MIN(t.received_at) AS start",
   "pkgs": "./internal/store/ ./cmd/archiver/",
   "rf": "T3"
+ },
+ {
+  "name": "t3-lastprogress-any-type",
+  "file": "internal/store/store.go",
+  "old": "WHERE sync_type=COALESCE((SELECT sync_type FROM history_sync_chunks WHERE sync_type='FULL' LIMIT 1),'INITIAL_BOOTSTRAP') ORDER BY received_at DESC,chunk_order DESC LIMIT 1)",
+  "new": "ORDER BY received_at DESC,rowid DESC LIMIT 1)",
+  "pkgs": "./internal/store/",
+  "rf": "T3"
+ },
+ {
+  "name": "t3-lastprogress-tie-by-rowid",
+  "file": "internal/store/store.go",
+  "old": "ORDER BY received_at DESC,chunk_order DESC LIMIT 1",
+  "new": "ORDER BY received_at DESC,rowid DESC LIMIT 1",
+  "pkgs": "./internal/store/",
+  "rf": "T3"
  }
 ]
