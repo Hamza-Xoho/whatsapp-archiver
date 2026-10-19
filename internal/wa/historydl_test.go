@@ -200,3 +200,47 @@ func TestHistoryDownloadFailureLogIsRedacted(t *testing.T) {
 		}
 	}
 }
+
+// Shutdown cancels the download: that is expected, so it is logged at Info (still not acked, still redacted).
+// A timeout with the parent alive stays at Error, and so does a cancellation while the parent is alive.
+func TestCancelledHistoryDownloadLogsAtInfo(t *testing.T) {
+	signed := "https://mmg.whatsapp.net/v/t62/h.enc?ccb=11-4&oh=01_SECRET&oe=65F0"
+	run := func(parentDone bool, timeout time.Duration, err error) (acked bool, out string) {
+		var buf bytes.Buffer
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		if parentDone {
+			cancel()
+		}
+		c := historyClient(slog.New(slog.NewTextHandler(&buf, nil)), timeout, func(context.Context, *waE2E.HistorySyncNotification) (*waHistorySync.HistorySync, error) {
+			return nil, err
+		})
+		acked = c.historyHandler(ctx, func(any) bool { t.Fatal("handler called without a chunk"); return true })(historyNotification(true))
+		return acked, buf.String()
+	}
+	t.Run("shutdown", func(t *testing.T) {
+		acked, out := run(true, time.Minute, fmt.Errorf("download %s: %w", signed, context.Canceled))
+		if acked || !strings.Contains(out, "level=INFO") || strings.Contains(out, "level=ERROR") || !strings.Contains(out, "history download failed; not acked") ||
+			!strings.Contains(out, "sync_type=FULL") || !strings.Contains(out, "chunk_order=3") || strings.Contains(out, "SECRET") || !strings.Contains(out, "h.enc?REDACTED") {
+			t.Fatalf("ack=%v line=%q, want no ack and a redacted Info line", acked, out)
+		}
+	})
+	t.Run("timeout with the parent alive stays at Error", func(t *testing.T) {
+		acked, out := run(false, time.Minute, fmt.Errorf("failed to download: %w", context.DeadlineExceeded))
+		if acked || !strings.Contains(out, "level=ERROR") {
+			t.Fatalf("ack=%v line=%q, want no ack and an Error line", acked, out)
+		}
+	})
+	t.Run("cancelled while the parent is alive stays at Error", func(t *testing.T) {
+		acked, out := run(false, time.Minute, fmt.Errorf("failed to download: %w", context.Canceled))
+		if acked || !strings.Contains(out, "level=ERROR") {
+			t.Fatalf("ack=%v line=%q, want no ack and an Error line", acked, out)
+		}
+	})
+	t.Run("another error during shutdown stays at Error", func(t *testing.T) {
+		acked, out := run(true, time.Minute, errors.New("failed to download: connection reset"))
+		if acked || !strings.Contains(out, "level=ERROR") {
+			t.Fatalf("ack=%v line=%q, want no ack and an Error line", acked, out)
+		}
+	})
+}
