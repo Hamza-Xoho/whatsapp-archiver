@@ -1,0 +1,90 @@
+[
+ {
+  "name": "t4-redactor-keeps-query",
+  "file": "internal/logsafe/logsafe.go",
+  "old": "\"${1}?REDACTED\"",
+  "new": "\"${0}\"",
+  "pkgs": "./internal/logsafe/ ./internal/wa/ ./internal/media/",
+  "rf": "T4"
+ },
+ {
+  "name": "t4-redactor-ignores-fragment",
+  "file": "internal/logsafe/logsafe.go",
+  "old": "[?#][^",
+  "new": "[?][^",
+  "pkgs": "./internal/logsafe/",
+  "rf": "T4"
+ },
+ {
+  "name": "t4-redactor-eats-non-url-text",
+  "file": "internal/logsafe/logsafe.go",
+  "old": "(https?://[^",
+  "new": "(?:https?://|/)[^",
+  "pkgs": "./internal/logsafe/",
+  "rf": "T4"
+ },
+ {
+  "name": "t4-walog-skips-redactor",
+  "file": "internal/wa/walog.go",
+  "old": "logsafe.RedactURLs(fmt.Sprintf(msg, args...))",
+  "new": "fmt.Sprintf(msg, args...)",
+  "pkgs": "./internal/wa/",
+  "rf": "T4"
+ },
+ {
+  "name": "t4-history-log-skips-redactor-gone",
+  "file": "internal/wa/historydl.go",
+  "old": "acked without importing it\", \"sync_type\", n.GetSyncType().String(), \"chunk_order\", n.GetChunkOrder(), \"err\", logsafe.RedactURLs(err.Error()))",
+  "new": "acked without importing it\", \"sync_type\", n.GetSyncType().String(), \"chunk_order\", n.GetChunkOrder(), \"err\", err)",
+  "pkgs": "./internal/wa/",
+  "rf": "T4"
+ },
+ {
+  "name": "t4-history-log-skips-redactor-failed",
+  "file": "internal/wa/historydl.go",
+  "old": "delivers it again\", \"sync_type\", n.GetSyncType().String(), \"chunk_order\", n.GetChunkOrder(), \"err\", logsafe.RedactURLs(err.Error()))",
+  "new": "delivers it again\", \"sync_type\", n.GetSyncType().String(), \"chunk_order\", n.GetChunkOrder(), \"err\", err)",
+  "pkgs": "./internal/wa/",
+  "rf": "T4"
+ },
+ {
+  "name": "t4-media-request-log-skips-redactor",
+  "file": "internal/media/queue.go",
+  "old": "\"id\", m.MessageID, \"err\", logsafe.RedactURLs(err.Error()))\n\t\treturn false",
+  "new": "\"id\", m.MessageID, \"err\", err)\n\t\treturn false",
+  "pkgs": "./internal/media/",
+  "rf": "T4"
+ },
+ {
+  "name": "t4-media-retry-log-skips-redactor",
+  "file": "internal/media/queue.go",
+  "old": "not applied\", \"chat\", m.ChatJID, \"id\", m.MessageID, \"err\", logsafe.RedactURLs(err.Error()))",
+  "new": "not applied\", \"chat\", m.ChatJID, \"id\", m.MessageID, \"err\", err)",
+  "pkgs": "./internal/media/",
+  "rf": "T4"
+ },
+ {
+  "name": "t4-line-on-every-setstate",
+  "file": "internal/health/health.go",
+  "old": "\tcase prev == state:\n",
+  "new": "\tcase false:\n",
+  "pkgs": "./internal/health/",
+  "rf": "T4"
+ },
+ {
+  "name": "t4-restored-without-prior-loss",
+  "file": "internal/health/health.go",
+  "old": "state == \"connected\" && !m.lostAt.IsZero()",
+  "new": "state == \"connected\"",
+  "pkgs": "./internal/health/",
+  "rf": "T4"
+ },
+ {
+  "name": "t4-lost-only-from-disconnected",
+  "file": "internal/health/health.go",
+  "old": "case prev == \"connected\":",
+  "new": "case prev == \"connected\" && state == \"disconnected\" && false:",
+  "pkgs": "./internal/health/",
+  "rf": "T4"
+ }
+]
