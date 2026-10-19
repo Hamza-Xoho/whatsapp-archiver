@@ -30,6 +30,10 @@ SHA256 := $(shell command -v sha256sum >/dev/null 2>&1 && echo sha256sum || echo
 
 BUILD_TARGETS := linux/amd64 linux/arm64 darwin/arm64 darwin/amd64 windows/amd64
 
+# Stamped into `archiver version` (cmd/archiver: var version). Falls back to "dev" outside a git checkout.
+VERSION ?= $(shell git describe --always --dirty --tags 2>/dev/null || echo dev)
+LDFLAGS := -X main.version=$(VERSION)
+
 .PHONY: check test lint build build-all fmt tools
 
 check: test lint build-all
@@ -42,14 +46,14 @@ lint: tools $(GO)
 
 build: $(GO)
 	mkdir -p .cache/build
-	$(GO) build -o .cache/build/archiver ./cmd/archiver
+	$(GO) build -ldflags "$(LDFLAGS)" -o .cache/build/archiver ./cmd/archiver
 
 build-all: $(GO)
 	mkdir -p .cache/build
 	for t in $(BUILD_TARGETS); do \
 	  os=$${t%/*}; arch=$${t#*/}; ext=; [ $$os = windows ] && ext=.exe; \
 	  echo "build $$os/$$arch"; \
-	  GOOS=$$os GOARCH=$$arch $(GO) build -o .cache/build/archiver-$$os-$$arch$$ext ./cmd/archiver || exit 1; \
+	  GOOS=$$os GOARCH=$$arch $(GO) build -ldflags "$(LDFLAGS)" -o .cache/build/archiver-$$os-$$arch$$ext ./cmd/archiver || exit 1; \
 	done
 
 fmt: $(GO)

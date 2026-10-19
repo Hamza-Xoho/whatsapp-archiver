@@ -20,7 +20,9 @@ import (
 	"whatsapp-archiver/internal/wa"
 )
 
-const version = "0.1.0-phase0"
+// version is set at link time by the Makefile (-ldflags "-X main.version=..."); "dev" marks an unstamped build.
+var version = "dev"
+
 const whatsmeowVersion = "v0.0.0-20261013142727-4cf8bc8e0aeb"
 
 // exitNotPaired tells systemd not to restart (RestartPreventExitStatus in deploy/archiver.service).

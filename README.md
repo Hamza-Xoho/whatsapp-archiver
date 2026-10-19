@@ -382,11 +382,12 @@ On the Mac, in the repository, with the newest revision checked out:
 
 ```sh
 make build-all
+git describe --always --dirty --tags
 shasum -a 256 .cache/build/archiver-linux-amd64
 scp .cache/build/archiver-linux-amd64 hamza@SERVER:/tmp/archiver
 ```
 
-(use `archiver-linux-arm64` if `uname -m` on the server says `aarch64`). The `shasum` line prints a long fingerprint; write down its first characters. On the server:
+(use `archiver-linux-arm64` if `uname -m` on the server says `aarch64`). The `git describe` line is the commit the program will report; write it down with the `shasum` line, whose long fingerprint you only need the first characters of. On the server:
 
 ```sh
 sudo systemctl stop archiver
@@ -398,7 +399,7 @@ systemctl status archiver --no-pager | grep Active
 sudo -u whatsapp-archiver /opt/whatsapp-archiver/archiver status --data /var/lib/whatsapp-archiver | head -2
 ```
 
-Expected: `sha256sum` starts with the same characters as the Mac's `shasum`; `version` prints two lines (the `whatsmeow` line changes when the WhatsApp library was updated; the first line is `whatsapp-archiver 0.1.0-phase0` for every phase 0 build, so it cannot tell two builds apart); `Active: active (running) since …` with a time of a minute ago; `state: connected` within a minute. WhatsApp queues messages for a linked device that is offline and delivers them when it connects again; keep the stop short anyway.
+Expected: `sha256sum` starts with the same characters as the Mac's `shasum`; `version` prints two lines: the first is `whatsapp-archiver <commit>` and `<commit>` must equal the Mac's `git describe` line (a `-dirty` suffix means the build had uncommitted changes, so do not deploy that as a release); the second is the `whatsmeow` line, which changes when the WhatsApp library was updated; `Active: active (running) since …` with a time of a minute ago; `state: connected` within a minute. WhatsApp queues messages for a linked device that is offline and delivers them when it connects again; keep the stop short anyway.
 
 ### 11. Backups
 
