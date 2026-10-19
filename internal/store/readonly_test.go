@@ -184,7 +184,7 @@ func TestCoverageIsCompleteWhenAnyChunkReachedHundred(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			s := open(t)
 			for i, p := range c.progress {
-				if err := s.InsertHistoryChunk(context.Background(), store.HistoryChunk{ID: fmt.Sprint("c", i), SyncType: "FULL", Progress: p, ReceivedAt: int64(100 + i)}); err != nil {
+				if err := s.InsertHistoryChunk(context.Background(), store.HistoryChunk{ID: fmt.Sprint("c", i), SyncType: "FULL", ChunkOrder: i, Progress: p, ReceivedAt: int64(100 + i)}); err != nil {
 					t.Fatal(err)
 				}
 			}

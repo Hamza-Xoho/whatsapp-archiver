@@ -232,7 +232,7 @@ func TestStatusHistoryLines(t *testing.T) {
 			_, err = st.InsertMessage(context.Background(), msg(familyJID, "H1", "history", "2024-03-01T21:30:00Z"))
 			mustDo(t, err)
 			for i, p := range c.progress {
-				mustDo(t, st.InsertHistoryChunk(context.Background(), store.HistoryChunk{ID: fmt.Sprint("c", i), SyncType: "FULL", Progress: p, ReceivedAt: utc("2026-10-10T08:00:00Z") + int64(i)*600}))
+				mustDo(t, st.InsertHistoryChunk(context.Background(), store.HistoryChunk{ID: fmt.Sprint("c", i), SyncType: "FULL", ChunkOrder: i, Progress: p, ReceivedAt: utc("2026-10-10T08:00:00Z") + int64(i)*600}))
 			}
 			mustDo(t, st.Close())
 			writeFile(t, filepath.Join(dir, "config.yaml"), "time_zone: UTC\n")
