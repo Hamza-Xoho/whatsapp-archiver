@@ -1,0 +1,98 @@
+[
+ {
+  "name": "t2-ledger-above-loop",
+  "rf": "T2",
+  "file": "internal/ingest/history.go",
+  "old": "\tfor _, mapping := range hs.GetPhoneNumberToLidMappings() {",
+  "new": "\tif err = p.persist(ctx, \"insert history chunk\", func() error { return ledger.InsertHistoryChunk(ctx, chunk) }); err != nil {\n\t\treturn\n\t}\n\tfor _, mapping := range hs.GetPhoneNumberToLidMappings() {",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "t2-download-error-acks",
+  "rf": "T2",
+  "file": "internal/wa/historydl.go",
+  "old": "\t\t\treturn false\n\t\t}\n\t\treturn h(evt) && h(",
+  "new": "\t\t\treturn true\n\t\t}\n\t\treturn h(evt) && h(",
+  "pkgs": "./internal/wa/"
+ },
+ {
+  "name": "t2-timeout-removed",
+  "rf": "T2",
+  "file": "internal/wa/historydl.go",
+  "old": "dctx, cancel := context.WithTimeout(ctx, c.historyTimeout)",
+  "new": "dctx, cancel := context.WithCancel(ctx)",
+  "pkgs": "./internal/wa/"
+ },
+ {
+  "name": "t2-gone-is-retried",
+  "rf": "T2",
+  "file": "internal/wa/historydl.go",
+  "old": "\t\t\treturn h(evt)\n\t\tcase err != nil:",
+  "new": "\t\t\treturn false\n\t\tcase err != nil:",
+  "pkgs": "./internal/wa/"
+ },
+ {
+  "name": "t2-handle-ignores-import-error",
+  "rf": "T2",
+  "file": "internal/ingest/pipeline.go",
+  "old": "\t\t\tif err != nil {\n\t\t\t\tack = false // a chunk",
+  "new": "\t\t\tif errors.Is(err, errStopped) {\n\t\t\t\tack = false // a chunk",
+  "pkgs": "./internal/ingest/"
+ },
+ {
+  "name": "t2-manual-download-off",
+  "rf": "T2",
+  "file": "internal/wa/wa.go",
+  "old": "inner.ManualHistorySyncDownload = true",
+  "new": "inner.ManualHistorySyncDownload = false",
+  "pkgs": "./internal/wa/"
+ },
+ {
+  "name": "t2-notification-from-anyone",
+  "rf": "T2",
+  "file": "internal/wa/historydl.go",
+  "old": "if !ok || !msg.Info.IsFromMe {",
+  "new": "if !ok {",
+  "pkgs": "./internal/wa/"
+ },
+ {
+  "name": "t2-gone-not-mapped",
+  "rf": "T2",
+  "file": "internal/wa/historydl.go",
+  "old": "\t\treturn fmt.Errorf(\"%w: %w\", errHistoryGone, err)",
+  "new": "\t\treturn fmt.Errorf(\"%w\", err)",
+  "pkgs": "./internal/wa/"
+ },
+ {
+  "name": "t2-410-not-gone",
+  "rf": "T2",
+  "file": "internal/wa/historydl.go",
+  "old": " || errors.Is(err, whatsmeow.ErrMediaDownloadFailedWith410)",
+  "new": "",
+  "pkgs": "./internal/wa/"
+ },
+ {
+  "name": "t2-marker-dropped",
+  "rf": "T2",
+  "file": "internal/wa/historydl.go",
+  "old": "return h(evt) && h(&events.HistorySync",
+  "new": "return h(&events.HistorySync",
+  "pkgs": "./internal/wa/"
+ },
+ {
+  "name": "t2-chunk-verdict-ignored",
+  "rf": "T2",
+  "file": "internal/wa/historydl.go",
+  "old": "return h(evt) && h(&events.HistorySync{Data: hs, Notification: n})",
+  "new": "_ = h(&events.HistorySync{Data: hs, Notification: n})\n\t\treturn h(evt)",
+  "pkgs": "./internal/wa/"
+ },
+ {
+  "name": "t2-default-timeout-zero",
+  "rf": "T2",
+  "file": "internal/wa/wa.go",
+  "old": "historyTimeout: historyDownloadTimeout}",
+  "new": "historyTimeout: 0}",
+  "pkgs": "./internal/wa/"
+ }
+]

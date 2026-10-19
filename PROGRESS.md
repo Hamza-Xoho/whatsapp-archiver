@@ -101,3 +101,7 @@ Carried over from the acceptance run on the server. Testing status and the step-
 - Step 2 and step 4 were skipped (step 2 blocks the test corpus in step 10; step 4 gates phase 1).
 - Steps 6 to 10, 12 and 13 not run. Step 9 can run now; step 12 needs seven days of running.
 - Step 3: the 100 MB video skip untested; sha256 file check not run; "nothing on anyone's phone" not checked.
+
+## Phase 1 gate (plan `docs/plans/2026-10-19-phase1-gate.md`)
+
+- Task 2 (history chunk acked only after it is stored, readiness Problem 4; closes "Open, needs Hamza" item 2): `ManualHistorySyncDownload` on; `Client.historyHandler` downloads the chunk under a 2-minute bound (`historyDownloadTimeout`) and acks only when the handler stored the notification and the chunk; 404/410 is logged at Error and acked (D4, no `DeleteMedia`); the ledger row is written last; `Handle` returns false on any history import error. Tests `bdb7f3c`; fix `58774b4`. `make check` green; mutation `specs-t2.json` 12/12 KILLED. Deviations: the notification message still reaches the handler (kept as its protocol event row) and only own-phone notifications are downloaded. Unproven: whether WhatsApp redelivers an un-acked notification after a restart (Task 8 step 6). Report: `.superpowers/sdd/2026-10-19-phase1-gate/task-2-report.md`.
