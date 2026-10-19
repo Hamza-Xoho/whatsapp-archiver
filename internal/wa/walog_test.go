@@ -41,6 +41,27 @@ func TestWhatsmeowLogsReachSlog(t *testing.T) {
 	}
 }
 
+// whatsmeow logs an empty About text as a WARN; it is harmless and ignored by us, so it is Debug.
+func TestBenignWhatsmeowWarnIsDebug(t *testing.T) {
+	var buf bytes.Buffer
+	l := newWALogger(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	l.Sub("Client").Warnf("Set status notification has unexpected content (%v)", nil)
+	l.Warnf("something else %d", 1)
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	var got []string
+	for _, line := range lines {
+		var rec map[string]any
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, rec["level"].(string))
+	}
+	if len(got) != 2 || got[0] != "DEBUG" || got[1] != "WARN" {
+		t.Fatalf("levels = %v, want [DEBUG WARN]:\n%s", got, buf.String())
+	}
+}
+
 func TestOpenWiresWhatsmeowLogger(t *testing.T) {
 	var buf bytes.Buffer
 	log := slog.New(slog.NewJSONHandler(&buf, nil))
