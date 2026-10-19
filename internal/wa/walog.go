@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	waLog "go.mau.fi/whatsmeow/util/log"
+
+	"whatsapp-archiver/internal/logsafe"
 )
 
 // waLogger adapts whatsmeow's waLog.Logger to slog; Sub nests the module attribute.
@@ -34,7 +36,7 @@ var benignWarnPrefixes = []string{"Set status notification has unexpected conten
 
 func (l waLogger) logf(level slog.Level, msg string, args []any) {
 	ctx := context.Background()
-	text := fmt.Sprintf(msg, args...)
+	text := logsafe.RedactURLs(fmt.Sprintf(msg, args...))
 	if level == slog.LevelWarn && hasAnyPrefix(text, benignWarnPrefixes) {
 		level = slog.LevelDebug
 	}

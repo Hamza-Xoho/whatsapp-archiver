@@ -17,6 +17,7 @@ import (
 	"time"
 	"whatsapp-archiver/internal/config"
 	"whatsapp-archiver/internal/guard"
+	"whatsapp-archiver/internal/logsafe"
 	"whatsapp-archiver/internal/retry"
 	"whatsapp-archiver/internal/store"
 	"whatsapp-archiver/internal/wa"
@@ -184,7 +185,7 @@ func (q *Queue) request(ctx context.Context, m *store.Media, now time.Time) bool
 	case errors.Is(err, wa.ErrNoMediaKey):
 		m.State, m.Reason = "failed", wa.ErrNoMediaKey.Error()
 	default:
-		q.log.Warn("media re-upload request failed", "chat", m.ChatJID, "id", m.MessageID, "err", err)
+		q.log.Warn("media re-upload request failed", "chat", m.ChatJID, "id", m.MessageID, "err", logsafe.RedactURLs(err.Error()))
 		return false
 	}
 	m.UpdatedAt = now.Unix()
@@ -250,7 +251,7 @@ func (q *Queue) OnRetry(ctx context.Context, e *events.MediaRetry) {
 	}
 	path, err := q.down.ApplyMediaRetry(e, m.RawProto)
 	if err != nil {
-		q.log.Warn("media retry answer not applied", "chat", m.ChatJID, "id", m.MessageID, "err", err)
+		q.log.Warn("media retry answer not applied", "chat", m.ChatJID, "id", m.MessageID, "err", logsafe.RedactURLs(err.Error()))
 		return
 	}
 	m.RetryDirectPath = path

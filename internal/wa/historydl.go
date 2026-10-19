@@ -10,6 +10,8 @@ import (
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/types/events"
+
+	"whatsapp-archiver/internal/logsafe"
 )
 
 // historyDownloader fetches and decodes the history chunk a notification points to.
@@ -60,10 +62,10 @@ func (c *Client) historyHandler(ctx context.Context, h func(any) bool) func(any)
 		hs, err := c.download(dctx, n)
 		switch {
 		case errors.Is(err, errHistoryGone):
-			c.log.Error("history chunk gone from the server; acked without importing it", "sync_type", n.GetSyncType().String(), "chunk_order", n.GetChunkOrder(), "err", err)
+			c.log.Error("history chunk gone from the server; acked without importing it", "sync_type", n.GetSyncType().String(), "chunk_order", n.GetChunkOrder(), "err", logsafe.RedactURLs(err.Error()))
 			return h(evt)
 		case err != nil:
-			c.log.Error("history download failed; not acked, so WhatsApp delivers it again", "sync_type", n.GetSyncType().String(), "chunk_order", n.GetChunkOrder(), "err", err)
+			c.log.Error("history download failed; not acked, so WhatsApp delivers it again", "sync_type", n.GetSyncType().String(), "chunk_order", n.GetChunkOrder(), "err", logsafe.RedactURLs(err.Error()))
 			return false
 		}
 		return h(evt) && h(&events.HistorySync{Data: hs, Notification: n})

@@ -37,6 +37,7 @@ type Monitor struct {
 	gate      *alertGate
 	started   time.Time // baseline for rules whose event has not been seen yet
 	downSince time.Time // when the connection was last lost; zero while connected
+	lostAt    time.Time // when this process logged "connection lost"; zero until it has
 	queue     chan alert
 	log       *slog.Logger
 }
@@ -96,8 +97,10 @@ func (m *Monitor) Seen(t time.Time, fromMe bool) {
 }
 func (m *Monitor) SetState(state, detail string) {
 	m.mu.Lock()
+	prev := m.snapshot.State
 	m.snapshot.State = state
 	m.snapshot.Detail = detail
+	m.logTransitionLocked(prev, state, detail)
 	switch {
 	case state == "connected":
 		m.downSince = time.Time{}
@@ -117,6 +120,21 @@ func (m *Monitor) SetState(state, detail string) {
 		m.gate.fire(state, stateTitles[state], m.banBody(detail))
 	case "client_outdated":
 		m.gate.fire(state, stateTitles[state], "Version "+m.version()+" was rejected; update the archiver")
+	}
+}
+
+// logTransitionLocked writes the journal line for a connection change: "lost" when a connected link goes to any other
+// state, "restored" when it is back after this process logged a loss. The first connect after start logs nothing, and
+// neither does a repeat of the same state.
+func (m *Monitor) logTransitionLocked(prev, state, detail string) {
+	switch {
+	case prev == state:
+	case prev == "connected":
+		m.lostAt = m.clock.Now()
+		m.log.Info("connection lost", "state", state, "detail", detail)
+	case state == "connected" && !m.lostAt.IsZero():
+		m.log.Info("connection restored", "down_for", m.clock.Now().Sub(m.lostAt).String())
+		m.lostAt = time.Time{}
 	}
 }
 
