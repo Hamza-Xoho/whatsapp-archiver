@@ -60,13 +60,14 @@ func TestStatusReportEqualsSeparateQueries(t *testing.T) {
 	if err := s.UpsertChat(ctx, Chat{JID: "9001@s.whatsapp.net", Name: "Alias chat", Type: "individual"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.InsertIDMapping(ctx, IDMapping{LID: "9001@lid", PN: "9001@s.whatsapp.net", Source: "test", FirstSeen: time.Unix(1, 0)}); err != nil {
-		t.Fatal(err)
-	}
 	add("9001@s.whatsapp.net", "a1", "live", 5000, 10) // first copy is live
 	add("9001@lid", "a1", "history", 4000, 20)         // later alias copy is history: not counted as history
 	add("9001@lid", "a2", "history", 4500, 30)         // first copy is history
 	add("9001@s.whatsapp.net", "a2", "live", 4500, 31) // later alias copy is live
+	// the alias is learned after the messages, as in production, so both copies are stored
+	if _, err := s.InsertIDMapping(ctx, IDMapping{LID: "9001@lid", PN: "9001@s.whatsapp.net", Source: "test", FirstSeen: time.Unix(1, 0)}); err != nil {
+		t.Fatal(err)
+	}
 	add("9002@s.whatsapp.net", "l1", "live", 6000, 40) // a chat with only live messages
 	add("9002@s.whatsapp.net", "l2", "live", 6001, 41)
 	for i, p := range []int{10, 100, 57} {
