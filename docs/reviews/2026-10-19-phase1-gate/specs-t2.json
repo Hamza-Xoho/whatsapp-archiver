@@ -94,5 +94,29 @@
   "old": "historyTimeout: historyDownloadTimeout}",
   "new": "historyTimeout: 0}",
   "pkgs": "./internal/wa/"
+ },
+ {
+  "name": "t2-cancel-always-error",
+  "rf": "T2",
+  "file": "internal/wa/historydl.go",
+  "old": "errors.Is(err, context.Canceled) && ctx.Err() != nil",
+  "new": "false",
+  "pkgs": "./internal/wa/"
+ },
+ {
+  "name": "t2-cancel-info-without-parent-check",
+  "rf": "T2",
+  "file": "internal/wa/historydl.go",
+  "old": "errors.Is(err, context.Canceled) && ctx.Err() != nil",
+  "new": "errors.Is(err, context.Canceled)",
+  "pkgs": "./internal/wa/"
+ },
+ {
+  "name": "t2-timeout-info",
+  "rf": "T2",
+  "file": "internal/wa/historydl.go",
+  "old": "errors.Is(err, context.Canceled) && ctx.Err() != nil",
+  "new": "ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded)",
+  "pkgs": "./internal/wa/"
  }
 ]
