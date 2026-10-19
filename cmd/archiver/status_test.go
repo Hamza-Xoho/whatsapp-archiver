@@ -82,7 +82,7 @@ func seedFolder(t *testing.T) string {
 		mustDo(t, st.InsertMedia(ctx, store.Media{ChatJID: familyJID, MessageID: id, Source: "live", State: state}))
 	}
 	mustDo(t, st.InsertMedia(ctx, store.Media{ChatJID: laylaPN, MessageID: "m1", Source: "history", State: "failed"}))
-	for _, h := range []store.HistoryChunk{{ID: "h1", Progress: 20, ReceivedAt: utc("2026-10-10T08:05:00Z")}, {ID: "h2", Progress: 60, ReceivedAt: utc("2026-10-10T08:20:00Z")}, {ID: "h3", Progress: 100, ReceivedAt: utc("2026-10-10T09:00:00Z")}} {
+	for _, h := range []store.HistoryChunk{{ID: "h1", SyncType: "FULL", Progress: 20, ReceivedAt: utc("2026-10-10T08:05:00Z")}, {ID: "h2", SyncType: "FULL", Progress: 60, ReceivedAt: utc("2026-10-10T08:20:00Z")}, {ID: "h3", SyncType: "FULL", Progress: 100, ReceivedAt: utc("2026-10-10T09:00:00Z")}} {
 		mustDo(t, st.InsertHistoryChunk(ctx, h))
 	}
 	mustDo(t, st.Close())
@@ -232,7 +232,7 @@ func TestStatusHistoryLines(t *testing.T) {
 			_, err = st.InsertMessage(context.Background(), msg(familyJID, "H1", "history", "2024-03-01T21:30:00Z"))
 			mustDo(t, err)
 			for i, p := range c.progress {
-				mustDo(t, st.InsertHistoryChunk(context.Background(), store.HistoryChunk{ID: fmt.Sprint("c", i), Progress: p, ReceivedAt: utc("2026-10-10T08:00:00Z") + int64(i)*600}))
+				mustDo(t, st.InsertHistoryChunk(context.Background(), store.HistoryChunk{ID: fmt.Sprint("c", i), SyncType: "FULL", Progress: p, ReceivedAt: utc("2026-10-10T08:00:00Z") + int64(i)*600}))
 			}
 			mustDo(t, st.Close())
 			writeFile(t, filepath.Join(dir, "config.yaml"), "time_zone: UTC\n")
