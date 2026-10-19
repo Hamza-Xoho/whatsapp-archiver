@@ -48,7 +48,7 @@ All rows refer to `v0.0.0-20261013142727-4cf8bc8e0aeb`.
 | Expired-media errors | `whatsmeow.ErrMediaDownloadFailedWith404`, `whatsmeow.ErrMediaDownloadFailedWith410` | `errors.go` | pinned |
 | Request media re-upload | `(*whatsmeow.Client).SendMediaRetryReceipt(ctx context.Context, message *types.MessageInfo, mediaKey []byte) error` | `mediaretry.go` | pinned |
 | Decrypt media retry | `whatsmeow.DecryptMediaRetryNotification(evt *events.MediaRetry, mediaKey []byte) (*waMmsRetry.MediaRetryNotification, error)` | `mediaretry.go` | pinned |
-| Session SQL store | `sqlstore.New(ctx context.Context, dialect, address string, log waLog.Logger) (*Container, error)`; modernc dialect `sqlite`, DSN `file:<path>?_pragma=foreign_keys(1)` | `store/sqlstore/container.go` | pinned |
+| Session SQL store | `sqlstore.New(ctx context.Context, dialect, address string, log waLog.Logger) (*Container, error)`; modernc dialect `sqlite`, DSN `file:<path>?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_txlock=immediate` (`internal/wa/session.go`) | `store/sqlstore/container.go` | pinned |
 
 ## Table 3 — borrowed code
 
