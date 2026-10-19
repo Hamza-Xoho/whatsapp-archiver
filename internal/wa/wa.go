@@ -33,6 +33,9 @@ type Client struct {
 	sock      socket
 	refresh   func(context.Context) (changed bool, err error)
 	sleep     func(context.Context, time.Duration) error
+	// download fetches a history chunk; historyTimeout bounds it. Tests replace both.
+	download       historyDownloader
+	historyTimeout time.Duration
 }
 
 // socket is the connection boundary the reconnect loop drives; *whatsmeow.Client satisfies it.
@@ -74,7 +77,9 @@ func Open(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Client, e
 	inner.AutomaticMessageRerequestFromPhone = true
 	inner.SynchronousAck = true
 	inner.EnableDecryptedEventBuffer = true
-	c := &Client{client: inner, container: container, cfg: cfg, log: log, sock: inner, sleep: sleepCtx}
+	inner.ManualHistorySyncDownload = true // historyHandler downloads, so the notification is acked only after its chunk is stored
+	c := &Client{client: inner, container: container, cfg: cfg, log: log, sock: inner, sleep: sleepCtx,
+		download: liveHistoryDownloader(inner), historyTimeout: historyDownloadTimeout}
 	c.ver.Store(&clientVersion{version, reason})
 	c.refresh = c.refreshVersion
 	return c, nil
@@ -132,7 +137,7 @@ func (c *Client) Run(ctx context.Context, h func(any) bool, pairing bool) error 
 		go printQR(ctx, qr)
 	}
 	ctl := make(chan any, 8)
-	c.client.AddEventHandlerWithSuccessStatus(eventHandler(h, pairing, os.Stdout, ctl))
+	c.client.AddEventHandlerWithSuccessStatus(eventHandler(c.historyHandler(ctx, h), pairing, os.Stdout, ctl))
 	return c.reconnect(ctx, ctl)
 }
 

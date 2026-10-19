@@ -132,9 +132,10 @@ func (p *Pipeline) rejected(what string, err error) error {
 	return err
 }
 
-// Handle processes one whatsmeow event and reports whether whatsmeow may acknowledge it. It returns false only when
-// the serve context ended before the event was stored, so whatsmeow leaves the event unacknowledged. A stored event
-// and a permanent rejection (logged and alerted by persist) both return true.
+// Handle processes one whatsmeow event and reports whether whatsmeow may acknowledge it. It returns false when the
+// serve context ended before the event was stored, so whatsmeow leaves the event unacknowledged. A stored event and a
+// permanent rejection (logged and alerted by persist) both return true, except for a history chunk: any import error
+// returns false, because its ledger row is written only once the whole chunk is stored.
 func (p *Pipeline) Handle(evt any) (ack bool) {
 	ack = true
 	guard.Run(p.log, "handler", func(string, any) { p.health.Panic("handler") }, func() {
@@ -156,6 +157,9 @@ func (p *Pipeline) Handle(evt any) (ack bool) {
 		case *events.HistorySync:
 			_, _, err := p.ImportHistory(ctx, e)
 			logErr(err)
+			if err != nil {
+				ack = false // a chunk that is not fully stored is not acked, so WhatsApp delivers it again
+			}
 		case *events.GroupInfo, *events.JoinedGroup, *events.Archive, *events.Mute, *events.Pin:
 			if r, ok := FromChatEvent(e, now); ok {
 				logErr(p.Ingest(ctx, r))

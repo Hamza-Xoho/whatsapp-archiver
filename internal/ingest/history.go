@@ -62,9 +62,6 @@ func (p *Pipeline) ImportHistory(ctx context.Context, evt *events.HistorySync) (
 			}
 		}
 	}
-	if err = p.persist(ctx, "insert history chunk", func() error { return ledger.InsertHistoryChunk(ctx, chunk) }); err != nil {
-		return
-	}
 	for _, mapping := range hs.GetPhoneNumberToLidMappings() {
 		if mapping == nil {
 			continue
@@ -132,6 +129,11 @@ func (p *Pipeline) ImportHistory(ctx context.Context, evt *events.HistorySync) (
 			}
 			stored++
 		}
+	}
+	// The ledger row claims the whole chunk, so it is written last: a chunk cut short (SIGTERM, a write that kept
+	// failing) has no row and is imported again when WhatsApp redelivers it.
+	if err = p.persist(ctx, "insert history chunk", func() error { return ledger.InsertHistoryChunk(ctx, chunk) }); err != nil {
+		return stored, skipped, err
 	}
 	p.log.Info("history chunk imported", "progress", chunk.Progress, "stored", stored, "skipped", skipped)
 	return

@@ -42,6 +42,10 @@ All rows refer to `v0.0.0-20261013142727-4cf8bc8e0aeb`.
 | Group events | `events.GroupInfo`, `events.JoinedGroup` | `types/events/events.go` | pinned |
 | App-state events | `events.Archive`, `events.Mute`, `events.Pin` | `types/events/appstate.go` | pinned |
 | Alternate message JIDs | `types.MessageInfo.MessageSource.SenderAlt`, `RecipientAlt`, and `AddressingMode` | `types/message.go`, `message.go` | pinned |
+| Manual history download | `Client.ManualHistorySyncDownload bool` (the notification then reaches handlers as `*events.Message` with `Message.GetProtocolMessage().GetHistorySyncNotification()`, only when `Info.IsFromMe`; `DisableManualHistorySyncReceipt` left false) | `client.go:109`, `message.go:888-906,1172-1178` | pinned |
+| Download a history chunk | `(*whatsmeow.Client).DownloadHistorySync(ctx context.Context, notif *waE2E.HistorySyncNotification, synchronousStorage bool) (*waHistorySync.HistorySync, error)`; wraps download errors with `%w`, so `ErrMediaDownloadFailedWith404`/`410` match with `errors.Is` | `message.go:783` | pinned |
+| Notification fields for logs | `waE2E.HistorySyncNotification.GetSyncType() waE2E.HistorySyncType`, `GetChunkOrder() uint32` | `proto/waE2E/WAWebProtobufsE2E.pb.go` | pinned |
+| Handler verdict skips the ack | `whatsmeow.EventHandlerWithSuccessStatus func(evt any) bool`, `(*Client).AddEventHandlerWithSuccessStatus`; a false makes `dispatchEvent` report failure and `decryptMessages` returns before the receipt | `client.go:48,817,996-1011`, `message.go:453,459-462,489-497` | pinned |
 | History LID mappings | `HistorySync.GetPhoneNumberToLidMappings() []*waHistorySync.PhoneNumberToLIDMapping`; conversation IDs remain in `Conversation.ID` | `proto/waHistorySync/...pb.go`, `message.go` | pinned |
 | Parse a history message | `(*whatsmeow.Client).ParseWebMessage(chatJID types.JID, webMsg *waWeb.WebMessageInfo) (*events.Message, error)` | `client.go` | pinned |
 | Download media | `(*whatsmeow.Client).Download(ctx context.Context, msg whatsmeow.DownloadableMessage) ([]byte, error)` | `download.go` | pinned |
