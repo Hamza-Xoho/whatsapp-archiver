@@ -50,8 +50,8 @@
  {
   "name": "t3-complete-ignores-full",
   "file": "internal/store/store.go",
-  "old": "WHERE sync_type='FULL' LIMIT 1",
-  "new": "WHERE 0 LIMIT 1",
+  "old": "t.sync_type=COALESCE((SELECT sync_type FROM history_sync_chunks WHERE sync_type='FULL' LIMIT 1)",
+  "new": "t.sync_type=COALESCE((SELECT sync_type FROM history_sync_chunks WHERE 0 LIMIT 1)",
   "pkgs": "./internal/store/ ./cmd/archiver/",
   "rf": "T3"
  },
@@ -66,8 +66,8 @@
  {
   "name": "t3-complete-latest-chunk-type",
   "file": "internal/store/store.go",
-  "old": "COALESCE((SELECT sync_type FROM history_sync_chunks WHERE sync_type='FULL' LIMIT 1),'INITIAL_BOOTSTRAP')",
-  "new": "(SELECT sync_type FROM history_sync_chunks ORDER BY received_at DESC,rowid DESC LIMIT 1)",
+  "old": "t.sync_type=COALESCE((SELECT sync_type FROM history_sync_chunks WHERE sync_type='FULL' LIMIT 1),'INITIAL_BOOTSTRAP')",
+  "new": "t.sync_type=(SELECT sync_type FROM history_sync_chunks ORDER BY received_at DESC,rowid DESC LIMIT 1)",
   "pkgs": "./internal/store/ ./cmd/archiver/",
   "rf": "T3"
  },
