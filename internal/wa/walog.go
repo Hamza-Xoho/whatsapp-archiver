@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	waLog "go.mau.fi/whatsmeow/util/log"
 )
@@ -28,8 +29,15 @@ func (l waLogger) Sub(module string) waLog.Logger {
 	return waLogger{log: l.log, module: module}
 }
 
+// benignWarnPrefixes are whatsmeow WARN lines we have judged harmless. Only these are demoted.
+var benignWarnPrefixes = []string{"Set status notification has unexpected content"}
+
 func (l waLogger) logf(level slog.Level, msg string, args []any) {
 	ctx := context.Background()
+	text := fmt.Sprintf(msg, args...)
+	if level == slog.LevelWarn && hasAnyPrefix(text, benignWarnPrefixes) {
+		level = slog.LevelDebug
+	}
 	if !l.log.Enabled(ctx, level) {
 		return
 	}
@@ -37,5 +45,14 @@ func (l waLogger) logf(level slog.Level, msg string, args []any) {
 	if l.module != "" {
 		attrs = append(attrs, slog.String("module", l.module))
 	}
-	l.log.LogAttrs(ctx, level, fmt.Sprintf(msg, args...), attrs...)
+	l.log.LogAttrs(ctx, level, text, attrs...)
+}
+
+func hasAnyPrefix(s string, prefixes []string) bool {
+	for _, p := range prefixes {
+		if strings.HasPrefix(s, p) {
+			return true
+		}
+	}
+	return false
 }
