@@ -295,7 +295,22 @@ Use a WhatsApp group with exactly one other person, created for this. Do not @-m
   | ____ | ____ | ____ | ____ | ____ | ____ |
   | ____ | ____ | ____ | ____ | ____ | ____ |
 
-- [ ] Expected: zero missing, and every `OPEN` gap in Q10 recovered or explained (`open_gaps` 0 or each one understood). Any miss halts phase 1 until fixed. Result: ____
+- [ ] Expected: zero missing, and every `OPEN` gap in Q10 recovered or explained (`open_gaps` 0 or each one understood). Any miss halts phase 1 until fixed. Result: ____ (the per-day phone comparison is still open; the gap part is recorded below).
+
+  Open gaps, 19 Oct 23:46 +03, on a `.backup` copy of the live archive (deleted after): `open_gaps` = 10 of 31 `undecryptable` events. Classes: (a) `hide`-mode message recovered as a `message_events` row; (b) DM recovered under the other JID form with no `id_mappings` row; (c) never recovered. Counts: a = 1, b = 0, c = 9. No messages row in any chat carries any of the 10 IDs, and every open DM chat has an `id_mappings` row, so (b) is empty. `unavailable_type` is not stored, so it is unknown for every gap. A `hide` gap is a reaction, edit, revoke, pin, poll vote or similar; none of those is a visible chat message.
+
+  - `…0AC5` group `…4102`, `hide`, 16 Oct 21:25: (c). Same sender sent a `GROUP_MEMBER_LABEL_CHANGE` 3 s later, but no event with this message's timestamp exists.
+  - `…8328` DM `…67085@lid`, show, 16 Oct 23:25: (c). Sender is most likely the account itself (it writes in 122 chats). Nothing with this ID anywhere.
+  - `…FCCF` group `…1153`, show, 17 Oct 20:40: (c). Same sender as `…8328`. A real, visible message: another member reacted to this ID 2 h 50 min later. Nothing with this ID anywhere.
+  - `…0E89` DM `…10940@lid`, show, 18 Oct 11:37: (c). Same sender wrote a message with a different ID 4 s later; not a recovery (different ID).
+  - `…4A9D` DM `…10940@lid`, show, 18 Oct 13:16: (c). Nothing with this ID or timestamp.
+  - `…83CF` group `…4027`, `hide`, 19 Oct 10:31: (c). Same sender cast four poll votes on one poll 3 to 5 s later; this was most likely an earlier vote on that poll, and the later votes carry the final choice.
+  - `…B09C` DM `…70694@lid`, show, 19 Oct 11:48: (c). The gap 19 s earlier in the same DM (`…69C1`) was recovered; this one was not.
+  - `…5ACB` group `…2808`, `hide`, 19 Oct 12:16: (c). No event or message from this sender near this time.
+  - `…61D5` group `…2808`, `hide`, 19 Oct 12:27: (c). No event or message from this sender near this time.
+  - `…6F66` group `…4102`, `hide`, 19 Oct 20:52: (a). A `GROUP_MEMBER_LABEL_CHANGE` event from the same sender with the same timestamp, same chat, arrived 3 s after the gap. The match is by chat, sender and timestamp: event rows do not store the message's own ID, so the ID cannot be compared.
+
+  Why open gaps went from about 1 to 10: the archive does not show 1. Rebuilt from `received_at` (tables are insert-only), the open count at the end of each day was 2 (16 Oct), 3 (17 Oct), 5 (18 Oct) and 10 (19 Oct). 19 Oct alone had 24 of the 31 `undecryptable` events (16 to 18 Oct: 7). 19 of the 24 were recovered within 0 to 3 s, most likely by the retry receipt; 5 stayed open, 4 of them `hide`. All 24 came after the 01:29 restart that deployed the decrypted-event buffer build, whose decrypt can fail with SQLITE_BUSY (readiness Problem 2, fixed in `6679e1b`, not yet deployed: the service has not restarted since 01:29). No 19 Oct gap is near a restart or a disconnect: the drops were at 17:56, 18:38, 20:28, 20:57 and 22:52, and the nearest gap (`…6F66`, 20:52) is 5½ minutes before one. 15 of the 24 were in one busy group (`…2808`) between 10:06 and 15:10. The SQLITE_BUSY cause is likely but not proven per gap: the journal was searched only for restart and connection lines.
 
 ### 13. Commit
 
