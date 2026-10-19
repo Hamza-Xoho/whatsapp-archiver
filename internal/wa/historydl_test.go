@@ -185,3 +185,18 @@ func TestHistoryGoneWraps404And410(t *testing.T) {
 		t.Fatal("nil error mapped to an error")
 	}
 }
+
+func TestHistoryDownloadFailureLogIsRedacted(t *testing.T) {
+	signed := errors.New("download https://mmg.whatsapp.net/v/t62/h.enc?ccb=11-4&oh=01_SECRET&oe=65F0: status 500")
+	for name, err := range map[string]error{"failed": signed, "gone": fmt.Errorf("%w: %w", errHistoryGone, signed)} {
+		var buf bytes.Buffer
+		c := historyClient(slog.New(slog.NewTextHandler(&buf, nil)), time.Minute, func(context.Context, *waE2E.HistorySyncNotification) (*waHistorySync.HistorySync, error) {
+			return nil, err
+		})
+		c.historyHandler(t.Context(), func(any) bool { return true })(historyNotification(true))
+		out := buf.String()
+		if !strings.Contains(out, "h.enc?REDACTED") || strings.Contains(out, "SECRET") || strings.Contains(out, "ccb=") {
+			t.Fatalf("%s: journal line = %q", name, out)
+		}
+	}
+}

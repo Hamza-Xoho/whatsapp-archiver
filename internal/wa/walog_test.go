@@ -76,3 +76,16 @@ func TestOpenWiresWhatsmeowLogger(t *testing.T) {
 		t.Fatalf("whatsmeow client log did not reach slog: %q", buf.String())
 	}
 }
+
+func TestWhatsmeowLinesAreRedacted(t *testing.T) {
+	var buf bytes.Buffer
+	l := newWALogger(slog.New(slog.NewJSONHandler(&buf, nil))).Sub("Client")
+	l.Warnf("Failed to download %s: %v", "https://mmg.whatsapp.net/v/t62/a.enc?ccb=11-4&oh=01_SECRET&oe=65F0", "403")
+	out := buf.String()
+	if strings.Contains(out, "SECRET") || strings.Contains(out, "ccb=") {
+		t.Fatalf("signed query reached slog: %s", out)
+	}
+	if !strings.Contains(out, "https://mmg.whatsapp.net/v/t62/a.enc?REDACTED") {
+		t.Fatalf("host and path were lost: %s", out)
+	}
+}
