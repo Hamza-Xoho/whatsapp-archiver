@@ -1,0 +1,187 @@
+package wa
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"strings"
+	"testing"
+	"time"
+
+	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/proto/waHistorySync"
+	"go.mau.fi/whatsmeow/types"
+	"go.mau.fi/whatsmeow/types/events"
+	"google.golang.org/protobuf/proto"
+
+	"whatsapp-archiver/internal/config"
+)
+
+// historyNotification is the message whatsmeow dispatches for a history chunk when ManualHistorySyncDownload is on.
+func historyNotification(fromMe bool) *events.Message {
+	n := &waE2E.HistorySyncNotification{SyncType: waE2E.HistorySyncType_FULL.Enum(), ChunkOrder: proto.Uint32(3)}
+	msg := &waE2E.Message{ProtocolMessage: &waE2E.ProtocolMessage{Type: waE2E.ProtocolMessage_HISTORY_SYNC_NOTIFICATION.Enum(), HistorySyncNotification: n}}
+	return &events.Message{Info: types.MessageInfo{MessageSource: types.MessageSource{IsFromMe: fromMe}, ID: "N1"}, Message: msg, RawMessage: msg}
+}
+
+func historyClient(log *slog.Logger, timeout time.Duration, dl historyDownloader) *Client {
+	if log == nil {
+		log = slog.New(slog.NewTextHandler(io.Discard, nil))
+	}
+	return &Client{log: log, download: dl, historyTimeout: timeout}
+}
+
+// Problem 4: whatsmeow's automatic history download acks the notification before the chunk is stored. The manual
+// download hands the chunk to our handler so the ack waits for it.
+func TestOpenDownloadsHistoryManually(t *testing.T) {
+	cfg := &config.Config{DataDir: t.TempDir(), History: config.HistoryRules{DaysLimit: 1, SizeMBLimit: 1}}
+	c, err := Open(t.Context(), cfg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if !c.client.ManualHistorySyncDownload {
+		t.Fatal("whatsmeow downloads history itself and acks the notification before the chunk is stored")
+	}
+	if c.download == nil || c.historyTimeout != historyDownloadTimeout {
+		t.Fatalf("download set=%v timeout=%s, want the live downloader and %s", c.download != nil, c.historyTimeout, historyDownloadTimeout)
+	}
+}
+
+// The notification is acked only when the handler stored its chunk; the handler sees the chunk as an events.HistorySync.
+func TestHistoryNotificationIsNotAckedUntilItsChunkIsStored(t *testing.T) {
+	hs := &waHistorySync.HistorySync{SyncType: waHistorySync.HistorySync_FULL.Enum(), ChunkOrder: proto.Uint32(3)}
+	notif := historyNotification(true)
+	for _, verdict := range []bool{false, true} {
+		var gotNotif *waE2E.HistorySyncNotification
+		c := historyClient(nil, time.Minute, func(_ context.Context, n *waE2E.HistorySyncNotification) (*waHistorySync.HistorySync, error) {
+			gotNotif = n
+			return hs, nil
+		})
+		var chunks []*waHistorySync.HistorySync
+		markers := 0
+		h := func(evt any) bool {
+			if e, ok := evt.(*events.HistorySync); ok {
+				chunks = append(chunks, e.Data)
+				return verdict
+			}
+			if evt == notif {
+				markers++
+			}
+			return true
+		}
+		got := eventHandler(c.historyHandler(t.Context(), h), false, io.Discard, make(chan any, 1))(notif)
+		if got != verdict {
+			t.Fatalf("handler stored=%v, ack=%v", verdict, got)
+		}
+		if len(chunks) != 1 || chunks[0] != hs {
+			t.Fatalf("handler got chunks %v, want the downloaded chunk once", chunks)
+		}
+		if gotNotif != notif.Message.GetProtocolMessage().GetHistorySyncNotification() {
+			t.Fatal("downloader did not get the notification")
+		}
+		if markers != 1 {
+			t.Fatalf("notification message reached the handler %d times, want once (it is archived as a protocol event)", markers)
+		}
+	}
+}
+
+// Only our own phone sends history; a notification from anyone else is not downloaded (whatsmeow ignores it too), and
+// every other event reaches the handler unchanged.
+func TestOnlyOwnHistoryNotificationIsDownloaded(t *testing.T) {
+	c := historyClient(nil, time.Minute, func(context.Context, *waE2E.HistorySyncNotification) (*waHistorySync.HistorySync, error) {
+		t.Fatal("downloaded a history notification that is not from our own phone")
+		return nil, nil
+	})
+	for _, evt := range []any{historyNotification(false), &events.Message{Message: &waE2E.Message{Conversation: proto.String("x")}}, &events.Connected{}} {
+		var got []any
+		ok := c.historyHandler(t.Context(), func(e any) bool { got = append(got, e); return false })(evt)
+		if ok || len(got) != 1 || got[0] != evt {
+			t.Fatalf("%T: handler got %v and returned %v, want the event unchanged and its verdict", evt, got, ok)
+		}
+	}
+}
+
+// A download that hangs would stall every live event: it is bounded, and a timeout leaves the notification unacked.
+func TestHistoryDownloadIsBoundedAndNotAckedOnTimeout(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	c := historyClient(nil, 20*time.Millisecond, func(ctx context.Context, _ *waE2E.HistorySyncNotification) (*waHistorySync.HistorySync, error) {
+		<-ctx.Done()
+		return nil, fmt.Errorf("failed to download: %w", ctx.Err())
+	})
+	called := false
+	done := make(chan bool, 1)
+	go func() {
+		done <- c.historyHandler(ctx, func(any) bool { called = true; return true })(historyNotification(true))
+	}()
+	select {
+	case ok := <-done:
+		if ok || called {
+			t.Fatalf("timed-out download: ack=%v handler called=%v, want no ack and no call", ok, called)
+		}
+	case <-time.After(5 * time.Second):
+		cancel()
+		<-done
+		t.Fatal("history download is not bounded")
+	}
+}
+
+// Any other download error is retried by redelivery: no ack.
+func TestHistoryDownloadErrorIsNotAcked(t *testing.T) {
+	c := historyClient(nil, time.Minute, func(context.Context, *waE2E.HistorySyncNotification) (*waHistorySync.HistorySync, error) {
+		return nil, errors.New("failed to download: connection reset")
+	})
+	if c.historyHandler(t.Context(), func(any) bool { t.Fatal("handler called without a chunk"); return true })(historyNotification(true)) {
+		t.Fatal("a failed download was acked")
+	}
+}
+
+// D4: a blob that is gone (HTTP 404 or 410) can never be downloaded; it is logged at Error and acked.
+func TestHistoryGoneIsAckedAndLogged(t *testing.T) {
+	var buf bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&buf, nil))
+	c := historyClient(log, time.Minute, func(context.Context, *waE2E.HistorySyncNotification) (*waHistorySync.HistorySync, error) {
+		return nil, fmt.Errorf("download history: %w", errHistoryGone)
+	})
+	var chunks, markers int
+	ok := c.historyHandler(t.Context(), func(evt any) bool {
+		if _, isChunk := evt.(*events.HistorySync); isChunk {
+			chunks++
+		} else {
+			markers++
+		}
+		return true
+	})(historyNotification(true))
+	if !ok || chunks != 0 || markers != 1 {
+		t.Fatalf("gone blob: ack=%v chunks=%d markers=%d, want ack, no chunk, the notification archived once", ok, chunks, markers)
+	}
+	line := buf.String()
+	for _, want := range []string{"level=ERROR", "sync_type=FULL", "chunk_order=3"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("log %q lacks %q", line, want)
+		}
+	}
+}
+
+// The live downloader maps whatsmeow's typed 404 and 410 download errors to errHistoryGone, and nothing else.
+func TestHistoryGoneWraps404And410(t *testing.T) {
+	for _, err := range []error{whatsmeow.ErrMediaDownloadFailedWith404, whatsmeow.ErrMediaDownloadFailedWith410} {
+		got := historyErr(fmt.Errorf("failed to download: %w", err))
+		if !errors.Is(got, errHistoryGone) || !errors.Is(got, err) {
+			t.Fatalf("%v -> %v, want errHistoryGone wrapping it", err, got)
+		}
+	}
+	for _, err := range []error{whatsmeow.ErrMediaDownloadFailedWith403, errors.New("failed to download: connection reset"), context.DeadlineExceeded} {
+		if got := historyErr(err); errors.Is(got, errHistoryGone) || !errors.Is(got, err) {
+			t.Fatalf("%v -> %v, want it unchanged", err, got)
+		}
+	}
+	if historyErr(nil) != nil {
+		t.Fatal("nil error mapped to an error")
+	}
+}
