@@ -32,9 +32,17 @@
   "rf": "T3"
  },
  {
-  "name": "t3-complete-any-chunk",
+  "name": "t3-complete-ignores-received-at",
   "file": "internal/store/store.go",
-  "old": "WHERE sync_type=COALESCE((SELECT sync_type FROM history_sync_chunks WHERE sync_type='FULL' LIMIT 1),'INITIAL_BOOTSTRAP')",
+  "old": " AND h.received_at>=s.start",
+  "new": "",
+  "pkgs": "./internal/store/ ./cmd/archiver/",
+  "rf": "T3"
+ },
+ {
+  "name": "t3-complete-drops-first-chunk-condition",
+  "file": "internal/store/store.go",
+  "old": " AND t.chunk_order=(SELECT MIN(chunk_order) FROM history_sync_chunks WHERE sync_type=t.sync_type)",
   "new": "",
   "pkgs": "./internal/store/ ./cmd/archiver/",
   "rf": "T3"
@@ -50,16 +58,24 @@
  {
   "name": "t3-complete-no-bootstrap-fallback",
   "file": "internal/store/store.go",
-  "old": ",'INITIAL_BOOTSTRAP')),0)",
-  "new": ",'FULL')),0)",
-  "pkgs": "./internal/store/",
+  "old": "LIMIT 1),'INITIAL_BOOTSTRAP') AND",
+  "new": "LIMIT 1),'FULL') AND",
+  "pkgs": "./internal/store/ ./cmd/archiver/",
   "rf": "T3"
  },
  {
-  "name": "t3-complete-any-sync-type-last",
+  "name": "t3-complete-latest-chunk-type",
   "file": "internal/store/store.go",
-  "old": "WHERE sync_type=COALESCE((SELECT sync_type FROM history_sync_chunks WHERE sync_type='FULL' LIMIT 1),'INITIAL_BOOTSTRAP')",
-  "new": "WHERE sync_type=(SELECT sync_type FROM history_sync_chunks ORDER BY received_at DESC,rowid DESC LIMIT 1)",
+  "old": "COALESCE((SELECT sync_type FROM history_sync_chunks WHERE sync_type='FULL' LIMIT 1),'INITIAL_BOOTSTRAP')",
+  "new": "(SELECT sync_type FROM history_sync_chunks ORDER BY received_at DESC,rowid DESC LIMIT 1)",
+  "pkgs": "./internal/store/ ./cmd/archiver/",
+  "rf": "T3"
+ },
+ {
+  "name": "t3-complete-start-at-oldest-first-chunk",
+  "file": "internal/store/store.go",
+  "old": "MAX(t.received_at) AS start",
+  "new": "MIN(t.received_at) AS start",
   "pkgs": "./internal/store/ ./cmd/archiver/",
   "rf": "T3"
  }
