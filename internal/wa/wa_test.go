@@ -2,11 +2,13 @@ package wa
 
 import (
 	"bytes"
+	"database/sql"
 	"errors"
 	"io"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waCommon"
@@ -43,6 +45,59 @@ func TestSessionDSNEnablesForeignKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.Close()
+}
+
+// whatsmeow decrypts inside a read-then-write transaction. Two such transactions on the session
+// pool must queue behind each other, not fail at once with SQLITE_BUSY.
+func TestSessionDSNReadThenWriteTxnsWaitInsteadOfBusy(t *testing.T) {
+	db, err := sql.Open("sqlite", sessionDSN(filepath.Join(t.TempDir(), "session.db")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := t.Context()
+	if _, err := db.ExecContext(ctx, "CREATE TABLE t (x INTEGER)"); err != nil {
+		t.Fatal(err)
+	}
+
+	tx1, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var seen1 int
+	if err := tx1.QueryRowContext(ctx, "SELECT COUNT(*) FROM t").Scan(&seen1); err != nil {
+		t.Fatal(err)
+	}
+
+	errc := make(chan error, 1)
+	go func() {
+		errc <- func() error {
+			tx2, err := db.BeginTx(ctx, nil)
+			if err != nil {
+				return err
+			}
+			defer tx2.Rollback()
+			var seen2 int
+			if err := tx2.QueryRowContext(ctx, "SELECT COUNT(*) FROM t").Scan(&seen2); err != nil {
+				return err
+			}
+			if _, err := tx2.ExecContext(ctx, "INSERT INTO t (x) VALUES (2)"); err != nil {
+				return err
+			}
+			return tx2.Commit()
+		}()
+	}()
+
+	time.Sleep(200 * time.Millisecond)
+	if _, err := tx1.ExecContext(ctx, "INSERT INTO t (x) VALUES (1)"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx1.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-errc; err != nil {
+		t.Fatalf("second read-then-write transaction failed instead of waiting: %v", err)
+	}
 }
 
 func TestDecideVersion(t *testing.T) {
