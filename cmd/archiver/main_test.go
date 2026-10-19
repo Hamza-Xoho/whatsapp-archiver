@@ -29,6 +29,19 @@ func TestVersionPrints(t *testing.T) {
 	}
 }
 
+func TestVersionOutputUsesBuildStamp(t *testing.T) {
+	saved := version
+	t.Cleanup(func() { version = saved })
+	version = "abc1234"
+	var out, errOut bytes.Buffer
+	if code := run([]string{"version"}, &out, &errOut); code != 0 {
+		t.Fatalf("code=%d err=%q", code, errOut.String())
+	}
+	if !strings.HasPrefix(out.String(), "whatsapp-archiver abc1234\n") {
+		t.Fatalf("out=%q, want first line %q", out.String(), "whatsapp-archiver abc1234")
+	}
+}
+
 func writeConfig(t *testing.T, dir, ntfyURL string) {
 	t.Helper()
 	cfg := "wa:\n  check_latest_version: false\n"
