@@ -187,7 +187,7 @@ The commands print nothing until the last two. Expected:
 
 ```
 uid=…(whatsapp-archiver) gid=…(whatsapp-archiver) groups=…(whatsapp-archiver)
-whatsapp-archiver 0.1.0-phase0
+whatsapp-archiver d26dbf1
 whatsmeow v0.0.0-…
 ```
 
