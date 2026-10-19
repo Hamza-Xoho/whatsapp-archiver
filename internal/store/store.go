@@ -345,25 +345,13 @@ func (s *Store) InsertHistoryChunk(ctx context.Context, h HistoryChunk) error {
 	_, err := s.insert(ctx, `INSERT INTO history_sync_chunks(id,sync_type,chunk_order,progress,conversation_count,message_count,oldest_ts,newest_ts,received_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING`, h.ID, h.SyncType, h.ChunkOrder, h.Progress, h.ConversationCount, h.MessageCount, h.Oldest, h.Newest, h.ReceivedAt)
 	return err
 }
+
+// historyChunksQuery summarizes the history ledger: chunk count, progress of the chunk received last, time of the
+// last chunk, and whether history is complete (some chunk reported progress 100).
+const historyChunksQuery = `SELECT COUNT(*),COALESCE((SELECT progress FROM history_sync_chunks ORDER BY received_at DESC,rowid DESC LIMIT 1),0),COALESCE(MAX(received_at),0),COALESCE(MAX(progress)>=100,0) FROM history_sync_chunks`
+
+// HistoryCoverage is the coverage half of StatusReport.
 func (s *Store) HistoryCoverage(ctx context.Context) (Coverage, error) {
-	var c Coverage
-	c.OldestByChat = map[string]int64{}
-	err := s.read.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE((SELECT progress FROM history_sync_chunks ORDER BY received_at DESC,rowid DESC LIMIT 1),0),COALESCE(MAX(received_at),0),COALESCE(MAX(progress)>=100,0) FROM history_sync_chunks`).Scan(&c.Chunks, &c.LastProgress, &c.LastChunkTime, &c.Complete)
-	if err != nil {
-		return c, err
-	}
-	rows, err := s.read.QueryContext(ctx, `SELECT canonical_jid,MIN(ts) FROM messages_resolved WHERE source='history' GROUP BY canonical_jid`)
-	if err != nil {
-		return c, err
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var jid string
-		var oldest int64
-		if err = rows.Scan(&jid, &oldest); err != nil {
-			return c, err
-		}
-		c.OldestByChat[jid] = oldest
-	}
-	return c, rows.Err()
+	r, err := s.StatusReport(ctx)
+	return r.Coverage, err
 }

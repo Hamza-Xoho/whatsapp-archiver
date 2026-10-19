@@ -129,14 +129,11 @@ func printStatus(cfg *config.Config, out io.Writer) error {
 		return err
 	}
 	defer func() { _ = st.Close() }()
-	coverage, err := st.HistoryCoverage(ctx)
+	report, err := st.StatusReport(ctx)
 	if err != nil {
-		return fmt.Errorf("read history coverage: %w", err)
+		return fmt.Errorf("read status: %w", err)
 	}
-	stats, err := st.ChatStats(ctx)
-	if err != nil {
-		return fmt.Errorf("read chat statistics: %w", err)
-	}
+	coverage, stats := report.Coverage, report.Chats
 	size, err := dirSize(cfg.DataDir)
 	if err != nil {
 		return fmt.Errorf("measure data folder: %w", err)
