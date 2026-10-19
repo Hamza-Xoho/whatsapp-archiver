@@ -1,0 +1,66 @@
+[
+ {
+  "name": "t3-gaps-rerun-window",
+  "file": "internal/store/views.go",
+  "old": "SELECT 1 FROM resolved k WHERE",
+  "new": "SELECT 1 FROM messages_resolved k WHERE",
+  "pkgs": "./internal/store/",
+  "rf": "T3"
+ },
+ {
+  "name": "t3-history-oldest-any-source",
+  "file": "internal/store/views.go",
+  "old": "MIN(CASE WHEN rs.source='history' THEN rs.ts END)",
+  "new": "MIN(rs.ts)",
+  "pkgs": "./internal/store/",
+  "rf": "T3"
+ },
+ {
+  "name": "t3-no-dedupe-of-alias-copies",
+  "file": "internal/store/views.go",
+  "old": "SELECT canonical_jid,chat_jid,id,ts,source FROM messages_resolved",
+  "new": "SELECT COALESCE(a.canonical_jid,m.chat_jid),m.chat_jid,m.id,m.ts,m.source FROM messages m LEFT JOIN chat_aliases a ON a.alias_jid=m.chat_jid",
+  "pkgs": "./internal/store/",
+  "rf": "T3"
+ },
+ {
+  "name": "t3-alias-copy-ranked-first",
+  "file": "internal/store/migrations/0001_raw.sql",
+  "old": "ORDER BY m.received_at, m.chat_jid",
+  "new": "ORDER BY m.received_at DESC, m.chat_jid",
+  "pkgs": "./internal/store/",
+  "rf": "T3"
+ },
+ {
+  "name": "t3-complete-any-chunk",
+  "file": "internal/store/store.go",
+  "old": "WHERE sync_type=COALESCE((SELECT sync_type FROM history_sync_chunks WHERE sync_type='FULL' LIMIT 1),'INITIAL_BOOTSTRAP')",
+  "new": "",
+  "pkgs": "./internal/store/ ./cmd/archiver/",
+  "rf": "T3"
+ },
+ {
+  "name": "t3-complete-ignores-full",
+  "file": "internal/store/store.go",
+  "old": "WHERE sync_type='FULL' LIMIT 1",
+  "new": "WHERE 0 LIMIT 1",
+  "pkgs": "./internal/store/ ./cmd/archiver/",
+  "rf": "T3"
+ },
+ {
+  "name": "t3-complete-no-bootstrap-fallback",
+  "file": "internal/store/store.go",
+  "old": ",'INITIAL_BOOTSTRAP')),0)",
+  "new": ",'FULL')),0)",
+  "pkgs": "./internal/store/",
+  "rf": "T3"
+ },
+ {
+  "name": "t3-complete-any-sync-type-last",
+  "file": "internal/store/store.go",
+  "old": "WHERE sync_type=COALESCE((SELECT sync_type FROM history_sync_chunks WHERE sync_type='FULL' LIMIT 1),'INITIAL_BOOTSTRAP')",
+  "new": "WHERE sync_type=(SELECT sync_type FROM history_sync_chunks ORDER BY received_at DESC,rowid DESC LIMIT 1)",
+  "pkgs": "./internal/store/ ./cmd/archiver/",
+  "rf": "T3"
+ }
+]
