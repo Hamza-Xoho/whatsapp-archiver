@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"go.mau.fi/whatsmeow"
@@ -65,7 +66,11 @@ func (c *Client) historyHandler(ctx context.Context, h func(any) bool) func(any)
 			c.log.Error("history chunk gone from the server; acked without importing it", "sync_type", n.GetSyncType().String(), "chunk_order", n.GetChunkOrder(), "err", logsafe.RedactURLs(err.Error()))
 			return h(evt)
 		case err != nil:
-			c.log.Error("history download failed; not acked, so WhatsApp delivers it again", "sync_type", n.GetSyncType().String(), "chunk_order", n.GetChunkOrder(), "err", logsafe.RedactURLs(err.Error()))
+			level := slog.LevelError
+			if errors.Is(err, context.Canceled) && ctx.Err() != nil { // shutdown cut the download: expected
+				level = slog.LevelInfo
+			}
+			c.log.Log(context.WithoutCancel(ctx), level, "history download failed; not acked, so WhatsApp delivers it again", "sync_type", n.GetSyncType().String(), "chunk_order", n.GetChunkOrder(), "err", logsafe.RedactURLs(err.Error()))
 			return false
 		}
 		return h(evt) && h(&events.HistorySync{Data: hs, Notification: n})
