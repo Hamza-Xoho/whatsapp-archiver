@@ -19,7 +19,7 @@
   "name": "t4-redactor-eats-non-url-text",
   "file": "internal/logsafe/logsafe.go",
   "old": "(https?://[^",
-  "new": "(?:https?://|/)[^",
+  "new": "((?:https?://|/)[^",
   "pkgs": "./internal/logsafe/",
   "rf": "T4"
  },
@@ -27,7 +27,7 @@
   "name": "t4-walog-skips-redactor",
   "file": "internal/wa/walog.go",
   "old": "logsafe.RedactURLs(fmt.Sprintf(msg, args...))",
-  "new": "fmt.Sprintf(msg, args...)",
+  "new": "logsafe.RedactURLs(\"\")+fmt.Sprintf(msg, args...)",
   "pkgs": "./internal/wa/",
   "rf": "T4"
  },

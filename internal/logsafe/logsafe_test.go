@@ -8,6 +8,9 @@ func TestRedactURLsRemovesQuery(t *testing.T) {
 	if got := RedactURLs(in); got != want {
 		t.Fatalf("RedactURLs = %q, want %q", got, want)
 	}
+	if got := RedactURLs("see https://h.example/a/b#token=SECRET now"); got != "see https://h.example/a/b?REDACTED now" {
+		t.Fatalf("fragment only: %q", got)
+	}
 	if got := RedactURLs("http://h.example/a?x=1 and https://i.example/b?y=2"); got != "http://h.example/a?REDACTED and https://i.example/b?REDACTED" {
 		t.Fatalf("two URLs: %q", got)
 	}
