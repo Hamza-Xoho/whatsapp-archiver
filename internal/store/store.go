@@ -77,7 +77,7 @@ type HistoryChunk struct {
 }
 type Coverage struct {
 	Chunks, LastProgress int
-	Complete             bool // some chunk reported progress 100
+	Complete             bool // a chunk of the latest FULL (else INITIAL_BOOTSTRAP) sync reported progress 100
 	LastChunkTime        int64
 	OldestByChat         map[string]int64
 }
@@ -347,8 +347,10 @@ func (s *Store) InsertHistoryChunk(ctx context.Context, h HistoryChunk) error {
 }
 
 // historyChunksQuery summarizes the history ledger: chunk count, progress of the chunk received last, time of the
-// last chunk, and whether history is complete (some chunk reported progress 100).
-const historyChunksQuery = `SELECT COUNT(*),COALESCE((SELECT progress FROM history_sync_chunks ORDER BY received_at DESC,rowid DESC LIMIT 1),0),COALESCE(MAX(received_at),0),COALESCE(MAX(progress)>=100,0) FROM history_sync_chunks`
+// last chunk, and whether history is complete: the newest sync of type FULL (else INITIAL_BOOTSTRAP) has a chunk at
+// progress 100. A sync is the set of chunks of one type, since the ledger has no sync id; an older sync of another type
+// that finished says nothing about a newer one still running.
+const historyChunksQuery = `SELECT COUNT(*),COALESCE((SELECT progress FROM history_sync_chunks ORDER BY received_at DESC,rowid DESC LIMIT 1),0),COALESCE(MAX(received_at),0),COALESCE((SELECT MAX(progress)>=100 FROM history_sync_chunks WHERE sync_type=COALESCE((SELECT sync_type FROM history_sync_chunks WHERE sync_type='FULL' LIMIT 1),'INITIAL_BOOTSTRAP')),0) FROM history_sync_chunks`
 
 // HistoryCoverage is the coverage half of StatusReport.
 func (s *Store) HistoryCoverage(ctx context.Context) (Coverage, error) {
