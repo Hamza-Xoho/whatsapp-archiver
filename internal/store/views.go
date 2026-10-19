@@ -55,3 +55,23 @@ func (s *Store) ChatStats(ctx context.Context) ([]ChatStat, error) {
 	}
 	return out, rows.Err()
 }
+
+// StatusReport is everything `archiver status` reads from the archive.
+type StatusReport struct {
+	Chats    []ChatStat
+	Coverage Coverage
+}
+
+// statusReportQuery is a stub: it reruns the two old queries until the one-pass query replaces it.
+var statusReportQuery = chatStatsQuery
+
+// StatusReport runs ChatStats and HistoryCoverage.
+func (s *Store) StatusReport(ctx context.Context) (StatusReport, error) {
+	var r StatusReport
+	var err error
+	if r.Chats, err = s.ChatStats(ctx); err != nil {
+		return r, err
+	}
+	r.Coverage, err = s.HistoryCoverage(ctx)
+	return r, err
+}
