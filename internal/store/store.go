@@ -346,13 +346,15 @@ func (s *Store) InsertHistoryChunk(ctx context.Context, h HistoryChunk) error {
 	return err
 }
 
-// historyChunksQuery summarizes the history ledger: chunk count, progress of the chunk received last, time of the
-// last chunk, and whether history is complete. Let T be FULL if any FULL chunk exists, else INITIAL_BOOTSTRAP; the
+// historyChunksQuery summarizes the history ledger: chunk count, progress of the newest T chunk (by received_at, then
+// chunk_order; any type when there is none), time of the last chunk, and whether history is complete. Let T be FULL if any FULL chunk exists, else INITIAL_BOOTSTRAP; the
 // newest sync of T starts at start, the latest received_at among the T chunks with the lowest chunk_order (a restarted
 // sync sends its first chunk again). History is complete when some T chunk received at or after start has progress
 // 100. The ledger has no sync id, so a sync is found this way; with no T chunk history is not complete. A sync whose
-// first chunk arrives after a later chunk reads "in progress" until a newer chunk arrives.
-const historyChunksQuery = `SELECT COUNT(*),COALESCE((SELECT progress FROM history_sync_chunks ORDER BY received_at DESC,rowid DESC LIMIT 1),0),COALESCE(MAX(received_at),0),COALESCE((SELECT MAX(h.progress)>=100 FROM history_sync_chunks h,(SELECT t.sync_type,MAX(t.received_at) AS start FROM history_sync_chunks t WHERE t.sync_type=COALESCE((SELECT sync_type FROM history_sync_chunks WHERE sync_type='FULL' LIMIT 1),'INITIAL_BOOTSTRAP') AND t.chunk_order=(SELECT MIN(chunk_order) FROM history_sync_chunks WHERE sync_type=t.sync_type)) s WHERE h.sync_type=s.sync_type AND h.received_at>=s.start),0) FROM history_sync_chunks`
+// first chunk arrives after a later chunk reads "in progress" until a newer chunk arrives. Limitation: if the newest
+// sync's lowest-order chunk never reaches the ledger (acked as gone, or never importable), start stays at the old sync
+// and an old 100 can complete the newer one.
+const historyChunksQuery = `SELECT COUNT(*),COALESCE((SELECT progress FROM history_sync_chunks WHERE sync_type=COALESCE((SELECT sync_type FROM history_sync_chunks WHERE sync_type='FULL' LIMIT 1),'INITIAL_BOOTSTRAP') ORDER BY received_at DESC,chunk_order DESC LIMIT 1),(SELECT progress FROM history_sync_chunks ORDER BY received_at DESC,rowid DESC LIMIT 1),0),COALESCE(MAX(received_at),0),COALESCE((SELECT MAX(h.progress)>=100 FROM history_sync_chunks h,(SELECT t.sync_type,MAX(t.received_at) AS start FROM history_sync_chunks t WHERE t.sync_type=COALESCE((SELECT sync_type FROM history_sync_chunks WHERE sync_type='FULL' LIMIT 1),'INITIAL_BOOTSTRAP') AND t.chunk_order=(SELECT MIN(chunk_order) FROM history_sync_chunks WHERE sync_type=t.sync_type)) s WHERE h.sync_type=s.sync_type AND h.received_at>=s.start),0) FROM history_sync_chunks`
 
 // HistoryCoverage is the coverage half of StatusReport.
 func (s *Store) HistoryCoverage(ctx context.Context) (Coverage, error) {
