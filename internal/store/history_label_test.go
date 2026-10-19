@@ -109,3 +109,55 @@ func TestHistoryCompleteOnlyWhenLatestSyncReachesHundred(t *testing.T) {
 		}
 	})
 }
+
+// LastProgress follows the sync type that decides completeness: a RECENT or PUSH_NAME chunk received after the FULL
+// chunks must not replace the FULL sync's progress. With no chunk of that type the newest chunk of any type is used.
+func TestHistoryLastProgressFollowsSyncType(t *testing.T) {
+	ctx := context.Background()
+	t.Run("a later RECENT chunk at 0 does not hide FULL at 57", func(t *testing.T) {
+		s := open(t)
+		insertSyncChunk(t, s, "f1", "FULL", 0, 30, 100)
+		insertSyncChunk(t, s, "f2", "FULL", 1, 57, 101)
+		insertSyncChunk(t, s, "r1", "RECENT", 0, 0, 200)
+		c, err := s.HistoryCoverage(ctx)
+		if err != nil || c.Complete || c.LastProgress != 57 {
+			t.Fatalf("coverage=%+v err=%v; want Complete=false, LastProgress=57", c, err)
+		}
+	})
+	t.Run("a later PUSH_NAME chunk at 30 does not hide FULL at 57", func(t *testing.T) {
+		s := open(t)
+		insertSyncChunk(t, s, "f1", "FULL", 0, 57, 100)
+		insertSyncChunk(t, s, "p1", "PUSH_NAME", 0, 30, 200)
+		c, err := s.HistoryCoverage(ctx)
+		if err != nil || c.LastProgress != 57 {
+			t.Fatalf("coverage=%+v err=%v; want LastProgress=57", c, err)
+		}
+	})
+	t.Run("a bootstrap's progress is used when there is no FULL sync", func(t *testing.T) {
+		s := open(t)
+		insertSyncChunk(t, s, "b1", "INITIAL_BOOTSTRAP", 0, 40, 100)
+		insertSyncChunk(t, s, "r1", "RECENT", 0, 10, 200)
+		c, err := s.HistoryCoverage(ctx)
+		if err != nil || c.LastProgress != 40 {
+			t.Fatalf("coverage=%+v err=%v; want LastProgress=40", c, err)
+		}
+	})
+	t.Run("equal received_at takes the highest chunk order", func(t *testing.T) {
+		s := open(t)
+		insertSyncChunk(t, s, "f2", "FULL", 2, 57, 100)
+		insertSyncChunk(t, s, "f1", "FULL", 1, 30, 100)
+		c, err := s.HistoryCoverage(ctx)
+		if err != nil || c.LastProgress != 57 {
+			t.Fatalf("coverage=%+v err=%v; want LastProgress=57", c, err)
+		}
+	})
+	t.Run("only RECENT chunks fall back to the newest chunk", func(t *testing.T) {
+		s := open(t)
+		insertSyncChunk(t, s, "r1", "RECENT", 0, 10, 100)
+		insertSyncChunk(t, s, "r2", "RECENT", 1, 20, 101)
+		c, err := s.HistoryCoverage(ctx)
+		if err != nil || c.Complete || c.LastProgress != 20 {
+			t.Fatalf("coverage=%+v err=%v; want Complete=false, LastProgress=20", c, err)
+		}
+	})
+}
