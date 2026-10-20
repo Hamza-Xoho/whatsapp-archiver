@@ -275,7 +275,7 @@
   "name": "t8-error-not-capitalised",
   "file": "internal/web/settings.go",
   "old": "return string(unicode.ToUpper(r)) + s[i+len(string(r)):]",
-  "new": "return s",
+  "new": "return string(unicode.ToLower(r)) + s[i+len(string(r)):]",
   "pkgs": "./internal/web/",
   "rf": 1
  },
