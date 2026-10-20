@@ -107,7 +107,7 @@
   "name": "t10-stop-leaves-open",
   "file": "internal/wa/pairer.go",
   "old": "\tif out != nil {\n\t\tp.end(out, nil)\n\t}\n}",
-  "new": "}",
+  "new": "\tif out != nil && false {\n\t\tp.end(out, nil)\n\t}\n}",
   "pkgs": "./internal/wa/",
   "rf": 1
  },
@@ -120,10 +120,10 @@
   "rf": 1
  },
  {
-  "name": "t10-qr-before-connect-dropped",
+  "name": "t10-qr-not-shown",
   "file": "internal/wa/wa.go",
   "old": "\t\tgo show(ctx, qr)\n",
-  "new": "",
+  "new": "\t\t_, _ = show, qr\n",
   "pkgs": "./internal/wa/",
   "rf": 1
  },
@@ -267,7 +267,7 @@
   "name": "t10-no-web-pairer",
   "file": "cmd/archiver/main.go",
   "old": "Notifier: notifier, Pairer: browser})",
-  "new": "Notifier: notifier})",
+  "new": "Notifier: notifier, Pairer: func() web.Pairer { _ = browser; return nil }()})",
   "pkgs": "./cmd/archiver/",
   "rf": 1
  }

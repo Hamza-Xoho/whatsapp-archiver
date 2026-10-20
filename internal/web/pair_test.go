@@ -245,3 +245,36 @@ func TestPairEventOnStream(t *testing.T) {
 		e = next(t, events, "pair", 5*time.Second)
 	}
 }
+
+// Once paired, the old QR code is no longer served.
+func TestQRPNGGoneAfterDone(t *testing.T) {
+	f := newFakePairer(t, false)
+	h := newPairUI(t, f).Handler()
+	samePost(t, h, "/pair/start", true)
+	f.send(PairUpdate{QR: "2@x"})
+	waitPage(t, h, `src="/pair/qr.png`)
+	f.send(PairUpdate{Done: true})
+	waitPage(t, h, "Paired. Capture is running.")
+	if _, code, _ := get(t, h, "/pair/qr.png"); code != http.StatusNotFound {
+		t.Fatalf("QR served after pairing: %d", code)
+	}
+}
+
+// Every new QR code reaches an open page as a pair event with a new image URL.
+func TestEachNewQRCodeIsStreamed(t *testing.T) {
+	f := newFakePairer(t, false)
+	s := newPairUI(t, f)
+	h := s.Handler()
+	samePost(t, h, "/pair/start", true)
+	f.send(PairUpdate{QR: "2@one"})
+	waitPage(t, h, `src="/pair/qr.png?n=1"`)
+	events := openStream(t, s, nil) // connects while a pairing runs: the panel is sent at once
+	e := next(t, events, "pair", 5*time.Second)
+	if !strings.Contains(e.data, `src="/pair/qr.png?n=1"`) {
+		t.Fatalf("pair event on connect: %q", e.data)
+	}
+	f.send(PairUpdate{QR: "2@two"})
+	if e := next(t, events, "pair", 5*time.Second); !strings.Contains(e.data, `src="/pair/qr.png?n=2"`) {
+		t.Fatalf("pair event after the second code: %q", e.data)
+	}
+}
