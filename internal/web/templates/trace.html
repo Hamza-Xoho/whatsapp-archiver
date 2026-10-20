@@ -18,7 +18,7 @@
       <dt>Archived</dt><dd>{{$.Received}}</dd>
       <dt>Arrived as</dt><dd>{{.Source}}</dd>
       {{if .Forwarded}}<dt>Forwarded</dt><dd>yes</dd>{{end}}
-      {{if .QuotedID}}<dt>Reply to</dt><dd><a href="/chats/{{$.JID}}/m/{{.QuotedID}}">{{.QuotedID}}</a></dd>{{end}}
+      {{if .QuotedID}}<dt>Reply to</dt><dd><a href="/chats/{{$.JID}}/m/{{pathEscape .QuotedID}}">{{.QuotedID}}</a></dd>{{end}}
       {{if .MediaType}}<dt>Media</dt><dd>{{.MediaType}}</dd>{{end}}
       <dt>Original record</dt><dd>{{$.Raw}}</dd>
       <dt>Text</dt><dd class="text">{{.Text}}</dd>

@@ -160,11 +160,21 @@ func (s *Server) chatRules(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no archive", http.StatusServiceUnavailable)
 		return
 	}
-	ctx := r.Context()
+	if msg := s.applyRules(r.Context(), change); msg != "" {
+		http.Error(w, msg, http.StatusInternalServerError)
+		return
+	}
+	s.updatedRows(w, r, change.jids)
+}
+
+// applyRules is the locked part of a rule change: read, merge, write, re-read and Replace run under rulesMu, so two
+// interleaved changes cannot leave the live rules behind the archive. It returns "" or what went wrong.
+func (s *Server) applyRules(ctx context.Context, change ruleChange) string {
+	s.rulesMu.Lock()
+	defer s.rulesMu.Unlock()
 	existing, err := s.d.Store.ChatRules(ctx)
 	if err != nil {
-		http.Error(w, "the archive could not be read", http.StatusInternalServerError)
-		return
+		return "the archive could not be read"
 	}
 	byJID := make(map[string]store.ChatRule, len(existing))
 	for _, rule := range existing {
@@ -176,8 +186,7 @@ func (s *Server) chatRules(w http.ResponseWriter, r *http.Request) {
 	for _, jid := range change.jids {
 		aliases, err := s.d.Store.Aliases(ctx, jid)
 		if err != nil {
-			http.Error(w, "the archive could not be read", http.StatusInternalServerError)
-			return
+			return "the archive could not be read"
 		}
 		targets := []string{jid}
 		for _, a := range aliases {
@@ -204,19 +213,17 @@ func (s *Server) chatRules(w http.ResponseWriter, r *http.Request) {
 			write = append(write, rule)
 		}
 	}
-	if err = s.d.Store.SetChatRules(ctx, write); err != nil {
-		http.Error(w, "the change could not be saved", http.StatusInternalServerError)
-		return
+	if err := s.d.Store.SetChatRules(ctx, write); err != nil {
+		return "the change could not be saved"
 	}
 	all, err := s.d.Store.ChatRules(ctx)
 	if err != nil {
-		http.Error(w, "the change was saved but could not be applied; restart the archiver", http.StatusInternalServerError)
-		return
+		return "the change was saved but could not be applied; restart the archiver"
 	}
 	if s.d.Rules != nil {
 		s.d.Rules.Replace(all)
 	}
-	s.updatedRows(w, r, change.jids)
+	return ""
 }
 
 // chatAck is POST /chats/ack: the selected chats stop being flagged New, under every JID form they were seen as.

@@ -45,7 +45,8 @@ func canonicalOf(x string) string {
 	return `COALESCE((SELECT im.lid FROM id_mappings im WHERE im.lid=` + x + ` OR im.pn=` + x + ` ORDER BY im.lid LIMIT 1),` + x + `)`
 }
 
-// ChatList is the chats screen: every chat with messages, newest activity first. DisplayName is the chat's name (a
+// ChatList is the chats screen: every chat with messages, newest activity first, then every chat known only from
+// chat_rules, chat_seen or chats (no stored message: zero counts), each once under its canonical JID. DisplayName is the chat's name (a
 // group's subject), else the participant's name for a direct chat, else the JID. filter keeps the chats whose name or
 // JID contains it, ignoring case.
 func (s *Store) ChatList(ctx context.Context, filter string) ([]ChatRow, error) {
@@ -85,6 +86,24 @@ func (s *Store) ChatList(ctx context.Context, filter string) ([]ChatRow, error) 
 	if err != nil {
 		return nil, err
 	}
+	chats, err := s.stringsByCanonical(ctx, `SELECT `+canonicalOf("jid")+`,MAX(name) FROM (SELECT jid,'' AS name FROM chat_rules UNION ALL SELECT jid,'' FROM chat_seen UNION ALL SELECT jid,name FROM chats) GROUP BY 1`)
+	if err != nil {
+		return nil, err
+	}
+	listed := make(map[string]bool, len(report.Chats))
+	for _, c := range report.Chats {
+		listed[c.CanonicalJID] = true
+	}
+	quiet := make([]string, 0, len(chats))
+	for jid := range chats {
+		if !listed[jid] {
+			quiet = append(quiet, jid)
+		}
+	}
+	sort.Strings(quiet)
+	for _, jid := range quiet {
+		report.Chats = append(report.Chats, ChatStat{CanonicalJID: jid, Name: chats[jid]})
+	}
 	needle := strings.ToLower(filter)
 	out := make([]ChatRow, 0, len(report.Chats))
 	for _, c := range report.Chats {
@@ -120,8 +139,10 @@ func (s *Store) ChatName(ctx context.Context, jid string) (string, error) {
 }
 
 // chatPageQuery is messages_resolved for one chat: its messages under every JID form (aliasSet of ?1), each id once
-// (the first received copy), newest first, older than ?2 when ?2 > 0, at most ?3. Restricting to the chat's forms
-// before the window function keeps the cost to the chat's own rows instead of the whole archive.
+// (the first received copy), newest first, at most ?3, and, when ?2 > 0, after the cursor (?2, ?4) in that order:
+// older than ?2, or at ?2 with an id below ?4. The dedupe rank is computed over all the chat's rows before the cursor
+// filter. Restricting to the chat's forms before the window function keeps the cost to the chat's own rows instead of
+// the whole archive.
 const chatPageQuery = `WITH m AS (
  SELECT chat_jid,id,sender_jid,ts,text,quoted_id,media_type,
   ROW_NUMBER() OVER (PARTITION BY id ORDER BY received_at,chat_jid) AS rk
@@ -129,14 +150,14 @@ const chatPageQuery = `WITH m AS (
 )
 SELECT m.id,m.sender_jid,COALESCE(p.display_name,''),m.text,m.media_type,m.ts,m.quoted_id
 FROM m LEFT JOIN participants p ON p.jid=m.sender_jid
-WHERE m.rk=1 AND (?2<=0 OR m.ts<?2)
+WHERE m.rk=1 AND (?2<=0 OR m.ts<?2 OR (m.ts=?2 AND m.id<?4))
 ORDER BY m.ts DESC,m.id DESC LIMIT ?3`
 
-// ChatPage is one page of the viewer: at most limit messages of the chat older than beforeTS (all when beforeTS is
-// 0), newest first, with their edits, deletion, reactions and media state.
+// ChatPage is one page of the viewer: at most limit messages of the chat after the cursor (beforeTS, beforeID) in
+// newest-first order (all when beforeTS is 0), newest first, with their edits, deletion, reactions and media state.
 func (s *Store) ChatPage(ctx context.Context, canonicalJID string, beforeTS int64, beforeID string, limit int) ([]ViewMessage, error) {
 	var page []ViewMessage
-	err := s.scanRows(ctx, chatPageQuery, []any{canonicalJID, beforeTS, limit}, func(rows *sql.Rows) error {
+	err := s.scanRows(ctx, chatPageQuery, []any{canonicalJID, beforeTS, limit, beforeID}, func(rows *sql.Rows) error {
 		var m ViewMessage
 		if err := rows.Scan(&m.ID, &m.Sender, &m.SenderName, &m.Text, &m.MediaType, &m.TS, &m.QuotedID); err != nil {
 			return err

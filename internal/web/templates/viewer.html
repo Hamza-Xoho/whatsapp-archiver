@@ -2,14 +2,14 @@
   <h1>{{.Name}}</h1>
   {{if ne .Name .JID}}<p class="chat">{{.JID}}</p>{{end}}
   <p><a href="/chats">All chats</a>{{if .Before}} · <a href="/chats/{{.JID}}">Newest messages</a>{{end}}</p>
-  {{if .HasOlder}}<p><a href="/chats/{{.JID}}?before={{.OlderBefore}}">Older messages</a></p>{{end}}
+  {{if .HasOlder}}<p><a href="/chats/{{.JID}}?before={{.OlderBefore}}&amp;before_id={{.OlderID}}">Older messages</a></p>{{end}}
   <section class="panel">
     {{if not .Messages}}<p class="muted">No messages{{if .Before}} older than this{{end}}.</p>{{end}}
     <ol class="messages">
     {{range .Messages}}
       <li class="msg{{if .Deleted}} deleted{{end}}">
         <div class="meta"><strong class="name">{{.From}}</strong> <time>{{.Time}}</time>
-          <a class="muted" href="/chats/{{$.JID}}/m/{{.ID}}">Details</a></div>
+          <a class="muted" href="/chats/{{$.JID}}/m/{{pathEscape .ID}}">Details</a></div>
         {{if .QuotedID}}<div class="muted">Reply to an earlier message</div>{{end}}
         {{if .Deleted}}<div class="warn">Deleted by the sender. The archived copy is kept below.</div>{{end}}
         {{if .EditedText}}
@@ -28,5 +28,5 @@
     {{end}}
     </ol>
   </section>
-  {{if .HasOlder}}<p><a href="/chats/{{.JID}}?before={{.OlderBefore}}">Older messages</a></p>{{end}}
+  {{if .HasOlder}}<p><a href="/chats/{{.JID}}?before={{.OlderBefore}}&amp;before_id={{.OlderID}}">Older messages</a></p>{{end}}
 {{end}}

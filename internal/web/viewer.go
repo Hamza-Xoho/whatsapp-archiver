@@ -27,6 +27,7 @@ type viewerData struct {
 	Messages    []viewMsg // oldest first, as a chat reads
 	HasOlder    bool
 	OlderBefore int64
+	OlderID     string
 	Before      int64
 }
 
@@ -43,6 +44,7 @@ func (s *Server) viewer(w http.ResponseWriter, r *http.Request) {
 		}
 		before = n
 	}
+	beforeID := r.URL.Query().Get("before_id")
 	if s.d.Store == nil {
 		http.NotFound(w, r)
 		return
@@ -53,7 +55,7 @@ func (s *Server) viewer(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "the page could not be rendered", http.StatusInternalServerError)
 		return
 	}
-	msgs, err := s.d.Store.ChatPage(ctx, jid, before, "", viewerPageSize+1)
+	msgs, err := s.d.Store.ChatPage(ctx, jid, before, beforeID, viewerPageSize+1)
 	if err != nil {
 		http.Error(w, "the archive could not be read", http.StatusInternalServerError)
 		return
@@ -69,7 +71,7 @@ func (s *Server) viewer(w http.ResponseWriter, r *http.Request) {
 	data := viewerData{page: page{Title: name}, JID: jid, Name: name, Before: before}
 	if len(msgs) > viewerPageSize {
 		msgs = msgs[:viewerPageSize]
-		data.HasOlder, data.OlderBefore = true, msgs[viewerPageSize-1].TS
+		data.HasOlder, data.OlderBefore, data.OlderID = true, msgs[viewerPageSize-1].TS, msgs[viewerPageSize-1].ID
 	}
 	for _, m := range msgs {
 		v := viewMsg{ViewMessage: m, Time: view.FormatUnix(loc, m.TS), From: m.SenderName, ShowMedia: m.MediaState == "done"}

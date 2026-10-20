@@ -13,6 +13,8 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
+	"net/url"
+	"sync"
 	"time"
 
 	"whatsapp-archiver/internal/activity"
@@ -29,6 +31,10 @@ var templateFiles embed.FS
 //
 //go:embed static
 var staticFiles embed.FS
+
+// templateFuncs are the helpers every page may call. pathEscape makes one path segment of a value that came from
+// another phone (a message id may hold "?" or "/").
+var templateFuncs = template.FuncMap{"pathEscape": url.PathEscape}
 
 // shutdownBound is how long Run waits for requests in flight once its context ends.
 const shutdownBound = 5 * time.Second
@@ -65,6 +71,9 @@ type Server struct {
 	pages       map[string]*template.Template // one clone of tmpl per page, each with its own "content" block
 	static      http.Handler
 	healthEvery time.Duration // how often a quiet stream repeats the health event
+	// rulesMu serializes rule changes from read to Replace, so two interleaved POSTs cannot leave the live rules
+	// without one of them.
+	rulesMu sync.Mutex
 }
 
 // New parses the embedded templates once and builds the server.
@@ -76,7 +85,7 @@ func New(d Deps) *Server {
 	if err != nil {
 		panic(err) // the embed directive guarantees the directory
 	}
-	base := template.Must(template.ParseFS(templateFiles, "templates/layout.html"))
+	base := template.Must(template.New("layout.html").Funcs(templateFuncs).ParseFS(templateFiles, "templates/layout.html"))
 	return &Server{
 		d:    d,
 		tmpl: base,
