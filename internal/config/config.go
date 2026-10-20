@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"regexp"
+	"slices"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -109,7 +110,80 @@ func Load(path string) (*Config, error) {
 	if err := checkLoopback(cfg.Web.Listen); err != nil {
 		return nil, err
 	}
+	if err := ValidateMediaRules(cfg.Media); err != nil {
+		return nil, fmt.Errorf("media: %w", err)
+	}
+	if err := ValidateAlertThresholds(cfg.Alerts); err != nil {
+		return nil, fmt.Errorf("alerts: %w", err)
+	}
+	if err := ValidateBackupSchedule(cfg.Backup.Time, cfg.Backup.Keep); err != nil {
+		return nil, fmt.Errorf("backup: %w", err)
+	}
 	return &cfg, nil
+}
+
+// MediaTypes are the media types the rules can name.
+var MediaTypes = []string{"image", "video", "audio", "document", "sticker", "gif"}
+
+const (
+	maxVideoMB    = 100000
+	maxWorkers    = 16
+	maxRetryRate  = 600
+	maxBackupKeep = 3650
+)
+
+var backupTime = regexp.MustCompile(`^([01]\d|2[0-3]):[0-5]\d$`)
+
+// ValidateMediaRules checks media rules from config.yaml or the settings screen. An empty download list is allowed
+// (text only) and a video cap of 0 means no cap.
+func ValidateMediaRules(r MediaRules) error {
+	if r.VideoMaxMB < 0 || r.VideoMaxMB > maxVideoMB {
+		return fmt.Errorf("video size cap must be a whole number of MB from 0 (no cap) to %d", maxVideoMB)
+	}
+	if r.Workers < 1 || r.Workers > maxWorkers {
+		return fmt.Errorf("workers must be a whole number from 1 to %d", maxWorkers)
+	}
+	if r.RetryRequestsPerMinute < 1 || r.RetryRequestsPerMinute > maxRetryRate {
+		return fmt.Errorf("retry requests per minute must be a whole number from 1 to %d", maxRetryRate)
+	}
+	for _, list := range []struct {
+		name  string
+		types []string
+	}{{"download", r.Download}, {"skip", r.Skip}} {
+		for _, t := range list.types {
+			if !slices.Contains(MediaTypes, t) {
+				return fmt.Errorf("%s: unknown media type %q", list.name, t)
+			}
+		}
+	}
+	return nil
+}
+
+// ValidateAlertThresholds checks the three durations (each above zero) and the disk floor. Ntfy is not checked.
+func ValidateAlertThresholds(a AlertConfig) error {
+	for _, d := range []struct {
+		name string
+		v    time.Duration
+	}{{"no events after", a.NoEventsAfter}, {"disconnected after", a.DisconnectedAfter}, {"phone quiet after", a.PhoneQuietAfter}} {
+		if d.v <= 0 {
+			return fmt.Errorf("%s must be a duration above zero, such as 6h or 15m", d.name)
+		}
+	}
+	if a.DiskFreeMinGB < 0 {
+		return errors.New("disk free minimum must be a whole number of GB, 0 or more")
+	}
+	return nil
+}
+
+// ValidateBackupSchedule checks the daily backup time (HH:MM, 24-hour) and how many snapshots to keep.
+func ValidateBackupSchedule(at string, keep int) error {
+	if !backupTime.MatchString(at) {
+		return fmt.Errorf("backup time %q must be HH:MM on a 24-hour clock, such as 03:30", at)
+	}
+	if keep < 1 || keep > maxBackupKeep {
+		return fmt.Errorf("keep must be a whole number of snapshots from 1 to %d", maxBackupKeep)
+	}
+	return nil
 }
 
 // checkLoopback accepts a listen address only on 127.0.0.1, ::1 or localhost, with a port.

@@ -1,0 +1,70 @@
+{{define "content"}}
+  <h1>{{.Title}}</h1>
+  <p class="muted">Changes here apply as soon as they are saved, with no restart. The number of download workers and the retry rate are read when the archiver starts.</p>
+
+  <section class="panel" id="media">
+    <h2>Media rules</h2>
+    {{if eq .Saved "media"}}<p class="ok" role="status">Saved. The next media item uses these rules.</p>{{end}}
+    <p class="muted">{{.MediaInUse}}</p>
+    {{with .Media}}{{if .Err}}<p class="bad" role="alert">{{.Err}}</p>{{end}}
+    <form method="post" action="/settings/media">
+      <fieldset>
+        <legend>Media types</legend>
+        <table>
+          <thead><tr><th>Type</th><th>Download</th><th>Never download</th></tr></thead>
+          <tbody>{{range .Options}}
+            <tr><td>{{.Name}}</td>
+              <td><input type="checkbox" name="download" value="{{.Name}}"{{if .Download}} checked{{end}} aria-label="Download {{.Name}}"></td>
+              <td><input type="checkbox" name="skip" value="{{.Name}}"{{if .Skip}} checked{{end}} aria-label="Never download {{.Name}}"></td></tr>{{end}}
+          </tbody>
+        </table>
+      </fieldset>
+      <label>Largest video (MB, 0 for no cap) <input type="number" name="video_max_mb" value="{{.VideoMaxMB}}" min="0"></label>
+      <label>Download workers <input type="number" name="workers" value="{{.Workers}}" min="1"></label>
+      <label>Phone retry requests per minute <input type="number" name="retry_requests_per_minute" value="{{.RetryPerM}}" min="1"></label>
+      <button>Save media rules</button>
+    </form>{{end}}
+    <p class="muted">A chat's own media rules, set on the Chats screen, replace these for that chat.</p>
+  </section>
+
+  <section class="panel" id="alerts">
+    <h2>Alert thresholds</h2>
+    {{if eq .Saved "alerts"}}<p class="ok" role="status">Saved. The next health check uses these thresholds.</p>{{end}}
+    <p class="muted">{{.AlertsInUse}}</p>
+    {{with .Alerts}}{{if .Err}}<p class="bad" role="alert">{{.Err}}</p>{{end}}
+    <form method="post" action="/settings/alerts">
+      <label>No events after <input name="no_events_after" value="{{.NoEventsAfter}}"></label>
+      <label>Disconnected after <input name="disconnected_after" value="{{.DisconnectedAfter}}"></label>
+      <label>Phone quiet after <input name="phone_quiet_after" value="{{.PhoneQuietAfter}}"></label>
+      <label>Disk free minimum (GB) <input type="number" name="disk_free_min_gb" value="{{.DiskFreeMinGB}}" min="0"></label>
+      <button>Save alert thresholds</button>
+    </form>{{end}}
+    <p class="muted">Write durations as hours or minutes: 6h, 15m, 240h.</p>
+  </section>
+
+  <section class="panel" id="backup">
+    <h2>Backup schedule</h2>
+    {{if eq .Saved "backup"}}<p class="ok" role="status">Saved. The scheduler reads it after its next wait.</p>{{end}}
+    <p class="muted">{{.BackupInUse}}</p>
+    {{with .Backup}}{{if .Err}}<p class="bad" role="alert">{{.Err}}</p>{{end}}
+    <form method="post" action="/settings/backup">
+      <label>Backup time (HH:MM, 24-hour) <input name="time" value="{{.Time}}"></label>
+      <label>Snapshots to keep <input type="number" name="keep" value="{{.Keep}}" min="1"></label>
+      <button>Save backup schedule</button>
+    </form>{{end}}
+  </section>
+
+  <section class="panel">
+    <h2>Set in config.yaml</h2>
+    <p class="muted">These are set in config.yaml on the server and can only be changed there.</p>
+    <dl class="facts">
+      <dt>Data folder</dt><dd>{{.DataDir}} <span class="muted">set in config.yaml</span></dd>
+      <dt>Time zone</dt><dd>{{.TimeZone}} <span class="muted">set in config.yaml</span></dd>
+      <dt>WhatsApp: check for the latest client version</dt><dd>{{if .CheckLatestVersion}}Yes{{else}}No{{end}} <span class="muted">set in config.yaml</span></dd>
+      {{if .VersionOverride}}<dt>WhatsApp: version override</dt><dd>{{.VersionOverride}} <span class="muted">set in config.yaml</span></dd>{{end}}
+      <dt>Phone alerts (ntfy)</dt><dd>{{if .NtfyConfigured}}Phone alerts (ntfy) configured{{else}}Phone alerts (ntfy) not configured{{end}} <span class="muted">set in config.yaml</span></dd>
+      <dt>Backup destination</dt><dd>{{.BackupDestination}} <span class="muted">set in config.yaml</span></dd>
+      <dt>Web address</dt><dd>{{.Listen}} <span class="muted">set in config.yaml</span></dd>
+    </dl>
+  </section>
+{{end}}

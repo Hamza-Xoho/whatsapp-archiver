@@ -17,7 +17,7 @@ import (
 const maxFormBytes = 1 << 20
 
 // mediaTypes are the media types a chat's own rules can choose to download.
-var mediaTypes = []string{"image", "video", "audio", "document", "sticker", "gif"}
+var mediaTypes = config.MediaTypes
 
 type chatRowView struct {
 	store.ChatRow
