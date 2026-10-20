@@ -147,3 +147,87 @@ func TestLoadRejectsNonLoopbackListen(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateMediaRules(t *testing.T) {
+	good := config.MediaRules{Download: []string{"image", "video"}, Skip: []string{"sticker"}, VideoMaxMB: 100, Workers: 2, RetryRequestsPerMinute: 10}
+	if err := config.ValidateMediaRules(good); err != nil {
+		t.Fatalf("good rules rejected: %v", err)
+	}
+	if err := config.ValidateMediaRules(config.MediaRules{Workers: 1, RetryRequestsPerMinute: 1}); err != nil {
+		t.Fatalf("no types and no cap is allowed (text only): %v", err)
+	}
+	for name, mutate := range map[string]func(*config.MediaRules){
+		"negative cap":     func(r *config.MediaRules) { r.VideoMaxMB = -1 },
+		"huge cap":         func(r *config.MediaRules) { r.VideoMaxMB = 100001 },
+		"zero workers":     func(r *config.MediaRules) { r.Workers = 0 },
+		"too many workers": func(r *config.MediaRules) { r.Workers = 17 },
+		"zero retries":     func(r *config.MediaRules) { r.RetryRequestsPerMinute = 0 },
+		"too many retries": func(r *config.MediaRules) { r.RetryRequestsPerMinute = 601 },
+		"unknown download": func(r *config.MediaRules) { r.Download = []string{"image", "hologram"} },
+		"unknown skip":     func(r *config.MediaRules) { r.Skip = []string{"hologram"} },
+	} {
+		r := good
+		mutate(&r)
+		if err := config.ValidateMediaRules(r); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+func TestValidateAlertThresholds(t *testing.T) {
+	good := config.AlertConfig{NoEventsAfter: time.Hour, DisconnectedAfter: time.Minute, PhoneQuietAfter: 240 * time.Hour, DiskFreeMinGB: 0}
+	if err := config.ValidateAlertThresholds(good); err != nil {
+		t.Fatalf("good thresholds rejected: %v", err)
+	}
+	for name, mutate := range map[string]func(*config.AlertConfig){
+		"zero no-events":     func(a *config.AlertConfig) { a.NoEventsAfter = 0 },
+		"negative offline":   func(a *config.AlertConfig) { a.DisconnectedAfter = -time.Minute },
+		"zero phone quiet":   func(a *config.AlertConfig) { a.PhoneQuietAfter = 0 },
+		"negative disk free": func(a *config.AlertConfig) { a.DiskFreeMinGB = -1 },
+	} {
+		a := good
+		mutate(&a)
+		if err := config.ValidateAlertThresholds(a); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+func TestValidateBackupSchedule(t *testing.T) {
+	for _, ok := range []string{"00:00", "03:30", "23:59"} {
+		if err := config.ValidateBackupSchedule(ok, 7); err != nil {
+			t.Errorf("%s rejected: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"", "25:00", "24:00", "12:60", "3:30", "0330", "03:30:00", "ab:cd", " 03:30"} {
+		if err := config.ValidateBackupSchedule(bad, 7); err == nil {
+			t.Errorf("time %q accepted", bad)
+		}
+	}
+	for _, keep := range []int{0, -1, 3651} {
+		if err := config.ValidateBackupSchedule("03:30", keep); err == nil {
+			t.Errorf("keep %d accepted", keep)
+		}
+	}
+	if err := config.ValidateBackupSchedule("03:30", 1); err != nil {
+		t.Errorf("keep 1 rejected: %v", err)
+	}
+}
+
+// Load and the settings screen share one rule set.
+func TestLoadRejectsInvalidRuntimeSections(t *testing.T) {
+	for name, yaml := range map[string]string{
+		"backup time":   "backup:\n  time: \"25:00\"\n",
+		"backup keep":   "backup:\n  keep: 0\n",
+		"video cap":     "media:\n  video_max_mb: -3\n",
+		"alert horizon": "alerts:\n  no_events_after: 0s\n",
+	} {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		if err := os.WriteFile(path, []byte(yaml), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := config.Load(path); err == nil {
+			t.Errorf("%s: Load accepted %q", name, yaml)
+		}
+	}
+}
