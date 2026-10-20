@@ -155,7 +155,7 @@
   "name": "f7-health-unredacted",
   "file": "internal/health/health.go",
   "old": "logsafe.RedactNtfy(err.Error(), m.ntfyURL())",
-  "new": "err.Error()",
+  "new": "logsafe.RedactNtfy(err.Error(), \"\")",
   "pkgs": "./internal/health/",
   "rf": 1
  },
@@ -171,7 +171,7 @@
   "name": "f8-sse-no-zone",
   "file": "internal/web/sse.go",
   "old": "feedItem{Event: e, Loc: loc}",
-  "new": "feedItem{Event: e}",
+  "new": "feedItem{Event: e, Loc: func() *time.Location { _ = loc; return nil }()}",
   "pkgs": "./internal/web/",
   "rf": 1
  },
