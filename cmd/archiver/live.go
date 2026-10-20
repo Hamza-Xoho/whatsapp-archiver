@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"strings"
 
 	"whatsapp-archiver/internal/config"
@@ -98,4 +99,23 @@ func shortJID(jid string) string {
 		user = user[len(user)-4:]
 	}
 	return "…" + user + "@" + server
+}
+
+// applyArchiveKeep sets cfg.Backup.Keep to the archive's backup.schedule keep for a manual backup, so it never prunes
+// snapshots the dashboard asked to keep. Without the setting (an archive not yet imported) config.yaml's keep stays.
+// The archive is opened read-only; a failed read is an error, so no snapshot is pruned on a guess.
+func applyArchiveKeep(cfg *config.Config) error {
+	st, err := store.OpenReadOnly(filepath.Join(cfg.DataDir, "archive.db"))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = st.Close() }()
+	sched, ok, err := st.BackupSchedule(context.Background())
+	if err != nil {
+		return fmt.Errorf("read backup schedule: %w", err)
+	}
+	if ok {
+		cfg.Backup.Keep = sched.Keep
+	}
+	return nil
 }

@@ -83,7 +83,9 @@ func run(args []string, out, errOut io.Writer) int {
 		err = printChats(cfg, out)
 	case "backup":
 		var r backup.Report
-		r, err = backup.Run(context.Background(), cfg)
+		if err = applyArchiveKeep(cfg); err == nil {
+			r, err = backup.Run(context.Background(), cfg)
+		}
 		if err == nil {
 			_, _ = fmt.Fprintf(out, "snapshot %s (%d bytes, %s)\n", r.Snapshot, r.Bytes, r.Duration)
 		}
