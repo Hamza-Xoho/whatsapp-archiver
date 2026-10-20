@@ -7,7 +7,7 @@
   <td>{{if .Logging}}<span class="ok">Logging</span>{{else}}<span class="bad">Not logging</span>{{end}}</td>
   <td>{{if .HasMediaRule}}Own media rules{{else}}Default media{{end}}</td>
   <td class="actions">
-    <form method="post" action="/chats/rules" hx-post="/chats/rules" hx-swap="none">
+    {{if .Logging}}<form method="post" action="/chats/rules" hx-post="/chats/rules" hx-swap="none" hx-confirm="Stop logging this chat? Messages that arrive while logging is off are not saved." onsubmit="if(!window.htmx&&!confirm('Stop logging this chat? Messages that arrive while logging is off are not saved.')){return false}">{{else}}<form method="post" action="/chats/rules" hx-post="/chats/rules" hx-swap="none">{{end}}
       <input type="hidden" name="jid[]" value="{{.CanonicalJID}}">
       {{if .Logging}}<input type="hidden" name="logging" value="off"><button>Stop logging</button>
       {{else}}<input type="hidden" name="logging" value="on"><button>Start logging</button>{{end}}
@@ -27,7 +27,7 @@
     <label>Find a chat <input type="search" name="q" value="{{.Query}}" placeholder="Name or number"></label>
     <button>Find</button>
   </form>
-  <form id="bulk" class="panel bulk" method="post" action="/chats/rules" hx-post="/chats/rules" hx-swap="none">
+  <form id="bulk" class="panel bulk" method="post" action="/chats/rules" hx-post="/chats/rules" hx-swap="none" onsubmit="if(this.logging.value==='off'&&!confirm('Stop logging these chats? Messages that arrive while logging is off are not saved.')){event.stopImmediatePropagation();return false}">
     <h2>Change the selected chats</h2>
     <label>Logging
       <select name="logging">

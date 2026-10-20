@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"whatsapp-archiver/internal/activity"
+	"whatsapp-archiver/internal/view"
 )
 
 // sseBuffer is a stream's subscription buffer. A browser that falls this far behind is dropped by the bus (capture
@@ -88,7 +89,8 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) writeActivity(w http.ResponseWriter, e activity.Event) error {
 	var buf bytes.Buffer
-	if err := s.tmpl.ExecuteTemplate(&buf, "activity_item", feedItem{Event: e}); err != nil {
+	loc, _ := view.Location(s.config()) // a bad time zone is the pages' error to report; the feed falls back to UTC
+	if err := s.tmpl.ExecuteTemplate(&buf, "activity_item", feedItem{Event: e, Loc: loc}); err != nil {
 		return err
 	}
 	return writeEvent(w, strconv.FormatInt(e.At.UnixNano(), 10), "activity", buf.String())

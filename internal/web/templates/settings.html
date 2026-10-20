@@ -50,6 +50,7 @@
     <form method="post" action="/settings/backup">
       <label>Backup time (HH:MM, 24-hour) <input name="time" value="{{.Time}}"></label>
       <label>Snapshots to keep <input type="number" name="keep" value="{{.Keep}}" min="1"></label>
+      <p class="muted">Lowering this deletes the oldest snapshots at the next backup.</p>
       <button>Save backup schedule</button>
     </form>{{end}}
   </section>

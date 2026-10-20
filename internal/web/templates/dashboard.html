@@ -26,6 +26,6 @@
   {{end}}
   <section class="panel">
     <h2>Activity</h2>
-    <ul id="feed" class="feed" sse-swap="activity" hx-swap="afterbegin">{{range .Events}}{{template "activity_item" .}}{{end}}</ul>
+    <ul id="feed" class="feed" data-max="200" sse-swap="activity" hx-swap="afterbegin">{{range .Events}}{{template "activity_item" .}}{{end}}</ul>
   </section>
 {{end}}

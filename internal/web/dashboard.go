@@ -22,7 +22,19 @@ const recentEvents = 20
 type feedItem struct {
 	activity.Event
 	Name string
+	Loc  *time.Location // the configured time zone; nil is UTC
 }
+
+func (f feedItem) at() time.Time {
+	if f.Loc == nil {
+		return f.At.UTC()
+	}
+	return f.At.In(f.Loc)
+}
+
+// Clock is the line's time of day in the configured zone; Stamp is the same instant for the time element.
+func (f feedItem) Clock() string { return f.at().Format("15:04:05") }
+func (f feedItem) Stamp() string { return f.at().Format("2006-01-02T15:04:05Z07:00") }
 
 // healthView is the connection panel, in the words of the user's side of the screen.
 type healthView struct {
@@ -82,7 +94,7 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 		data.History = view.HistoryLine(loc, report.Coverage)
 		data.LoggingNoun, data.NotLoggingNoun = chatNoun(data.Logging), chatNoun(data.NotLogging)
 	}
-	data.Events = s.recent(names)
+	data.Events = s.recent(names, loc)
 	s.render(w, s.pages["dashboard"], "layout", data)
 }
 
@@ -97,14 +109,14 @@ func (s *Server) healthPartial(w http.ResponseWriter, r *http.Request) {
 }
 
 // recent is the newest recentEvents events, newest first.
-func (s *Server) recent(names map[string]string) []feedItem {
+func (s *Server) recent(names map[string]string, loc *time.Location) []feedItem {
 	all := s.d.Activity.Recent() // oldest first; a nil bus has none
 	if len(all) > recentEvents {
 		all = all[len(all)-recentEvents:]
 	}
 	out := make([]feedItem, 0, len(all))
 	for i := len(all) - 1; i >= 0; i-- {
-		out = append(out, feedItem{Event: all[i], Name: names[all[i].Chat]})
+		out = append(out, feedItem{Event: all[i], Name: names[all[i].Chat], Loc: loc})
 	}
 	return out
 }

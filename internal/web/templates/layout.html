@@ -26,12 +26,22 @@
   <h1>{{.Title}}</h1>
   <section class="panel">
     <h2>Activity</h2>
-    <ul id="feed" class="feed" sse-swap="activity" hx-swap="afterbegin"></ul>
+    <ul id="feed" class="feed" data-max="200" sse-swap="activity" hx-swap="afterbegin"></ul>
   </section>
 {{end}}
 </main>
+<script>
+// The feed keeps the newest lines: after each streamed line, drop the oldest beyond data-max, so a tab left open
+// for days does not grow without bound.
+document.addEventListener("htmx:sseMessage", function () {
+  var f = document.getElementById("feed");
+  if (!f) { return; }
+  var max = parseInt(f.getAttribute("data-max"), 10) || 200;
+  while (f.children.length > max) { f.lastElementChild.remove(); }
+});
+</script>
 </body>
 </html>
 {{end}}
 
-{{define "activity_item"}}<li class="feed-item"><time datetime="{{.At.Format "2006-01-02T15:04:05Z07:00"}}">{{.At.Format "15:04:05"}}</time> <span class="kind">{{.Kind}}</span>{{if .Name}} <span class="name">{{.Name}}</span>{{end}}{{if .Chat}} <span class="chat">{{.Chat}}</span>{{end}} <span class="detail">{{.Detail}}</span></li>{{end}}
+{{define "activity_item"}}<li class="feed-item"><time datetime="{{.Stamp}}">{{.Clock}}</time> <span class="kind">{{.Kind}}</span>{{if .Name}} <span class="name">{{.Name}}</span>{{end}}{{if .Chat}} <span class="chat">{{.Chat}}</span>{{end}} <span class="detail">{{.Detail}}</span></li>{{end}}
