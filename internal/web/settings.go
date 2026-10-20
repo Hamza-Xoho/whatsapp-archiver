@@ -100,7 +100,7 @@ func (s *Server) settingsData(ctx context.Context) (settingsData, error) {
 		Media:       mediaSectionOf(m), Alerts: alertsSectionOf(a), Backup: backupSection{Time: b.Time, Keep: strconv.Itoa(b.Keep)},
 		DataDir: cfg.DataDir, TimeZone: cfg.TimeZone, BackupDestination: cfg.Backup.Destination, Listen: cfg.Web.Listen,
 		CheckLatestVersion: cfg.WA.CheckLatestVersion, VersionOverride: cfg.WA.VersionOverride,
-		NtfyConfigured: cfg.Alerts.Ntfy != nil && cfg.Alerts.Ntfy.URL != "",
+		NtfyConfigured: cfg.Alerts.Ntfy != nil,
 	}, nil
 }
 
