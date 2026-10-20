@@ -106,7 +106,7 @@ func TestLiveMediaReportsAFailedRead(t *testing.T) {
 
 type noDownloads struct{}
 
-func (noDownloads) Download(context.Context, []byte, string) ([]byte, error)    { return nil, nil }
+func (noDownloads) Download(context.Context, []byte, string) ([]byte, error)     { return nil, nil }
 func (noDownloads) RequestMediaRetry(context.Context, wa.MediaRef, []byte) error { return nil }
 func (noDownloads) ApplyMediaRetry(*events.MediaRetry, []byte) (string, error)   { return "", nil }
 

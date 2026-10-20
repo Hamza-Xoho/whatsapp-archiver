@@ -70,7 +70,7 @@ func TestEnqueueRuleReadErrorMakesNoDecision(t *testing.T) {
 		global  func() (config.MediaRules, error)
 		perChat func(string) (*config.MediaRules, error)
 	}{
-		"chat rule": {func() (config.MediaRules, error) { return image, nil }, func(string) (*config.MediaRules, error) { return nil, boom }},
+		"chat rule":    {func() (config.MediaRules, error) { return image, nil }, func(string) (*config.MediaRules, error) { return nil, boom }},
 		"global rules": {func() (config.MediaRules, error) { return config.MediaRules{}, boom }, func(string) (*config.MediaRules, error) { return nil, nil }},
 	}
 	for name, c := range cases {

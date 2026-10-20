@@ -32,7 +32,9 @@ func (c fakeClock) Now() time.Time { return c.now }
 func TestDocumentDownloads(t *testing.T) {
 	st := testkit.Store(t)
 	d := &downFake{data: []byte("file")}
-	q := NewQueue(t.TempDir(), func() (config.MediaRules, error) { return config.MediaRules{Download: []string{"document"}, Workers: 1}, nil }, nil, st, d, fakeClock{time.Unix(1, 0)}, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
+	q := NewQueue(t.TempDir(), func() (config.MediaRules, error) {
+		return config.MediaRules{Download: []string{"document"}, Workers: 1}, nil
+	}, nil, st, d, fakeClock{time.Unix(1, 0)}, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
 	if err := q.Enqueue(t.Context(), store.Media{ChatJID: "g@g.us", MessageID: "A", Type: "document", MIME: "application/pdf", State: "pending"}); err != nil {
 		t.Fatal(err)
 	}
