@@ -15,8 +15,17 @@ var signedURL = regexp.MustCompile(`(https?://[^\s?#"'<>]*)[?#][^\s"'<>]*`)
 func RedactURLs(s string) string { return signedURL.ReplaceAllString(s, "${1}?REDACTED") }
 
 // RedactNtfy replaces the configured ntfy URL's path, the topic that works as a password on ntfy.sh, with "/REDACTED"
-// wherever it appears in s. A URL with no topic (no path) leaves s unchanged. Stub: not yet implemented.
+// wherever it appears in s. A URL with no topic (no path) leaves s unchanged.
 func RedactNtfy(s string, ntfyURL string) string {
-	_, _, _ = url.Parse, strings.ReplaceAll, ntfyURL
+	u, err := url.Parse(ntfyURL)
+	if err != nil {
+		return s
+	}
+	for _, topic := range []string{u.EscapedPath(), u.Path} {
+		if strings.Trim(topic, "/") == "" {
+			continue
+		}
+		s = strings.ReplaceAll(s, topic, "/REDACTED")
+	}
 	return s
 }

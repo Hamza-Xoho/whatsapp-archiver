@@ -72,7 +72,7 @@ func (s *Server) sendTestAlert(parent context.Context) *alertResult {
 	if err == nil {
 		return &alertResult{Sent: true, Text: "Sent. It should appear on your phone in a moment."}
 	}
-	slog.Warn("test alert not sent", "err", logsafe.RedactURLs(err.Error()))
+	slog.Warn("test alert not sent", "err", logsafe.RedactNtfy(logsafe.RedactURLs(err.Error()), s.ntfyURL()))
 	if m := ntfyStatus.FindStringSubmatch(err.Error()); m != nil {
 		return &alertResult{Text: "The test alert failed: ntfy answered " + m[1] + "."}
 	}
@@ -116,4 +116,12 @@ func (s *Server) renderBackups(w http.ResponseWriter, r *http.Request, alert *al
 		}
 	}
 	s.render(w, s.pages["backups"], "layout", d)
+}
+
+// ntfyURL is the configured ntfy URL, whose path is the secret topic; "" when ntfy is not configured.
+func (s *Server) ntfyURL() string {
+	if n := s.config().Alerts.Ntfy; n != nil {
+		return n.URL
+	}
+	return ""
 }

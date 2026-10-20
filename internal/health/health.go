@@ -13,6 +13,7 @@ import (
 	"whatsapp-archiver/internal/activity"
 	"whatsapp-archiver/internal/backup"
 	"whatsapp-archiver/internal/config"
+	"whatsapp-archiver/internal/logsafe"
 )
 
 type Clock interface{ Now() time.Time }
@@ -308,7 +309,7 @@ func (m *Monitor) sendAlerts(ctx context.Context) {
 }
 func (m *Monitor) send(ctx context.Context, a alert) {
 	if err := m.n.Notify(ctx, a.title, a.body); err != nil {
-		m.log.Error("alert not sent", "title", a.title, "err", err)
+		m.log.Error("alert not sent", "title", a.title, "err", logsafe.RedactNtfy(err.Error(), m.ntfyURL()))
 	}
 }
 
@@ -359,4 +360,12 @@ func (m *Monitor) writeLocked() {
 	if os.WriteFile(tmp, data, 0o600) == nil {
 		_ = os.Rename(tmp, filepath.Join(m.cfg.DataDir, "health.json"))
 	}
+}
+
+// ntfyURL is the configured ntfy URL, whose path is the secret topic; "" when ntfy is not configured.
+func (m *Monitor) ntfyURL() string {
+	if m.cfg != nil && m.cfg.Alerts.Ntfy != nil {
+		return m.cfg.Alerts.Ntfy.URL
+	}
+	return ""
 }

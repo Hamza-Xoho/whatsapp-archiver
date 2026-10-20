@@ -271,17 +271,19 @@ func (p *Pipeline) ingest(ctx context.Context, r Result, publish bool) error {
 	if err := p.persist(ctx, fmt.Sprintf("write %s in %s", r.Kind, r.Chat.JID), write); err != nil {
 		return err
 	}
-	if p.seen != nil && r.Chat.JID != "" {
-		if err := p.persist(ctx, "mark "+r.Chat.JID+" seen", func() error { return p.seen.mark(ctx, r.Chat.JID, r.Received.Unix()) }); err != nil {
-			return err
-		}
-	}
 	if r.Media != nil {
 		if err := p.persist(ctx, fmt.Sprintf("enqueue media in %s", r.Chat.JID), func() error { return p.queue.Enqueue(ctx, *r.Media) }); err != nil {
 			return err
 		}
 	}
 	p.health.Seen(r.Received, r.FromMe)
+	if p.seen != nil && r.Chat.JID != "" {
+		// A UI flag, written after capture is done: a failure is logged and the chat is tried again at its next
+		// sighting. It never fails, retries or delays the event.
+		if err := p.seen.mark(ctx, r.Chat.JID, r.Received.Unix()); err != nil {
+			p.log.Warn("chat not marked as seen; will retry at its next message", "chat", r.Chat.JID, "err", err)
+		}
+	}
 	if publish {
 		p.publish(r, true)
 	}
