@@ -1,0 +1,170 @@
+[
+ {
+  "name": "t3-blocking-send",
+  "file": "internal/activity/activity.go",
+  "old": "\t\tselect {\n\t\tcase s.ch <- e:\n\t\tdefault:\n\t\t\tdelete(b.subs, s)\n\t\t\tclose(s.ch)\n\t\t}\n",
+  "new": "\t\ts.ch <- e\n",
+  "pkgs": "./internal/activity/",
+  "rf": 1
+ },
+ {
+  "name": "t3-drop-keeps-subscriber",
+  "file": "internal/activity/activity.go",
+  "old": "\t\t\tdelete(b.subs, s)\n\t\t\tclose(s.ch)\n\t\t}\n\t}\n}",
+  "new": "\t\t\tclose(s.ch)\n\t\t}\n\t}\n}",
+  "pkgs": "./internal/activity/",
+  "rf": 1
+ },
+ {
+  "name": "t3-recent-ignores-wrap",
+  "file": "internal/activity/activity.go",
+  "old": "\tif !b.full {",
+  "new": "\tif true {",
+  "pkgs": "./internal/activity/",
+  "rf": 1
+ },
+ {
+  "name": "t3-nil-bus-panics",
+  "file": "internal/activity/activity.go",
+  "old": "\tif b == nil {\n\t\treturn\n\t}\n\tif e.At.IsZero()",
+  "new": "\tif e.At.IsZero()",
+  "pkgs": "./internal/activity/",
+  "rf": 1
+ },
+ {
+  "name": "t3-time-not-stamped",
+  "file": "internal/activity/activity.go",
+  "old": "\tif e.At.IsZero() {",
+  "new": "\tif false {",
+  "pkgs": "./internal/activity/",
+  "rf": 1
+ },
+ {
+  "name": "t3-text-in-detail",
+  "file": "internal/ingest/pipeline.go",
+  "old": "e.Kind, e.Detail = \"message\", \"text\"",
+  "new": "e.Kind, e.Detail = \"message\", r.Message.Text",
+  "pkgs": "./internal/ingest/",
+  "rf": 1
+ },
+ {
+  "name": "t3-excluded-skip-silent",
+  "file": "internal/ingest/pipeline.go",
+  "old": "\t\t\tp.publish(r, false)\n",
+  "new": "",
+  "pkgs": "./internal/ingest/",
+  "rf": 1
+ },
+ {
+  "name": "t3-stored-silent",
+  "file": "internal/ingest/pipeline.go",
+  "old": "\tif publish {\n\t\tp.publish(r, true)",
+  "new": "\tif false {\n\t\tp.publish(r, true)",
+  "pkgs": "./internal/ingest/",
+  "rf": 1
+ },
+ {
+  "name": "t3-gap-as-message",
+  "file": "internal/ingest/pipeline.go",
+  "old": "\tcase r.Kind == KindUndecryptable:",
+  "new": "\tcase false:",
+  "pkgs": "./internal/ingest/",
+  "rf": 1
+ },
+ {
+  "name": "t3-chat-event-as-event",
+  "file": "internal/ingest/pipeline.go",
+  "old": "e.Kind, e.Detail = \"chat_event\"",
+  "new": "e.Kind, e.Detail = \"event\"",
+  "pkgs": "./internal/ingest/",
+  "rf": 1
+ },
+ {
+  "name": "t3-history-publishes-each-message",
+  "file": "internal/ingest/history.go",
+  "old": "p.ingest(ctx, r, false)",
+  "new": "p.ingest(ctx, r, true)",
+  "pkgs": "./internal/ingest/",
+  "rf": 1
+ },
+ {
+  "name": "t3-history-chunk-silent",
+  "file": "internal/ingest/history.go",
+  "old": "Kind: \"history_chunk\"",
+  "new": "Kind: \"message\"",
+  "pkgs": "./internal/ingest/",
+  "rf": 1
+ },
+ {
+  "name": "t3-media-done-silent",
+  "file": "internal/media/queue.go",
+  "old": "case \"done\", \"failed\", \"expired\":",
+  "new": "case \"failed\", \"expired\":",
+  "pkgs": "./internal/media/",
+  "rf": 1
+ },
+ {
+  "name": "t3-media-failed-silent",
+  "file": "internal/media/queue.go",
+  "old": "case \"done\", \"failed\", \"expired\":",
+  "new": "case \"done\", \"expired\":",
+  "pkgs": "./internal/media/",
+  "rf": 1
+ },
+ {
+  "name": "t3-media-detail-no-state",
+  "file": "internal/media/queue.go",
+  "old": "Detail: kind + \" \" + m.State",
+  "new": "Detail: kind",
+  "pkgs": "./internal/media/",
+  "rf": 1
+ },
+ {
+  "name": "t3-monitor-publishes-every-call",
+  "file": "internal/health/health.go",
+  "old": "\tif prev != state {\n\t\tm.bus.Publish",
+  "new": "\tif true {\n\t\tm.bus.Publish",
+  "pkgs": "./internal/health/",
+  "rf": 1
+ },
+ {
+  "name": "t3-monitor-silent",
+  "file": "internal/health/health.go",
+  "old": "\tif prev != state {\n\t\tm.bus.Publish",
+  "new": "\tif false {\n\t\tm.bus.Publish",
+  "pkgs": "./internal/health/",
+  "rf": 1
+ },
+ {
+  "name": "t3-monitor-detail-has-text",
+  "file": "internal/health/health.go",
+  "old": "Kind: \"state\", Detail: state}",
+  "new": "Kind: \"state\", Detail: state + \" \" + detail}",
+  "pkgs": "./internal/health/",
+  "rf": 1
+ },
+ {
+  "name": "t3-backup-error-text",
+  "file": "cmd/archiver/main.go",
+  "old": "e.Detail = \"failed\"",
+  "new": "e.Detail = err.Error()",
+  "pkgs": "./cmd/archiver/",
+  "rf": 1
+ },
+ {
+  "name": "t3-backup-not-passed-on",
+  "file": "cmd/archiver/main.go",
+  "old": "\t\tnext(r, err)\n",
+  "new": "",
+  "pkgs": "./cmd/archiver/",
+  "rf": 1
+ },
+ {
+  "name": "t3-backup-silent",
+  "file": "cmd/archiver/main.go",
+  "old": "\t\tbus.Publish(e)\n",
+  "new": "",
+  "pkgs": "./cmd/archiver/",
+  "rf": 1
+ }
+]
