@@ -318,3 +318,44 @@ func TestRunReportsListenError(t *testing.T) {
 		t.Fatal("Run on an address in use did not return")
 	}
 }
+
+// F2: Listening is called only once the port is held; a taken port gets the error and no call.
+func TestRunReportsListeningOnlyAfterListen(t *testing.T) {
+	taken, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = taken.Close() })
+	var calls []string
+	s := New(Deps{Listening: func(addr string) { calls = append(calls, addr) }})
+	if err := s.Run(t.Context(), taken.Addr().String()); err == nil {
+		t.Fatal("Run on a taken port returned nil")
+	}
+	if len(calls) != 0 {
+		t.Fatalf("Listening called %v for a port that could not be listened on", calls)
+	}
+
+	free, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := free.Addr().String()
+	_ = free.Close()
+	got := make(chan string, 1)
+	s = New(Deps{Listening: func(a string) { got <- a }})
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- s.Run(ctx, addr) }()
+	select {
+	case a := <-got:
+		if a != addr {
+			t.Fatalf("Listening(%q), want %q", a, addr)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Listening was not called for a free port")
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}

@@ -218,3 +218,54 @@ func TestServiceUnitDoesNotRestartWhenNotPaired(t *testing.T) {
 		t.Fatalf("deploy/archiver.service lacks %q", want)
 	}
 }
+
+// logCapture redirects os.Stderr, where serve's logger writes, to a file for the test; log returns what was written.
+func logCapture(t *testing.T) (log func() string) {
+	t.Helper()
+	f, err := os.CreateTemp(t.TempDir(), "stderr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := os.Stderr
+	os.Stderr = f
+	t.Cleanup(func() { os.Stderr = saved; _ = f.Close() })
+	return func() string {
+		b, _ := os.ReadFile(f.Name())
+		return string(b)
+	}
+}
+
+// F2: "dashboard listening" is logged once the port is held. A taken port logs the failure and no such line.
+func TestDashboardListeningLoggedOnlyWhenListening(t *testing.T) {
+	log := logCapture(t)
+	taken, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = taken.Close() })
+	data := t.TempDir()
+	writeConfig(t, data, "", taken.Addr().String())
+	ctx, cancel := context.WithCancel(context.Background())
+	savedCtx, savedSock := serveContext, testSocket
+	serveContext = func() context.Context { return ctx }
+	testSocket = &countingSocket{}
+	t.Cleanup(func() { cancel(); serveContext, testSocket = savedCtx, savedSock })
+	done := make(chan int, 1)
+	go func() { done <- run([]string{"run", "--data", data}, io.Discard, io.Discard) }()
+	deadline := time.Now().Add(10 * time.Second)
+	for !strings.Contains(log(), "dashboard stopped; capture continues") && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	<-done
+	if got := log(); !strings.Contains(got, "dashboard stopped; capture continues") || strings.Contains(got, "dashboard listening") {
+		t.Fatalf("log for a taken port:\n%s", got)
+	}
+
+	r := startRun(t, t.TempDir(), "")
+	r.waitPairPage(t)
+	r.stop(t)
+	if got := log(); !strings.Contains(got, "dashboard listening") {
+		t.Fatalf("log for a free port:\n%s", got)
+	}
+}

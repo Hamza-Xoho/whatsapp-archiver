@@ -286,3 +286,27 @@ func TestTrackPairingFollowsPairSuccessAndLogout(t *testing.T) {
 		t.Fatal("still paired after LoggedOut")
 	}
 }
+
+// Phase 2 final review F1: after WhatsApp logs a paired device out, nothing reads StartPairing's request (Run is
+// inside the capture loop), so StartPairing says so at once instead of leaving the page waiting for a QR code.
+func TestStartPairingAfterLogoutSaysToRestart(t *testing.T) {
+	r := newPairRig(t, true)
+	r.sock.waitConnects(t, 1)
+	select {
+	case <-r.p.Ready():
+	case <-time.After(5 * time.Second):
+		t.Fatal("not ready when already paired")
+	}
+	r.p.c.setPaired(false) // what trackPairing does on LoggedOut
+	ch, err := r.p.StartPairing(t.Context())
+	if ch != nil {
+		t.Fatal("StartPairing after a logout returned a channel nobody reads")
+	}
+	const want = "WhatsApp logged this archiver out. Restart it (sudo systemctl restart archiver) to pair again."
+	if err == nil || err.Error() != want {
+		t.Fatalf("err = %v, want %q", err, want)
+	}
+	if n := r.qrCalls(); n != 0 {
+		t.Fatalf("QR channels=%d after a logout, want 0", n)
+	}
+}

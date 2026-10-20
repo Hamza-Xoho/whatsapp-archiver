@@ -3,6 +3,7 @@ package web
 import (
 	"bytes"
 	"context"
+	"errors"
 	"image/png"
 	"net/http"
 	"net/http/httptest"
@@ -316,5 +317,23 @@ func TestBannerWhenUnpaired(t *testing.T) {
 				t.Fatalf("GET %s: no Pairing link in the nav", path)
 			}
 		}
+	}
+}
+
+// loggedOutPairer is a Pairer whose device was logged out: StartPairing refuses with the restart advice.
+type loggedOutPairer struct{}
+
+func (loggedOutPairer) Paired() bool { return false }
+func (loggedOutPairer) StartPairing(context.Context) (<-chan PairUpdate, error) {
+	return nil, errors.New("WhatsApp logged this archiver out. Restart it (sudo systemctl restart archiver) to pair again.")
+}
+
+// F1: the refusal reaches the /pair page, not an endless wait for a QR code.
+func TestPairPageShowsLoggedOutAdvice(t *testing.T) {
+	h := New(Deps{Store: testkit.Store(t), Config: &config.Config{TimeZone: "UTC"}, Pairer: loggedOutPairer{}, Activity: activity.NewBus(10)}).Handler()
+	samePost(t, h, "/pair/start", true)
+	page := visibleText(waitPage(t, h, "sudo systemctl restart archiver"))
+	if !strings.Contains(page, "WhatsApp logged this archiver out. Restart it (sudo systemctl restart archiver) to pair again.") || strings.Contains(page, "Waiting for WhatsApp") {
+		t.Fatalf("page:\n%s", page)
 	}
 }

@@ -52,6 +52,8 @@ type Deps struct {
 	Notifier health.Notifier
 	// DiskFree reports the free bytes of the disk holding a path; nil: health.DiskFree.
 	DiskFree func(string) (uint64, error)
+	// Listening is called with the address once Run has the listener, before it serves; nil: nothing.
+	Listening func(addr string)
 }
 
 // Pairer pairs WhatsApp from the browser (wa.Pairer, through an adapter in cmd/archiver). Updates are plain strings:

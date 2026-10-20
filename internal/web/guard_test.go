@@ -4,6 +4,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"whatsapp-archiver/internal/ingest"
+	"whatsapp-archiver/internal/testkit"
 )
 
 // The UI has no login and is reached through an SSH tunnel: a page on another site must not reach it, either by
@@ -127,5 +130,27 @@ func TestResponsesForbidFraming(t *testing.T) {
 	}
 	if got := w.Header().Get("X-Content-Type-Options"); got != "nosniff" {
 		t.Errorf("X-Content-Type-Options %q, want nosniff", got)
+	}
+}
+
+// F5: a request the browser marks cross-site is refused on every method; a missing header (curl, old browsers) and
+// same-origin, same-site and none (typed address) are unchanged.
+func TestCrossSiteFetchMetadataIsRefusedOnEveryMethod(t *testing.T) {
+	h := New(Deps{Store: testkit.Store(t), Rules: ingest.NewRuleSet(nil)}).Handler()
+	cases := []struct {
+		site string
+		want int
+	}{{"cross-site", http.StatusForbidden}, {"same-origin", http.StatusOK}, {"same-site", http.StatusOK}, {"none", http.StatusOK}, {"", http.StatusOK}}
+	for _, c := range cases {
+		r := httptest.NewRequest(http.MethodGet, "/chats", nil)
+		r.Host = "localhost:8080"
+		if c.site != "" {
+			r.Header.Set("Sec-Fetch-Site", c.site)
+		}
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != c.want {
+			t.Errorf("GET /chats with Sec-Fetch-Site %q: status %d, want %d", c.site, w.Code, c.want)
+		}
 	}
 }
