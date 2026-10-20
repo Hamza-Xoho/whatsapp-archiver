@@ -27,8 +27,18 @@ func TestSlowSubscriberNeverBlocksPublish(t *testing.T) {
 		t.Fatal("Publish blocked on a subscriber that never reads")
 	}
 	n := 0
-	for range ch { // the dropped subscriber's channel is closed, so the range ends
-		n++
+	deadline := time.After(time.Second)
+drain:
+	for {
+		select {
+		case _, open := <-ch:
+			if !open {
+				break drain // the dropped subscriber's channel is closed
+			}
+			n++
+		case <-deadline:
+			t.Fatal("the dropped subscriber's channel was not closed")
+		}
 	}
 	if n > 4 {
 		t.Fatalf("a buffer of 4 delivered %d events", n)

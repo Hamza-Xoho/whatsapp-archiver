@@ -93,3 +93,12 @@ func TestPipelinePublishesNothingForAConnectionEvent(t *testing.T) {
 		t.Fatalf("events=%+v", got)
 	}
 }
+
+// A status post is never archived and is not an exclusion: it must not appear in the feed (it would flood it).
+func TestStatusBroadcastPublishesNothing(t *testing.T) {
+	p, bus := activityPipeline(t, ingest.NewFilter(nil, nil))
+	p.Handle(messageEvent("status@broadcast", "S1", text("secret status")))
+	if got := bus.Recent(); len(got) != 0 {
+		t.Fatalf("events=%+v", got)
+	}
+}
