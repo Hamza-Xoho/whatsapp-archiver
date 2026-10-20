@@ -30,7 +30,7 @@ Times are Unix seconds; `datetime(x,'unixepoch')` shows UTC. Leave sqlite3 with 
 
 Before deploying, note the state of the live archive so that the comparison below means something.
 
-- [ ] Before the update: `sudo -u whatsapp-archiver /opt/whatsapp-archiver/archiver status --data /var/lib/whatsapp-archiver | head -4` shows `state: connected`. Then, in sqlite3:
+- [x] Before the update: `sudo -u whatsapp-archiver /opt/whatsapp-archiver/archiver status --data /var/lib/whatsapp-archiver | head -4` shows `state: connected`. Then, in sqlite3:
 
   ```sql
   SELECT COUNT(*) AS messages, MAX(received_at) AS newest, datetime(MAX(received_at),'unixepoch') AS newest_utc FROM messages;
@@ -38,16 +38,16 @@ Before deploying, note the state of the live archive so that the comparison belo
   SELECT COUNT(*) AS settings_rows FROM sqlite_master WHERE name IN ('settings','chat_rules','chat_seen');
   ```
 
-  Expected: a message count near 228,000 and a recent `newest`; `schema_version` lists `1` only; `settings_rows` is `0` (the new tables do not exist yet). Write the count and `newest` down. Messages ____, newest ____. Result: ____
-- [ ] Deploy as in README section 10 (build, `scp`, `sudo systemctl stop archiver`, install, `sudo systemctl start archiver`). Write down the start time: ____
-- [ ] Start-up lines. As soon as the service is up:
+  Expected: a message count near 228,000 and a recent `newest`; `schema_version` lists `1` only; `settings_rows` is `0` (the new tables do not exist yet). Write the count and `newest` down. Messages 228364, newest 1792506500 (2026-10-20 14:28:20 UTC). Result: **pass** (20 Oct, state connected, schema_version 1, settings_rows 0).
+- [x] Deploy as in README section 10 (build, `scp`, `sudo systemctl stop archiver`, install, `sudo systemctl start archiver`). Write down the start time: 2026-10-20 17:38:40 +03 (unix 1792507120), build `fe1629d`, sha256 `e6dfd02d…a710`; old binary kept as `archiver.prev`.
+- [x] Start-up lines. As soon as the service is up:
 
   ```sh
   journalctl -u archiver --since "5 minutes ago" --no-pager | grep -E 'settings imported|dashboard listening|ignored|ERROR'
   ```
 
-  Expected: one line `"msg":"config.yaml settings imported into the archive","exclusions":N` where `N` is the number of entries of `exclude:` in `config.yaml`, and one `"msg":"dashboard listening","listen":"127.0.0.1:8080"`. No `"level":"ERROR"` line. No `config.yaml exclude is ignored` line on this first start, because every entry was just imported. The migration itself writes no log line; it is seen in the database in the next item. Result: ____
-- [ ] The migration and the import are in the archive. In sqlite3:
+  Expected: one line `"msg":"config.yaml settings imported into the archive","exclusions":N` where `N` is the number of entries of `exclude:` in `config.yaml`, and one `"msg":"dashboard listening","listen":"127.0.0.1:8080"`. No `"level":"ERROR"` line. No `config.yaml exclude is ignored` line on this first start, because every entry was just imported. The migration itself writes no log line; it is seen in the database in the next item. Result: **pass.** `exclusions":0` (config `exclude: []`) at 17:38:40, `dashboard listening` `127.0.0.1:8080` at 17:38:41, authenticated 17:38:42. No ERROR from the new process; the only ERROR lines are the old process's known media-queue shutdown noise at 17:38:40.229 (`context canceled`).
+- [x] The migration and the import are in the archive. In sqlite3:
 
   ```sql
   SELECT version FROM schema_version;
@@ -55,9 +55,9 @@ Before deploying, note the state of the live archive so that the comparison belo
   SELECT COUNT(*) AS excluded FROM chat_rules WHERE logging = 0;
   ```
 
-  Expected: `schema_version` lists `1` and `2`; `settings` lists `alerts.thresholds`, `backup.schedule`, `import.config.v1` and `media.rules`; `excluded` equals the number of `exclude:` entries (more if the same chat was listed under both its phone and LID forms). Result: ____
-- [ ] Capture is running again at once: `status` shows `state: connected` within a minute.
-- [ ] Ten minutes after the start (ask someone to send a message to a logged chat if it is quiet), in sqlite3, with `<start>` the Unix time of the start (`date -d '<start time>' +%s` on the server, or take `newest` of the previous check):
+  Expected: `schema_version` lists `1` and `2`; `settings` lists `alerts.thresholds`, `backup.schedule`, `import.config.v1` and `media.rules`; `excluded` equals the number of `exclude:` entries (more if the same chat was listed under both its phone and LID forms). Result: **pass.** schema_version 1,2; settings `alerts.thresholds, backup.schedule, import.config.v1, media.rules`; excluded 0; chat_seen 399 rows (existing chats marked seen).
+- [x] Capture is running again at once: `status` shows `state: connected` within a minute. Result: **pass** (connected, client 2.3000.1050977907, 0 restarts).
+- [x] Ten minutes after the start (ask someone to send a message to a logged chat if it is quiet), in sqlite3, with `<start>` the Unix time of the start (`date -d '<start time>' +%s` on the server, or take `newest` of the previous check):
 
   ```sql
   SELECT COUNT(*) AS since_start, datetime(MAX(received_at),'unixepoch') AS newest_utc
@@ -65,7 +65,7 @@ Before deploying, note the state of the live archive so that the comparison belo
   SELECT COUNT(*) FROM open_gaps;
   ```
 
-  Expected: `since_start` above 0 and `newest_utc` within the last few minutes (live messages are arriving); `open_gaps` is 0 or falls to 0 by itself; the message count is higher than before the update and no lower. Result: ____
+  Expected: `since_start` above 0 and `newest_utc` within the last few minutes (live messages are arriving); `open_gaps` is 0 or falls to 0 by itself; the message count is higher than before the update and no lower. Result: **pass** (17:51): since_start 1, newest_utc 2026-10-20 14:48:57; total 228365 (was 228364); open_gaps 10 (unchanged); active, NRestarts 0; no WARN/ERROR and no connection drops since 17:38:41.
 
 ### 2. SC-5: a new message appears in the feed within 2 seconds
 
