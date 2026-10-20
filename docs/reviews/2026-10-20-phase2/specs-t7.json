@@ -11,7 +11,7 @@
   "name": "t7-replace-only-changed",
   "file": "internal/web/chats.go",
   "old": "s.d.Rules.Replace(all)",
-  "new": "s.d.Rules.Replace(write)",
+  "new": "s.d.Rules.Replace(write); _ = all",
   "pkgs": "./internal/web/",
   "rf": 1
  },
@@ -179,7 +179,7 @@
   "name": "t7-bad-before-accepted",
   "file": "internal/web/viewer.go",
   "old": "if err != nil || n < 0 {",
-  "new": "if false {",
+  "new": "if (err != nil && n != 0) || n < 0 {",
   "pkgs": "./internal/web/",
   "rf": 1
  },
