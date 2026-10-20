@@ -145,7 +145,14 @@ func TestEventsFirstConnectDoesNotReplay(t *testing.T) {
 	bus := activity.NewBus(500)
 	bus.Publish(activity.Event{Kind: "message", Chat: "old@s.whatsapp.net", Detail: "text"})
 	events := openStream(t, New(Deps{Activity: bus}), nil)
-	next(t, events, "health", 2*time.Second) // the stream is open
+	select { // the first thing on a first connect is the health event, not a replay of the ring
+	case e := <-events:
+		if e.name != "health" {
+			t.Fatalf("first event %q %q, want health", e.name, e.data)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no first event")
+	}
 	bus.Publish(activity.Event{Kind: "message", Chat: "new@s.whatsapp.net", Detail: "text"})
 	if e := next(t, events, "activity", 2*time.Second); !strings.Contains(e.data, "new@") {
 		t.Fatalf("got %q, want only the new event", e.data)

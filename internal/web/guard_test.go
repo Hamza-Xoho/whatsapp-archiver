@@ -11,7 +11,7 @@ import (
 func TestRejectsForeignHost(t *testing.T) {
 	h := New(Deps{}).Handler()
 	for _, host := range []string{"evil.example", "evil.example:8080", "localhost", "127.0.0.1", "127.0.0.2:8080",
-		"localhost.evil.example:8080", "[::2]:8080", "localhost:", "localhost:80a", ""} {
+		"localhost.evil.example:8080", "[::2]:8080", "localhost:", "localhost:80a", "localhost:0", "localhost:65536", ""} {
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 		r.Host = host
 		w := httptest.NewRecorder()
@@ -64,6 +64,7 @@ func TestPostWithoutMatchingOriginIs403(t *testing.T) {
 		{"http://127.0.0.1:8080", ""},                             // another host name for the same address
 		{"null", ""},                                              // sandboxed or privacy-stripped origin
 		{"", "http://evil.example/page"},                          // a foreign Referer
+		{"", "http://localhost:80801/"},                           // a Referer whose host only starts with Host
 		{"", "http://localhost:8080.evil.ex/"},                    // a Referer that only starts with the host
 		{"", "not a url\x7f"},                                     // an unparsable Referer
 		{"http://evil.example", "http://localhost:8080/settings"}, // Origin wins over Referer
