@@ -115,7 +115,7 @@
   "name": "t2-settings-read-error-guessed",
   "file": "cmd/archiver/live.go",
   "old": "\t\treturn config.MediaRules{}, fmt.Errorf(\"%w: %w\", health.ErrRead, err)",
-  "new": "\t\treturn l.cfg.Media, nil",
+  "new": "\t\t_ = health.ErrRead\n\t\treturn l.cfg.Media, nil",
   "pkgs": "./cmd/archiver/",
   "rf": 1
  },
