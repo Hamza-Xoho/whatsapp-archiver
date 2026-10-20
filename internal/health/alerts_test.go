@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -288,4 +289,18 @@ func TestNeverConnectedStartupAlertsDisconnected(t *testing.T) {
 	r.m.check()
 	r.m.SetState("connected", "")
 	wantBodies(t, r.sent(), "Disconnected for 16m", "ecovered")
+}
+
+// The thresholds come from WithThresholds at each check (the UI's alerts.thresholds setting); ntfy stays the
+// config file's.
+func TestThresholdsReadEachCheck(t *testing.T) {
+	r := newRig(t, config.AlertConfig{DiskFreeMinGB: 0})
+	var minGB atomic.Int32
+	r.m.WithThresholds(func() config.AlertConfig { return config.AlertConfig{DiskFreeMinGB: int(minGB.Load())} })
+	r.free = 1 << 30
+	r.m.check()
+	minGB.Store(5)
+	r.advance(time.Minute)
+	r.m.check()
+	wantBodies(t, r.sent(), "1073741824")
 }

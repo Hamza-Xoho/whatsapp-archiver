@@ -54,7 +54,7 @@ func recordedFiles(t *testing.T, dir string) []string {
 func TestRecorderSkipsEventsOfExcludedChat(t *testing.T) {
 	dir := t.TempDir()
 	ts := time.Unix(1_700_000_500, 0).UTC()
-	rec := ingest.NewRecorder(dir).WithFilter(ingest.NewFilter([]string{excludedPN, excludedGroup}, nil))
+	rec := ingest.NewRecorder(dir).WithFilter(ingest.NewFilter(ingest.NewRuleSet(ingest.ExclusionRules([]string{excludedPN, excludedGroup})), nil))
 	var passed int
 	wrapped := rec.Wrap(func(any) bool { passed++; return true })
 	excluded := []any{
@@ -81,7 +81,7 @@ func TestRecorderSkipsEventsOfExcludedChat(t *testing.T) {
 // Events of a chat that is not excluded are written as before.
 func TestRecorderWritesEventsOfKeptChat(t *testing.T) {
 	dir := t.TempDir()
-	wrapped := ingest.NewRecorder(dir).WithFilter(ingest.NewFilter([]string{excludedPN}, knownAliases)).Wrap(func(any) bool { return true })
+	wrapped := ingest.NewRecorder(dir).WithFilter(ingest.NewFilter(ingest.NewRuleSet(ingest.ExclusionRules([]string{excludedPN})), knownAliases)).Wrap(func(any) bool { return true })
 	wrapped(messageEvent(keptPN, "K", text("kept")))
 	wrapped(&events.GroupInfo{JID: jid(keptGroup), Timestamp: time.Unix(1_700_000_500, 0).UTC()})
 	if files := recordedFiles(t, dir); len(files) != 2 {
@@ -92,7 +92,7 @@ func TestRecorderWritesEventsOfKeptChat(t *testing.T) {
 // The LID form of an excluded phone number is excluded too: the store's alias lookup names the pair.
 func TestRecorderSkipsLIDFormOfExcludedPhone(t *testing.T) {
 	dir := t.TempDir()
-	wrapped := ingest.NewRecorder(dir).WithFilter(ingest.NewFilter([]string{excludedPN}, knownAliases)).Wrap(func(any) bool { return true })
+	wrapped := ingest.NewRecorder(dir).WithFilter(ingest.NewFilter(ingest.NewRuleSet(ingest.ExclusionRules([]string{excludedPN})), knownAliases)).Wrap(func(any) bool { return true })
 	wrapped(messageEvent(excludedLID, "L", text("same person, LID chat")))
 	if files := recordedFiles(t, dir); len(files) != 0 {
 		t.Fatalf("the LID form of an excluded chat was written: %v", files)
@@ -104,7 +104,7 @@ func TestRecorderSkipsChatWhoseAliasTheEventNames(t *testing.T) {
 	dir := t.TempDir()
 	evt := messageEvent(excludedLID, "R", text("alias named in the event"))
 	evt.Info.RecipientAlt = jid(excludedPN)
-	ingest.NewRecorder(dir).WithFilter(ingest.NewFilter([]string{excludedPN}, nil)).Wrap(func(any) bool { return true })(evt)
+	ingest.NewRecorder(dir).WithFilter(ingest.NewFilter(ingest.NewRuleSet(ingest.ExclusionRules([]string{excludedPN})), nil)).Wrap(func(any) bool { return true })(evt)
 	if files := recordedFiles(t, dir); len(files) != 0 {
 		t.Fatalf("an event naming an excluded alias was written: %v", files)
 	}
@@ -113,7 +113,7 @@ func TestRecorderSkipsChatWhoseAliasTheEventNames(t *testing.T) {
 // An event whose chat cannot be determined is written as before: no chat, nothing to exclude.
 func TestRecorderWritesEventWithoutChat(t *testing.T) {
 	dir := t.TempDir()
-	wrapped := ingest.NewRecorder(dir).WithFilter(ingest.NewFilter([]string{excludedPN}, knownAliases)).Wrap(func(any) bool { return true })
+	wrapped := ingest.NewRecorder(dir).WithFilter(ingest.NewFilter(ingest.NewRuleSet(ingest.ExclusionRules([]string{excludedPN})), knownAliases)).Wrap(func(any) bool { return true })
 	wrapped(&events.MediaRetry{MessageID: "M8", Timestamp: time.Unix(1_700_000_500, 0).UTC(), Error: &events.MediaRetryError{Code: 2}})
 	wrapped(&events.HistorySync{Data: &waHistorySync.HistorySync{SyncType: waHistorySync.HistorySync_INITIAL_BOOTSTRAP.Enum()}})
 	if files := recordedFiles(t, dir); len(files) != 2 {
@@ -138,7 +138,7 @@ func TestRecorderDropsConversationsOfExcludedChatsFromHistory(t *testing.T) {
 	}
 	evt := &events.HistorySync{Data: hs}
 	var got any
-	ingest.NewRecorder(dir).WithFilter(ingest.NewFilter([]string{excludedPN}, nil)).Wrap(func(v any) bool { got = v; return true })(evt)
+	ingest.NewRecorder(dir).WithFilter(ingest.NewFilter(ingest.NewRuleSet(ingest.ExclusionRules([]string{excludedPN})), nil)).Wrap(func(v any) bool { got = v; return true })(evt)
 	if got != evt {
 		t.Fatal("history chunk not passed on unchanged")
 	}
@@ -162,7 +162,7 @@ func TestRecorderSkipsEventWhenAliasLookupFails(t *testing.T) {
 	failing := func(string) ([]string, error) { return nil, errors.New("store busy") }
 	evt := messageEvent(keptPN, "F", text("exclusion unknown"))
 	var got any
-	rec := ingest.NewRecorder(dir).WithLogger(slog.New(slog.NewTextHandler(&logs, nil))).WithFilter(ingest.NewFilter([]string{excludedPN}, failing))
+	rec := ingest.NewRecorder(dir).WithLogger(slog.New(slog.NewTextHandler(&logs, nil))).WithFilter(ingest.NewFilter(ingest.NewRuleSet(ingest.ExclusionRules([]string{excludedPN})), failing))
 	rec.Wrap(func(v any) bool { got = v; return true })(evt)
 	if got != evt {
 		t.Fatal("event not passed on")
@@ -186,7 +186,7 @@ func TestRecorderDropsMappingsOfExcludedChatsFromHistory(t *testing.T) {
 		},
 		Conversations: []*waHistorySync.Conversation{{ID: proto.String(keptPN)}},
 	}
-	ingest.NewRecorder(dir).WithFilter(ingest.NewFilter([]string{excludedPN}, nil)).Wrap(func(any) bool { return true })(&events.HistorySync{Data: hs})
+	ingest.NewRecorder(dir).WithFilter(ingest.NewFilter(ingest.NewRuleSet(ingest.ExclusionRules([]string{excludedPN})), nil)).Wrap(func(any) bool { return true })(&events.HistorySync{Data: hs})
 	loaded, err := ingest.Load(dir)
 	if err != nil || len(loaded) != 1 {
 		t.Fatalf("loaded %d events, err %v; want the one chunk", len(loaded), err)

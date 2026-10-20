@@ -115,3 +115,35 @@ func TestSetupGuideConfigExampleLoads(t *testing.T) {
 		t.Fatalf("the guide's example does not load: %v", err)
 	}
 }
+
+// The UI has no login in phase 2, so it listens on loopback only.
+func TestLoadRejectsNonLoopbackListen(t *testing.T) {
+	c, err := config.Load(filepath.Join(t.TempDir(), "missing.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Web.Listen != "127.0.0.1:8080" {
+		t.Fatalf("default web.listen = %q", c.Web.Listen)
+	}
+	load := func(listen string) error {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		if err := os.WriteFile(path, []byte("web:\n  listen: \""+listen+"\"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		c, err := config.Load(path)
+		if err == nil && c.Web.Listen != listen {
+			t.Fatalf("web.listen = %q, want %q", c.Web.Listen, listen)
+		}
+		return err
+	}
+	for _, bad := range []string{"0.0.0.0:8080", "192.168.0.104:8080", ":8080", "example.com:8080", "127.0.0.1"} {
+		if err := load(bad); err == nil || !strings.Contains(err.Error(), "web.listen") {
+			t.Errorf("listen %q: error = %v, want a web.listen error", bad, err)
+		}
+	}
+	for _, good := range []string{"127.0.0.1:9000", "localhost:8080", "[::1]:8080"} {
+		if err := load(good); err != nil {
+			t.Errorf("listen %q rejected: %v", good, err)
+		}
+	}
+}

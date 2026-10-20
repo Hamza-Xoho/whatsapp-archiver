@@ -52,7 +52,7 @@ func TestHandleRecoversPanic(t *testing.T) {
 func TestMappingFromAltJIDStoredBeforeFilter(t *testing.T) {
 	st := testkit.Store(t)
 	aliases := func(jid string) ([]string, error) { return st.Aliases(context.Background(), jid) }
-	p := ingest.NewPipeline(st, ingest.NewFilter([]string{"9665@s.whatsapp.net"}, aliases), &queueFake{}, &healthFake{}, quiet())
+	p := ingest.NewPipeline(st, ingest.NewFilter(ingest.NewRuleSet(ingest.ExclusionRules([]string{"9665@s.whatsapp.net"})), aliases), &queueFake{}, &healthFake{}, quiet())
 	e := messageEvent("1234@lid", "A", text("secret"))
 	e.Info.RecipientAlt = jid("9665@s.whatsapp.net")
 	p.Handle(e)
@@ -70,7 +70,7 @@ func TestMappingFromAltJIDStoredBeforeFilter(t *testing.T) {
 // RF8, the other direction: an excluded LID also excludes its phone-number form, once a mapping is known. The
 // mapping arrives with an event of the excluded chat itself.
 func TestExcludeLIDMatchesPhoneForm(t *testing.T) {
-	f := ingest.NewFilter([]string{"1@lid"}, func(j string) ([]string, error) {
+	f := ingest.NewFilter(ingest.NewRuleSet(ingest.ExclusionRules([]string{"1@lid"})), func(j string) ([]string, error) {
 		if j == "1@s.whatsapp.net" {
 			return []string{"1@lid"}, nil
 		}
@@ -82,7 +82,7 @@ func TestExcludeLIDMatchesPhoneForm(t *testing.T) {
 
 	st := testkit.Store(t)
 	aliases := func(jid string) ([]string, error) { return st.Aliases(context.Background(), jid) }
-	p := ingest.NewPipeline(st, ingest.NewFilter([]string{"1234@lid"}, aliases), &queueFake{}, &healthFake{}, quiet())
+	p := ingest.NewPipeline(st, ingest.NewFilter(ingest.NewRuleSet(ingest.ExclusionRules([]string{"1234@lid"})), aliases), &queueFake{}, &healthFake{}, quiet())
 	learn := messageEvent("1234@lid", "LEARN", text("x"))
 	learn.Info.RecipientAlt = jid("9665@s.whatsapp.net")
 	p.Handle(learn)
@@ -188,7 +188,7 @@ func TestScopeDropsExcludedChatForEveryKind(t *testing.T) {
 		ingest.KindAppState, ingest.KindPresence, ingest.KindTyping, ingest.KindReceipt, ingest.KindCall,
 	}
 	noise := map[ingest.Kind]bool{ingest.KindPresence: true, ingest.KindTyping: true, ingest.KindReceipt: true, ingest.KindCall: true}
-	f := ingest.NewFilter([]string{"secret@g.us"}, nil)
+	f := ingest.NewFilter(ingest.NewRuleSet(ingest.ExclusionRules([]string{"secret@g.us"})), nil)
 	for _, k := range kinds {
 		if keep(t, f, "secret@g.us", k) {
 			t.Errorf("kind %s of an excluded chat was kept", k)
@@ -203,7 +203,7 @@ func TestScopeDropsExcludedChatForEveryKind(t *testing.T) {
 // stored, two skipped, the chunk is one ledger row, and nothing of the excluded chat is left behind.
 func TestHistoryChunkSplitsKeptAndExcludedConversations(t *testing.T) {
 	st := testkit.Store(t)
-	p := historyPipeline(st, ingest.NewFilter([]string{"secret@g.us"}, nil), &queueFake{})
+	p := historyPipeline(st, ingest.NewFilter(ingest.NewRuleSet(ingest.ExclusionRules([]string{"secret@g.us"})), nil), &queueFake{})
 	hs := chunk("kept@g.us", webMsg("K1", "3@lid", false, text("a")), webMsg("K2", "3@lid", false, text("b")), webMsg("K3", "3@lid", false, text("c")))
 	hs.Data.Conversations = append(hs.Data.Conversations, chunk("secret@g.us", webMsg("S1", "4@lid", false, text("x")), webMsg("S2", "4@lid", false, text("y"))).Data.Conversations...)
 	stored, skipped, err := p.ImportHistory(t.Context(), hs)

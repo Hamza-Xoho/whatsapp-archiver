@@ -278,7 +278,7 @@ func TestScheduleFiresOnceAtConfiguredTime(t *testing.T) {
 		if err != nil {
 			t.Error(err)
 		}
-	})
+	}, nil)
 	if runs != 1 {
 		t.Fatalf("ran %d times, want 1", runs)
 	}
@@ -395,5 +395,41 @@ func TestSnapshotOfWALArchiveWithoutShmVerifies(t *testing.T) {
 	}
 	if got := countMessages(t, report.Snapshot); got != 12 {
 		t.Fatalf("snapshot has %d messages, want 12", got)
+	}
+}
+
+// The backup time and the number kept come from sched at each scheduling decision (the UI's backup.schedule setting);
+// the destination stays the config file's.
+func TestScheduleReadsTimeAndKeepEachDecision(t *testing.T) {
+	dest := t.TempDir()
+	for _, old := range []string{"20200101T000000.000000000Z", "20200102T000000.000000000Z"} {
+		if err := os.MkdirAll(filepath.Join(dest, old), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg, st := seededConfig(t, dest, 7, 1)
+	_ = st.Close()
+	cfg.Backup.Time = "03:30"
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	clock := &fakeClock{now: time.Date(2026, 10, 14, 3, 0, 0, 0, time.UTC), cancel: cancel}
+	calls := 0
+	sched := func() config.BackupConfig {
+		calls++
+		return config.BackupConfig{Destination: "/ignored", Time: "03:45", Keep: 1}
+	}
+	Schedule(ctx, cfg, clock, func(r Report, err error) {
+		if err != nil {
+			t.Error(err)
+		}
+	}, sched)
+	if len(clock.waits) == 0 || clock.waits[0] != 45*time.Minute {
+		t.Fatalf("waits = %v, want first wait 45m from the live setting", clock.waits)
+	}
+	if calls < 2 {
+		t.Fatalf("sched read %d times, want once per scheduling decision", calls)
+	}
+	if got := names(t, dest); len(got) != 1 {
+		t.Fatalf("snapshot folders = %v, want 1 (live keep)", got)
 	}
 }

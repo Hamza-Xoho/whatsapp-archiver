@@ -81,7 +81,7 @@ func TestReadFailureAlertNamesNoChat(t *testing.T) {
 		}
 	}
 	st := closedStore(t)
-	p := ingest.NewPipeline(st, ingest.NewFilter([]string{"9665@s.whatsapp.net"}, storeAliases(st)), noQueue{}, mon, slog.New(slog.NewTextHandler(io.Discard, nil))).
+	p := ingest.NewPipeline(st, ingest.NewFilter(ingest.NewRuleSet(ingest.ExclusionRules([]string{"9665@s.whatsapp.net"})), storeAliases(st)), noQueue{}, mon, slog.New(slog.NewTextHandler(io.Discard, nil))).
 		WithClock(fixedClock{}.Now, sleep).WithContext(ctx)
 	chat := mustJID(t, "777777@lid")
 	p.Handle(&events.Message{Info: types.MessageInfo{MessageSource: types.MessageSource{Chat: chat, Sender: chat}, ID: "A", Timestamp: time.Unix(10, 0)}, Message: &waE2E.Message{Conversation: proto.String("secret")}})

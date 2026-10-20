@@ -240,7 +240,7 @@ func TestAliasLookupErrorNeverLeaksExcludedChat(t *testing.T) {
 			a := &flakyAliases{failures: 7, answer: c.answer}
 			h := &healthFake{}
 			ft := newFakeTime()
-			p := ingest.NewPipeline(st, ingest.NewFilter([]string{"9665@s.whatsapp.net"}, a.lookup), &queueFake{}, h, quiet()).WithClock(ft.clock.Now, ft.sleep)
+			p := ingest.NewPipeline(st, ingest.NewFilter(ingest.NewRuleSet(ingest.ExclusionRules([]string{"9665@s.whatsapp.net"})), a.lookup), &queueFake{}, h, quiet()).WithClock(ft.clock.Now, ft.sleep)
 			p.Handle(messageEvent("123@lid", "A", text("secret")))
 			if n := messageCount(t, st); n != c.wantKept {
 				t.Fatalf("messages stored=%d, want %d", n, c.wantKept)
@@ -257,7 +257,7 @@ func TestAliasLookupErrorNeverLeaksExcludedChat(t *testing.T) {
 			a := &flakyAliases{failures: 7, answer: c.answer}
 			h := &healthFake{}
 			ft := newFakeTime()
-			p := ingest.NewPipeline(st, ingest.NewFilter([]string{"9665@s.whatsapp.net"}, a.lookup), &queueFake{}, h, quiet()).WithClock(ft.clock.Now, ft.sleep).WithHistoryParser(historyParser())
+			p := ingest.NewPipeline(st, ingest.NewFilter(ingest.NewRuleSet(ingest.ExclusionRules([]string{"9665@s.whatsapp.net"})), a.lookup), &queueFake{}, h, quiet()).WithClock(ft.clock.Now, ft.sleep).WithHistoryParser(historyParser())
 			hs := history("123@lid", "A", 5)
 			hs.Data.Conversations[0].Name = proto.String("Private Name")
 			stored, _, err := p.ImportHistory(t.Context(), hs)

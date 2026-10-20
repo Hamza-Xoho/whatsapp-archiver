@@ -46,7 +46,7 @@ func TestHandleStoresKeptMessage(t *testing.T) {
 func TestHandleDropsExcludedChat(t *testing.T) {
 	st := testkit.Store(t)
 	q := &queueFake{}
-	p := ingest.NewPipeline(st, ingest.NewFilter([]string{"g@g.us"}, nil), q, &healthFake{}, slog.Default())
+	p := ingest.NewPipeline(st, ingest.NewFilter(ingest.NewRuleSet(ingest.ExclusionRules([]string{"g@g.us"})), nil), q, &healthFake{}, slog.Default())
 	p.Handle(messageEvent("g@g.us", "A", text("hello")))
 	stats, _ := st.ChatStats(t.Context())
 	if len(stats) != 0 || len(q.items) != 0 {

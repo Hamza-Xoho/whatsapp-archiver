@@ -223,7 +223,7 @@ func TestLiveMessageKeepsKnownChatName(t *testing.T) {
 // H6b: nothing of an excluded chat is stored from history, not even its JID or name.
 func TestExcludedChatNameNotStoredFromHistory(t *testing.T) {
 	st := testkit.Store(t)
-	p := historyPipeline(st, ingest.NewFilter([]string{"secret@g.us"}, nil), &queueFake{})
+	p := historyPipeline(st, ingest.NewFilter(ingest.NewRuleSet(ingest.ExclusionRules([]string{"secret@g.us"})), nil), &queueFake{})
 	hs := history("secret@g.us", "S1", 100)
 	hs.Data.Conversations[0].Name = proto.String("Private Therapy Group")
 	stored, skipped, err := p.ImportHistory(t.Context(), hs)
@@ -318,7 +318,7 @@ func TestIdenticalChunkTwiceIsOneLedgerRow(t *testing.T) {
 func TestExcludedHistoryChatLeavesNoParticipantsOrMedia(t *testing.T) {
 	st := testkit.Store(t)
 	q := &queueFake{}
-	p := historyPipeline(st, ingest.NewFilter([]string{"secret@g.us"}, nil), q)
+	p := historyPipeline(st, ingest.NewFilter(ingest.NewRuleSet(ingest.ExclusionRules([]string{"secret@g.us"})), nil), q)
 	img := webMsg("IMG", "3@lid", false, &waE2E.Message{ImageMessage: &waE2E.ImageMessage{Mimetype: proto.String("image/jpeg"), FileLength: proto.Uint64(10)}})
 	img.PushName = proto.String("Therapist")
 	if _, skipped, err := p.ImportHistory(t.Context(), chunk("secret@g.us", img, webMsg("TXT", "4@lid", false, text("x")))); err != nil || skipped != 2 {

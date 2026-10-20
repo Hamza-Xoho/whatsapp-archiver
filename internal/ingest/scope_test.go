@@ -17,7 +17,7 @@ func keep(t *testing.T, f *ingest.Filter, chat string, kind ingest.Kind) bool {
 }
 
 func TestScopeExcludesDirectAndAlias(t *testing.T) {
-	f := ingest.NewFilter([]string{"1@s.whatsapp.net"}, func(j string) ([]string, error) {
+	f := ingest.NewFilter(ingest.NewRuleSet(ingest.ExclusionRules([]string{"1@s.whatsapp.net"})), func(j string) ([]string, error) {
 		if j == "1@lid" {
 			return []string{"1@s.whatsapp.net"}, nil
 		}
@@ -46,7 +46,7 @@ func TestScopeAlwaysSkipsNoise(t *testing.T) {
 // A failed alias lookup is an error, never an answer: the filter must not guess "keep".
 func TestScopeReportsAliasLookupError(t *testing.T) {
 	boom := errors.New("database is locked")
-	f := ingest.NewFilter([]string{"1@s.whatsapp.net"}, func(string) ([]string, error) { return nil, boom })
+	f := ingest.NewFilter(ingest.NewRuleSet(ingest.ExclusionRules([]string{"1@s.whatsapp.net"})), func(string) ([]string, error) { return nil, boom })
 	ok, err := f.Keep("1@lid", ingest.KindMessage)
 	if ok || !errors.Is(err, boom) {
 		t.Fatalf("keep=%v err=%v", ok, err)

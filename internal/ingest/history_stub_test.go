@@ -131,7 +131,7 @@ func TestHistoryCiphertextStubIsStubEventAndNotAnOpenGap(t *testing.T) {
 // in the same chunk is archived.
 func TestHistoryStubInExcludedChatIsNotStored(t *testing.T) {
 	st := testkit.Store(t)
-	p := historyPipeline(st, ingest.NewFilter([]string{"secret@g.us"}, nil), &queueFake{})
+	p := historyPipeline(st, ingest.NewFilter(ingest.NewRuleSet(ingest.ExclusionRules([]string{"secret@g.us"})), nil), &queueFake{})
 	hs := chunk("g@g.us", stubOf("KEPT", "3@lid", waWeb.WebMessageInfo_REVOKE))
 	hs.Data.Conversations = append(hs.Data.Conversations, chunk("secret@g.us", stubOf("SECRET", "4@lid", waWeb.WebMessageInfo_REVOKE)).Data.Conversations...)
 	stored, skipped, err := p.ImportHistory(t.Context(), hs)
