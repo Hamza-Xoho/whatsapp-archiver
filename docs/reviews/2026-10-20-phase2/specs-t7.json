@@ -1,0 +1,242 @@
+[
+ {
+  "name": "t7-rules-skip-replace",
+  "file": "internal/web/chats.go",
+  "old": "s.d.Rules.Replace(all)",
+  "new": "_ = all",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-replace-only-changed",
+  "file": "internal/web/chats.go",
+  "old": "s.d.Rules.Replace(all)",
+  "new": "s.d.Rules.Replace(write)",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-alias-rules-untouched",
+  "file": "internal/web/chats.go",
+  "old": "if _, ok := byJID[a]; ok {",
+  "new": "if _, ok := byJID[a]; ok && false {",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-media-type-unchecked",
+  "file": "internal/web/chats.go",
+  "old": "if !slices.Contains(mediaTypes, t) {",
+  "new": "if false {",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-nothing-to-change-accepted",
+  "file": "internal/web/chats.go",
+  "old": "if c.logging == nil && c.media == nil {",
+  "new": "if false {",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-ack-no-aliases",
+  "file": "internal/web/chats.go",
+  "old": "all = append(all, aliases...)",
+  "new": "_ = aliases",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-plain-post-no-redirect",
+  "file": "internal/web/chats.go",
+  "old": "if r.Header.Get(\"HX-Request\") == \"\" {",
+  "new": "if false {",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-chatpage-ignores-before",
+  "file": "internal/store/browse.go",
+  "old": "WHERE m.rk=1 AND (?2<=0 OR m.ts<?2)",
+  "new": "WHERE m.rk=1 AND (?2<=0 OR m.ts>0)",
+  "pkgs": "./internal/store/ ./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-chatpage-oldest-first",
+  "file": "internal/store/browse.go",
+  "old": "ORDER BY m.ts DESC,m.id DESC LIMIT ?3",
+  "new": "ORDER BY m.ts ASC,m.id ASC LIMIT ?3",
+  "pkgs": "./internal/store/ ./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-edit-ignored",
+  "file": "internal/store/browse.go",
+  "old": "m.EditedText = newText",
+  "new": "_ = newText",
+  "pkgs": "./internal/store/ ./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-revoke-ignored",
+  "file": "internal/store/browse.go",
+  "old": "m.Deleted = true",
+  "new": "m.Deleted = false",
+  "pkgs": "./internal/store/ ./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-removed-reaction-shown",
+  "file": "internal/store/browse.go",
+  "old": "if by[r] != \"\" {",
+  "new": "if true {",
+  "pkgs": "./internal/store/ ./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-media-state-missing",
+  "file": "internal/store/browse.go",
+  "old": "m.MediaState = state",
+  "new": "_ = state",
+  "pkgs": "./internal/store/ ./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-participant-name-ignored",
+  "file": "internal/store/browse.go",
+  "old": "row.DisplayName = people[c.CanonicalJID]",
+  "new": "_ = people",
+  "pkgs": "./internal/store/ ./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-filter-ignored",
+  "file": "internal/store/browse.go",
+  "old": "if needle != \"\" && ",
+  "new": "if false && ",
+  "pkgs": "./internal/store/ ./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-new-ignores-ack",
+  "file": "internal/store/browse.go",
+  "old": "fresh[jid] = !acked",
+  "new": "fresh[jid] = true",
+  "pkgs": "./internal/store/ ./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-rule-alias-unresolved",
+  "file": "internal/store/browse.go",
+  "old": "`SELECT `+canonicalOf(\"r.jid\")+`,MIN(r.logging)",
+  "new": "`SELECT r.jid,MIN(r.logging)",
+  "pkgs": "./internal/store/ ./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-gap-not-flagged",
+  "file": "internal/store/browse.go",
+  "old": "t.Gap = true",
+  "new": "t.Gap = false",
+  "pkgs": "./internal/store/ ./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-trace-unknown-found",
+  "file": "internal/store/browse.go",
+  "old": "if t.Message.ID == \"\" && len(t.Events) == 0 && t.Media == nil {",
+  "new": "if false {",
+  "pkgs": "./internal/store/ ./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-page-size-201",
+  "file": "internal/web/viewer.go",
+  "old": "const viewerPageSize = 200",
+  "new": "const viewerPageSize = 201",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-older-link-wrong-ts",
+  "file": "internal/web/viewer.go",
+  "old": "data.HasOlder, data.OlderBefore = true, msgs[viewerPageSize-1].TS",
+  "new": "data.HasOlder, data.OlderBefore = true, msgs[0].TS",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-older-always-hidden",
+  "file": "internal/web/viewer.go",
+  "old": "if len(msgs) > viewerPageSize {",
+  "new": "if len(msgs) > viewerPageSize+1 {",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-bad-before-accepted",
+  "file": "internal/web/viewer.go",
+  "old": "if err != nil || n < 0 {",
+  "new": "if false {",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-media-path-check-removed",
+  "file": "internal/web/media.go",
+  "old": "path, ok := s.insideMediaDir(m.Path)",
+  "new": "path, ok := m.Path, true",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-media-state-ignored",
+  "file": "internal/web/media.go",
+  "old": "if m == nil || m.State != \"done\" {",
+  "new": "if m == nil {",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-symlink-not-resolved",
+  "file": "internal/web/media.go",
+  "old": "real, err := filepath.EvalSymlinks(p)",
+  "new": "real, err := filepath.Clean(p), error(nil)",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-dotdot-allowed",
+  "file": "internal/web/media.go",
+  "old": "rel == \"..\" || strings.HasPrefix(rel, \"..\"+string(filepath.Separator))",
+  "new": "false",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-svg-inline",
+  "file": "internal/web/media.go",
+  "old": "case t == \"image/svg+xml\":",
+  "new": "case t == \"never/never\":",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-always-inline",
+  "file": "internal/web/media.go",
+  "old": "disposition := \"attachment\"",
+  "new": "disposition := \"inline\"",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-mime-ignored",
+  "file": "internal/web/media.go",
+  "old": "h.Set(\"Content-Type\", ctype)",
+  "new": "_ = ctype",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ }
+]
