@@ -25,6 +25,10 @@ type Snapshot struct {
 	UpdatedAt       time.Time `json:"updated_at"`
 	Version         string    `json:"version"`        // WhatsApp client version in use
 	VersionReason   string    `json:"version_reason"` // why: latest, built-in or override
+	// The last nightly snapshot attempt: when it finished, the snapshot file on success, the reason on failure.
+	LastBackup     time.Time `json:"last_backup"`
+	LastBackupErr  string    `json:"last_backup_err"`
+	LastBackupPath string    `json:"last_backup_path"`
 }
 type Monitor struct {
 	mu        sync.Mutex
@@ -187,7 +191,15 @@ func (m *Monitor) Panic(where string) {
 	m.mu.Unlock()
 	m.gate.fire("panic:"+where, "Recovered panic", where)
 }
-func (m *Monitor) BackupResult(_ backup.Report, err error) {
+func (m *Monitor) BackupResult(r backup.Report, err error) {
+	m.mu.Lock()
+	m.snapshot.LastBackup = m.clock.Now()
+	m.snapshot.LastBackupErr, m.snapshot.LastBackupPath = "", r.Snapshot
+	if err != nil {
+		m.snapshot.LastBackupErr, m.snapshot.LastBackupPath = err.Error(), ""
+	}
+	m.writeLocked()
+	m.mu.Unlock()
 	if err != nil {
 		m.gate.fire("backup", "Backup failed", err.Error())
 		return

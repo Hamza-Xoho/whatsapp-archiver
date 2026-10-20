@@ -157,7 +157,7 @@ func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) er
 	if pairing {
 		_, _ = fmt.Fprintln(out, "Scan the QR code from WhatsApp → Linked Devices.")
 	}
-	ui := web.New(web.Deps{Store: st, Rules: rules, Health: mon.Status, Activity: bus, Config: cfg})
+	ui := web.New(web.Deps{Store: st, Rules: rules, Health: mon.Status, Activity: bus, Config: cfg, Notifier: notifier})
 	loops := []func(context.Context){
 		queue.Run,
 		mon.Run,

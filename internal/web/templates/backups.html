@@ -1,0 +1,32 @@
+{{define "content"}}
+  <h1>{{.Title}}</h1>
+
+  <section class="panel">
+    <h2>Nightly backup</h2>
+    <dl>
+      <dt>Schedule</dt><dd>{{.Schedule}} <span class="muted">change it under Settings</span></dd>
+      <dt>Destination</dt><dd>{{if .Destination}}{{.Destination}}{{else}}not set{{end}}</dd>
+      <dt>Last result</dt><dd>{{if .HasResult}}{{if .Succeeded}}Succeeded{{else}}<span class="bad">Failed</span>{{end}} at {{.ResultAt}}{{if .ResultPath}} <span class="chat">{{.ResultPath}}</span>{{end}}{{if .ResultErr}}: {{.ResultErr}}{{end}}{{else}}No backup has run since the archiver started.{{end}}</dd>
+    </dl>
+    <p class="muted">Media is not in the snapshots; a separate timer copies it (see the README, Backups).</p>
+  </section>
+
+  <section class="panel">
+    <h2>Phone alerts</h2>
+    <p>{{if .NtfyConfigured}}Phone alerts (ntfy) configured{{else}}Phone alerts (ntfy) not configured{{end}} <span class="muted">set in config.yaml</span></p>
+    {{with .Alert}}<p {{if .Sent}}class="ok" role="status"{{else}}class="bad" role="alert"{{end}}>{{.Text}}</p>{{end}}
+    {{if .NtfyConfigured}}<form method="post" action="/backups/test-alert">
+      <button>Send test alert</button>
+    </form>{{end}}
+  </section>
+
+  <section class="panel">
+    <h2>How to restore</h2>
+    <p>There is no restore button: restoring replaces the archive, so you run it yourself. <code>session.db</code> is never backed up, copied or restored: after a restore on a new server you pair again, with the snapshot's <code>archive.db</code> placed in the new data folder first.</p>
+    <p>To restore, first check the newest snapshot in a scratch folder. This does not touch the live archive:</p>
+<pre>sudo -u whatsapp-archiver sh -c 'mkdir -p -m 700 /var/tmp/snapshot-check &amp;&amp; cp "$(ls -1d {{.Dest}}/*/ | tail -n 1)archive.db" /var/tmp/snapshot-check/'
+sudo -u whatsapp-archiver /opt/whatsapp-archiver/archiver status --data /var/tmp/snapshot-check
+sudo rm -r /var/tmp/snapshot-check</pre>
+    <p>Then, with the service stopped, put that <code>archive.db</code> in the data folder ({{.DataDir}}) and start the service again. The full steps are in the README, section Backups.</p>
+  </section>
+{{end}}

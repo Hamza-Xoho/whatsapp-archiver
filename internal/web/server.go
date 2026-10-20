@@ -48,6 +48,10 @@ type Deps struct {
 	Config   *config.Config
 	Pairer   Pairer
 	Now      func() time.Time
+	// Notifier sends the test alert; nil when ntfy is not configured. It is the monitor's own notifier.
+	Notifier health.Notifier
+	// DiskFree reports the free bytes of the disk holding a path; nil: health.DiskFree.
+	DiskFree func(string) (uint64, error)
 }
 
 // Pairer pairs WhatsApp from the browser (implemented in internal/wa in Task 10). Updates are plain strings: the QR
@@ -74,12 +78,17 @@ type Server struct {
 	// rulesMu serializes rule changes from read to Replace, so two interleaved POSTs cannot leave the live rules
 	// without one of them.
 	rulesMu sync.Mutex
+	// storageCache keeps the slow storage figures for five minutes.
+	storageCache storageCache
 }
 
 // New parses the embedded templates once and builds the server.
 func New(d Deps) *Server {
 	if d.Now == nil {
 		d.Now = time.Now
+	}
+	if d.DiskFree == nil {
+		d.DiskFree = health.DiskFree
 	}
 	sub, err := fs.Sub(staticFiles, "static")
 	if err != nil {
@@ -95,6 +104,8 @@ func New(d Deps) *Server {
 			"viewer":    pageTemplate(base, "viewer"),
 			"trace":     pageTemplate(base, "trace"),
 			"settings":  pageTemplate(base, "settings"),
+			"storage":   pageTemplate(base, "storage"),
+			"backups":   pageTemplate(base, "backups"),
 		},
 		static:      http.StripPrefix("/static/", fileOnly(http.FileServerFS(sub), sub)),
 		healthEvery: 15 * time.Second,
@@ -128,6 +139,9 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /media", s.media)
 	mux.HandleFunc("GET /settings", s.settings)
 	mux.HandleFunc("POST /settings/{section}", s.saveSetting)
+	mux.HandleFunc("GET /storage", s.storage)
+	mux.HandleFunc("GET /backups", s.backups)
+	mux.HandleFunc("POST /backups/test-alert", s.testAlert)
 	mux.Handle("GET /static/", s.static)
 }
 

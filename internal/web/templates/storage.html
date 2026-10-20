@@ -1,0 +1,33 @@
+{{define "content"}}
+  <h1>{{.Title}}</h1>
+  <p class="muted">Figures as of {{.AsOf}}; the folder sizes are recalculated at most every 5 minutes. This screen only reads: nothing here deletes anything.</p>
+  {{if .Warning}}<p class="warn" role="alert">{{.Warning}}</p>{{end}}
+
+  <section class="panel">
+    <h2>Space</h2>
+    <dl>
+      <dt>Archive database</dt><dd>{{.DB}}</dd>
+      <dt>Media</dt><dd>{{.Media}}</dd>
+      <dt>Backup folder</dt><dd>{{if .BackupSet}}{{.Backup}}{{else}}not set{{end}}</dd>
+      <dt>Free disk space</dt><dd>{{.Free}}</dd>
+      <dt>Growth</dt><dd>{{.Growth}}</dd>
+      <dt>Disk full in</dt><dd>{{.Projection}}</dd>
+    </dl>
+  </section>
+
+  <section class="panel">
+    <h2>Media by type</h2>
+    {{if .ByType}}<table>
+      <thead><tr><th>Type</th><th>Size</th></tr></thead>
+      <tbody>{{range .ByType}}<tr><td>{{.Name}}</td><td>{{.Size}}</td></tr>{{end}}</tbody>
+    </table>{{else}}<p class="muted">No media has been downloaded yet.</p>{{end}}
+  </section>
+
+  <section class="panel">
+    <h2>Chats using the most media</h2>
+    {{if .ByChat}}<table>
+      <thead><tr><th>Chat</th><th>Size</th></tr></thead>
+      <tbody>{{range .ByChat}}<tr><td>{{.Name}}{{if .JID}} <span class="chat">{{.JID}}</span>{{end}}</td><td>{{.Size}}</td></tr>{{end}}</tbody>
+    </table>{{else}}<p class="muted">No media has been downloaded yet.</p>{{end}}
+  </section>
+{{end}}
