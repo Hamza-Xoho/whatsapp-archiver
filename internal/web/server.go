@@ -54,8 +54,8 @@ type Deps struct {
 	DiskFree func(string) (uint64, error)
 }
 
-// Pairer pairs WhatsApp from the browser (implemented in internal/wa in Task 10). Updates are plain strings: the QR
-// code text, then Done, or Err.
+// Pairer pairs WhatsApp from the browser (wa.Pairer, through an adapter in cmd/archiver). Updates are plain strings:
+// the QR code text, then Done, or Err; the Pairer closes the channel when pairing ends or the archiver stops.
 type Pairer interface {
 	Paired() bool
 	StartPairing(ctx context.Context) (<-chan PairUpdate, error)
@@ -83,6 +83,8 @@ type Server struct {
 	// testAlertAt throttles the test alert button.
 	testAlertMu sync.Mutex
 	testAlertAt time.Time
+	// pair is the browser pairing's state.
+	pair *pairing
 }
 
 // New parses the embedded templates once and builds the server.
@@ -109,7 +111,9 @@ func New(d Deps) *Server {
 			"settings":  pageTemplate(base, "settings"),
 			"storage":   pageTemplate(base, "storage"),
 			"backups":   pageTemplate(base, "backups"),
+			"pair":      pageTemplate(base, "pair"),
 		},
+		pair:        newPairing(),
 		static:      http.StripPrefix("/static/", fileOnly(http.FileServerFS(sub), sub)),
 		healthEvery: 15 * time.Second,
 	}
@@ -145,6 +149,9 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /storage", s.storage)
 	mux.HandleFunc("GET /backups", s.backups)
 	mux.HandleFunc("POST /backups/test-alert", s.testAlert)
+	mux.HandleFunc("GET /pair", s.pairPage)
+	mux.HandleFunc("POST /pair/start", s.pairStart)
+	mux.HandleFunc("GET /pair/qr.png", s.pairQR)
 	mux.Handle("GET /static/", s.static)
 }
 

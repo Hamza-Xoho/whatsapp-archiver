@@ -30,19 +30,25 @@ type Client struct {
 	log       *slog.Logger
 	ver       atomic.Pointer[clientVersion] // version and reason as one pair: the monitor reads while the reconnect loop refreshes
 	closeOnce sync.Once
-	sock      socket
+	sock      Socket
 	refresh   func(context.Context) (changed bool, err error)
 	sleep     func(context.Context, time.Duration) error
 	// download fetches a history chunk; historyTimeout bounds it. Tests replace both.
 	download       historyDownloader
 	historyTimeout time.Duration
+	// qrChannel is GetQRChannel; tests replace it with a fake channel.
+	qrChannel func(context.Context) (<-chan whatsmeow.QRChannelItem, error)
 }
 
-// socket is the connection boundary the reconnect loop drives; *whatsmeow.Client satisfies it.
-type socket interface {
+// Socket is the connection boundary the reconnect loop drives; *whatsmeow.Client satisfies it.
+type Socket interface {
 	ConnectContext(context.Context) error
 	Disconnect()
 }
+
+// UseSocket replaces the WhatsApp connection with s. Tests outside this package use it so that nothing reaches
+// WhatsApp; the service never calls it.
+func (c *Client) UseSocket(s Socket) { c.sock = s }
 
 func Open(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Client, error) {
 	if log == nil {
@@ -82,6 +88,7 @@ func Open(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Client, e
 		download: liveHistoryDownloader(inner), historyTimeout: historyDownloadTimeout}
 	c.ver.Store(&clientVersion{version, reason})
 	c.refresh = c.refreshVersion
+	c.qrChannel = inner.GetQRChannel
 	return c, nil
 }
 
@@ -118,27 +125,36 @@ func (c *Client) Close() error {
 	return err
 }
 
+// Run captures until ctx ends. With pairing, it first shows the QR codes in the terminal (`archiver pair`).
 func (c *Client) Run(ctx context.Context, h func(any) bool, pairing bool) error {
+	return c.run(ctx, h, pairing, printQR)
+}
+
+// run is Run with the QR codes handed to show, which runs in its own goroutine and must return when ctx ends or the
+// channel closes. The QR channel is taken before the first connect, as whatsmeow requires (qrchan.go:217).
+// A pairing that never completed removes its event handler on return, so a later attempt does not add a second
+// one; the socket is already disconnected then. Capture keeps its handler to the end.
+func (c *Client) run(ctx context.Context, h func(any) bool, pairing bool, show func(context.Context, <-chan whatsmeow.QRChannelItem)) error {
 	if pairing && c.Paired() {
 		return fmt.Errorf("already paired")
 	}
 	if !pairing && !c.Paired() {
 		return fmt.Errorf("not paired")
 	}
-	var qr <-chan whatsmeow.QRChannelItem
-	var err error
 	if pairing {
-		qr, err = c.client.GetQRChannel(ctx)
+		qr, err := c.qrChannel(ctx)
 		if err != nil {
 			return fmt.Errorf("start QR pairing: %w", err)
 		}
-	}
-	if qr != nil {
-		go printQR(ctx, qr)
+		go show(ctx, qr)
 	}
 	ctl := make(chan any, 8)
-	c.client.AddEventHandlerWithSuccessStatus(eventHandler(c.historyHandler(ctx, h), pairing, os.Stdout, ctl))
-	return c.reconnect(ctx, ctl)
+	id := c.client.AddEventHandlerWithSuccessStatus(eventHandler(c.historyHandler(ctx, h), pairing, os.Stdout, ctl))
+	err := c.reconnect(ctx, ctl)
+	if pairing && !c.Paired() {
+		c.client.RemoveEventHandler(id)
+	}
+	return err
 }
 
 // eventHandler adapts h to whatsmeow. It returns h's verdict, so whatsmeow acknowledges an event only when h reports

@@ -22,6 +22,8 @@ const sseBuffer = 64
 //   - "health": the health state, on connect, after every state change, and every healthEvery while quiet; the
 //     health panel re-renders on it. The repeat also keeps an SSH tunnel from idling out and makes a write that
 //     shows a client has gone.
+//   - "pair": the pair panel's HTML after every change of the browser pairing, and on connect while a pairing runs
+//     or has just succeeded. It carries the QR image's URL, never the code text.
 //
 // The handler returns when the client goes, when Run's context ends, or when the bus closes the subscription.
 // Payloads carry no message text, captions or URLs: activity events have none.
@@ -35,6 +37,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	// instant can appear twice in the feed, which is harmless.
 	feed, cancel := s.d.Activity.Subscribe(sseBuffer)
 	defer cancel()
+	paired := s.pair.wait() // taken before the first write, so no pairing change falls in between
 	h := w.Header()
 	h.Set("Content-Type", "text/event-stream")
 	h.Set("Cache-Control", "no-cache")
@@ -48,6 +51,9 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if s.writeHealth(w) != nil {
+		return
+	}
+	if s.pairActive() && s.writePair(r.Context(), w) != nil {
 		return
 	}
 	flusher.Flush()
@@ -69,6 +75,9 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 			}
 		case <-tick.C:
 			err = s.writeHealth(w)
+		case <-paired:
+			paired = s.pair.wait()
+			err = s.writePair(r.Context(), w)
 		}
 		if err != nil {
 			return

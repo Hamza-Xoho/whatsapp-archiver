@@ -33,6 +33,18 @@ func runService(ctx context.Context, cancel context.CancelFunc, main func(contex
 	return errors.Join(errs...)
 }
 
+// afterPaired runs loop once ready is closed (the device is paired), or returns when ctx ends first. Capture's own
+// loops wait on it, so an unpaired `run` starts no media download and no backup until pairing succeeds.
+func afterPaired(ready <-chan struct{}, loop func(context.Context)) func(context.Context) {
+	return func(ctx context.Context) {
+		select {
+		case <-ready:
+			loop(ctx)
+		case <-ctx.Done():
+		}
+	}
+}
+
 // handlerDrainBound is how long shutdown waits for the event handlers in flight (systemd's default stop timeout is
 // 90 s).
 const handlerDrainBound = 30 * time.Second

@@ -27,14 +27,22 @@ var version = "dev"
 
 const whatsmeowVersion = "v0.0.0-20261013142727-4cf8bc8e0aeb"
 
-// exitNotPaired tells systemd not to restart (RestartPreventExitStatus in deploy/archiver.service).
+// exitNotPaired tells systemd not to restart (RestartPreventExitStatus in deploy/archiver.service). Since phase 2
+// (FR-1) `run` no longer returns it: unpaired, it stays up and pairs from the dashboard.
 const exitNotPaired = 3
 
 type systemClock struct{}
 
 func (systemClock) Now() time.Time                         { return time.Now() }
 func (systemClock) After(d time.Duration) <-chan time.Time { return time.After(d) }
-func main()                                                { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
+
+// Test seams: tests stop serve by cancelling serveContext (the signal) and keep it off the network with testSocket.
+var (
+	serveContext = context.Background
+	testSocket   wa.Socket
+)
+
+func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 func run(args []string, out, errOut io.Writer) int {
 	if len(args) == 0 {
 		_, _ = fmt.Fprintln(errOut, "usage: archiver <pair|run|status|chats|backup|scrub|replay|version>")
@@ -68,10 +76,9 @@ func run(args []string, out, errOut io.Writer) int {
 			_, _ = fmt.Fprintln(errOut, err)
 			return 1
 		}
-		if !paired {
+		if !paired { // stay up: the dashboard pairs, and nothing connects until it is asked to
 			_, _ = fmt.Fprintln(errOut, notPairedHint)
 			alertNotPaired(cfg, errOut)
-			return exitNotPaired
 		}
 		fallthrough
 	case "pair":
@@ -102,7 +109,7 @@ func run(args []string, out, errOut io.Writer) int {
 	return 0
 }
 func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) error {
-	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	sigCtx, stop := signal.NotifyContext(serveContext(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	// ctx ends on SIGTERM and also when client.Run returns by itself; the pipeline and every loop stop on it.
 	ctx, cancel := context.WithCancel(sigCtx)
@@ -139,6 +146,9 @@ func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) er
 		_ = st.Close()
 		return err
 	}
+	if testSocket != nil {
+		client.UseSocket(testSocket)
+	}
 	bus := activity.NewBus(500)
 	var notifier health.Notifier
 	if cfg.Alerts.Ntfy != nil {
@@ -154,16 +164,27 @@ func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) er
 	}
 	handlers := &inFlight{}
 	handler = handlers.wrap(handler)
+	// `run` connects through the pairer: capture at once when paired, else nothing until the dashboard starts
+	// pairing, which carries on as capture. Media downloads and backups wait until the device is paired.
+	// `pair` pairs in the terminal as before, and the dashboard then offers no pairing of its own.
+	pairer := wa.NewPairer(client)
+	connect := func(ctx context.Context) error { return pairer.Run(ctx, handler) }
+	ready := pairer.Ready()
+	var browser web.Pairer = &browserPairer{p: pairer}
 	if pairing {
 		_, _ = fmt.Fprintln(out, "Scan the QR code from WhatsApp → Linked Devices.")
+		connect = func(ctx context.Context) error { return client.Run(ctx, handler, true) }
+		now := make(chan struct{})
+		close(now)
+		ready, browser = now, nil // the loops start at once, as before phase 2
 	}
-	ui := web.New(web.Deps{Store: st, Rules: rules, Health: mon.Status, Activity: bus, Config: cfg, Notifier: notifier})
+	ui := web.New(web.Deps{Store: st, Rules: rules, Health: mon.Status, Activity: bus, Config: cfg, Notifier: notifier, Pairer: browser})
 	loops := []func(context.Context){
-		queue.Run,
+		afterPaired(ready, queue.Run),
 		mon.Run,
-		func(ctx context.Context) {
+		afterPaired(ready, func(ctx context.Context) {
 			backup.Schedule(ctx, cfg, systemClock{}, publishBackup(bus, mon.BackupResult), live.backup)
-		},
+		}),
 		// The dashboard stops with the other loops. If it cannot listen (the port is taken), capture carries on.
 		func(ctx context.Context) {
 			log.Info("dashboard listening", "listen", cfg.Web.Listen)
@@ -174,7 +195,7 @@ func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) er
 	}
 	// Shutdown order: cancel ctx, client.Run returns, the loops are joined, the event handler in flight is waited for
 	// (at most handlerDrainBound), then the client and the store are closed.
-	return runService(ctx, cancel, func(ctx context.Context) error { return client.Run(ctx, handler, pairing) }, loops, handlers.drain, client.Close, st.Close)
+	return runService(ctx, cancel, connect, loops, handlers.drain, client.Close, st.Close)
 }
 
 // publishBackup wraps the backup result callback so each result also reaches the live feed: the outcome and the
@@ -202,7 +223,10 @@ func storeAliases(st *store.Store) func(string) ([]string, error) {
 	}
 }
 
-const notPairedHint = "not paired: run `archiver pair` in a terminal first"
+const notPairedHint = "not paired: open the dashboard through the SSH tunnel and pair (or stop the service and run `archiver pair` in a terminal)"
+
+// notPairedBody is the not-paired alert's text.
+const notPairedBody = "Open the dashboard through the SSH tunnel and pair"
 
 // alertNotPaired sends one ntfy alert when configured; a send failure is reported, not fatal.
 func alertNotPaired(cfg *config.Config, errOut io.Writer) {
@@ -211,7 +235,7 @@ func alertNotPaired(cfg *config.Config, errOut io.Writer) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	if err := health.NewNtfy(cfg.Alerts.Ntfy).Notify(ctx, "WhatsApp Archiver is not paired", notPairedHint); err != nil {
+	if err := health.NewNtfy(cfg.Alerts.Ntfy).Notify(ctx, "WhatsApp Archiver is not paired", notPairedBody); err != nil {
 		_, _ = fmt.Fprintln(errOut, "ntfy alert failed:", err)
 	}
 }
