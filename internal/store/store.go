@@ -96,16 +96,7 @@ func Open(path string) (*Store, error) {
 		_ = write.Close()
 		return nil, fmt.Errorf("enable WAL: %w", err)
 	}
-	data, err := migrations.ReadFile("migrations/0001_raw.sql")
-	if err != nil {
-		_ = write.Close()
-		return nil, err
-	}
-	if _, err = write.Exec(string(data)); err != nil {
-		_ = write.Close()
-		return nil, fmt.Errorf("migrate archive: %w", err)
-	}
-	if _, err = write.Exec("INSERT OR IGNORE INTO schema_version(version,applied_at) VALUES(1,?)", time.Now().Unix()); err != nil {
+	if err = migrate(write); err != nil {
 		_ = write.Close()
 		return nil, err
 	}
