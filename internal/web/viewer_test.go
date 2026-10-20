@@ -1,0 +1,185 @@
+package web
+
+import (
+	"fmt"
+	"net/http"
+	"regexp"
+	"strings"
+	"testing"
+
+	"whatsapp-archiver/internal/store"
+)
+
+func (u *chatsUI) msg(t *testing.T, chat, id, sender string, ts int64, text string) {
+	t.Helper()
+	m := store.Message{ChatJID: chat, ID: id, SenderJID: sender, Timestamp: ts, ReceivedAt: ts, Source: "live", Text: text, RawProto: []byte(id)}
+	if _, err := u.st.InsertMessage(t.Context(), m); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (u *chatsUI) event(t *testing.T, e store.MessageEvent) {
+	t.Helper()
+	e.ReceivedAt = e.Timestamp
+	if _, err := u.st.InsertEvent(t.Context(), e); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestViewerShowsEditedTextAndKeepsOriginal(t *testing.T) {
+	u := newChatsUI(t)
+	u.msg(t, "g@g.us", "a", "1@lid", 1760000000, "ORIGINAL-WORDS")
+	u.event(t, store.MessageEvent{ChatJID: "g@g.us", TargetID: "a", Kind: "edit", EventID: "e1", NewText: "EDITED-WORDS", Timestamp: 1760000060})
+	got := u.page(t, "/chats/g@g.us")
+	if !strings.Contains(got, "EDITED-WORDS") || !strings.Contains(got, "ORIGINAL-WORDS") || !strings.Contains(got, "Edited") {
+		t.Fatalf("viewer must show the edit, the original and say it was edited: %s", got)
+	}
+	if strings.Index(got, "EDITED-WORDS") > strings.Index(got, "ORIGINAL-WORDS") {
+		t.Fatal("the current (edited) text should come before the original")
+	}
+}
+
+func TestViewerMarksDeletedMessage(t *testing.T) {
+	u := newChatsUI(t)
+	u.msg(t, "g@g.us", "a", "1@lid", 1760000000, "KEPT-AFTER-DELETE")
+	u.event(t, store.MessageEvent{ChatJID: "g@g.us", TargetID: "a", Kind: "revoke", EventID: "r1", Timestamp: 1760000060})
+	got := u.page(t, "/chats/g@g.us")
+	if !strings.Contains(got, "Deleted by the sender") || !strings.Contains(got, "KEPT-AFTER-DELETE") {
+		t.Fatalf("viewer must mark the deletion and keep the text: %s", got)
+	}
+}
+
+func TestViewerListsReactions(t *testing.T) {
+	u := newChatsUI(t)
+	u.msg(t, "g@g.us", "a", "1@lid", 1760000000, "hello")
+	u.event(t, store.MessageEvent{ChatJID: "g@g.us", TargetID: "a", Kind: "reaction", EventID: "x1", SenderJID: "p1@lid", Value: "👍", Timestamp: 1760000010})
+	u.event(t, store.MessageEvent{ChatJID: "g@g.us", TargetID: "a", Kind: "reaction", EventID: "x2", SenderJID: "p2@lid", Value: "❤️", Timestamp: 1760000020})
+	got := u.page(t, "/chats/g@g.us")
+	if !strings.Contains(got, "👍") || !strings.Contains(got, "❤️") {
+		t.Fatalf("viewer lacks the reactions: %s", got)
+	}
+}
+
+func TestViewerShowsSenderNameAndChatName(t *testing.T) {
+	u := newChatsUI(t)
+	u.msg(t, "g@g.us", "a", "5551@s.whatsapp.net", 1760000000, "hello")
+	if err := u.st.UpsertParticipant(t.Context(), store.Participant{JID: "5551@s.whatsapp.net", DisplayName: "Aisha"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := u.st.UpsertChat(t.Context(), store.Chat{JID: "g@g.us", Name: "Family", Type: "group"}); err != nil {
+		t.Fatal(err)
+	}
+	got := u.page(t, "/chats/g@g.us")
+	if !strings.Contains(got, "Aisha") || !strings.Contains(got, "Family") {
+		t.Fatalf("viewer lacks the sender or chat name: %s", got)
+	}
+}
+
+var olderRe = regexp.MustCompile(`href="/chats/g@g\.us\?before=(\d+)"`)
+
+// Review Focus: a large chat pages, newest 200 first, with an "Older" link carrying the 200th message's time.
+func TestViewerPagesLargeChat(t *testing.T) {
+	u := newChatsUI(t)
+	const base = 1760000000
+	for i := 1; i <= 1000; i++ {
+		u.msg(t, "g@g.us", fmt.Sprintf("m%04d", i), "1@lid", base+int64(i), fmt.Sprintf("body-%04d", i))
+	}
+	body, code, _ := get(t, u.handler(), "/chats/g@g.us")
+	if code != http.StatusOK {
+		t.Fatalf("status %d", code)
+	}
+	if n := strings.Count(string(body), "body-"); n != 200 {
+		t.Fatalf("first page shows %d messages, want 200", n)
+	}
+	if !strings.Contains(string(body), "body-1000") || !strings.Contains(string(body), "body-0801") || strings.Contains(string(body), "body-0800") {
+		t.Fatal("first page is not the newest 200")
+	}
+	m := olderRe.FindStringSubmatch(string(body))
+	if m == nil || m[1] != fmt.Sprint(base+801) {
+		t.Fatalf("Older link %v, want before=%d", m, base+801)
+	}
+	if !strings.Contains(visibleText(string(body)), "Older") {
+		t.Fatal("no Older link text")
+	}
+	body, code, _ = get(t, u.handler(), "/chats/g@g.us?before="+m[1])
+	if code != http.StatusOK {
+		t.Fatalf("status %d", code)
+	}
+	if n := strings.Count(string(body), "body-"); n != 200 || !strings.Contains(string(body), "body-0800") || strings.Contains(string(body), "body-0801") || !strings.Contains(string(body), "body-0601") {
+		t.Fatalf("second page is not messages 601-800 (%d shown)", n)
+	}
+}
+
+func TestViewerLastPageHasNoOlderLink(t *testing.T) {
+	u := newChatsUI(t)
+	for i := 1; i <= 200; i++ {
+		u.msg(t, "g@g.us", fmt.Sprintf("m%04d", i), "1@lid", 1760000000+int64(i), "x")
+	}
+	body, _, _ := get(t, u.handler(), "/chats/g@g.us")
+	if olderRe.Match(body) {
+		t.Fatal("an Older link on a chat with exactly one page")
+	}
+}
+
+func TestViewerRejectsBadBefore(t *testing.T) {
+	u := newChatsUI(t)
+	if _, code, _ := get(t, u.handler(), "/chats/g@g.us?before=abc"); code != http.StatusBadRequest {
+		t.Fatalf("status %d, want 400", code)
+	}
+}
+
+// Message text and names come from any contact: they are escaped, never markup.
+func TestViewerEscapesHostileText(t *testing.T) {
+	u := newChatsUI(t)
+	const hostile = "<script>alert(1)</script>"
+	u.msg(t, "g@g.us", "a", "5551@s.whatsapp.net", 1760000000, hostile)
+	if err := u.st.UpsertParticipant(t.Context(), store.Participant{JID: "5551@s.whatsapp.net", DisplayName: hostile}); err != nil {
+		t.Fatal(err)
+	}
+	if err := u.st.UpsertChat(t.Context(), store.Chat{JID: "g@g.us", Name: hostile, Type: "group"}); err != nil {
+		t.Fatal(err)
+	}
+	u.event(t, store.MessageEvent{ChatJID: "g@g.us", TargetID: "a", Kind: "edit", EventID: "e1", NewText: hostile, Timestamp: 1760000001})
+	u.event(t, store.MessageEvent{ChatJID: "g@g.us", TargetID: "a", Kind: "reaction", EventID: "x1", SenderJID: "p@lid", Value: hostile, Timestamp: 1760000002})
+	for _, path := range []string{"/chats/g@g.us", "/chats/g@g.us/m/a", "/chats"} {
+		body, code, _ := get(t, u.handler(), path)
+		if code != http.StatusOK {
+			t.Fatalf("%s: status %d", path, code)
+		}
+		if strings.Contains(string(body), hostile) || strings.Contains(string(body), "<script>alert") {
+			t.Errorf("%s: hostile text rendered as markup", path)
+		}
+		if !strings.Contains(string(body), "&lt;script&gt;alert(1)&lt;/script&gt;") {
+			t.Errorf("%s: hostile text not shown escaped", path)
+		}
+	}
+}
+
+func TestTraceShowsMessageAndEvents(t *testing.T) {
+	u := newChatsUI(t)
+	u.msg(t, "g@g.us", "a", "1@lid", 1760000000, "hello")
+	u.event(t, store.MessageEvent{ChatJID: "g@g.us", TargetID: "a", Kind: "edit", EventID: "e1", NewText: "hi there", Timestamp: 1760000060})
+	got := u.page(t, "/chats/g@g.us/m/a")
+	for _, want := range []string{"hello", "edit", "hi there", "live"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("trace lacks %q: %s", want, got)
+		}
+	}
+	page := u.page(t, "/chats/g@g.us")
+	if !strings.Contains(page, "Details") {
+		t.Fatal("viewer has no link to the message trace")
+	}
+}
+
+func TestTraceShowsGapForUndecryptable(t *testing.T) {
+	u := newChatsUI(t)
+	u.msg(t, "g@g.us", "a", "1@lid", 1760000000, "hello")
+	u.event(t, store.MessageEvent{ChatJID: "g@g.us", TargetID: "lost", Kind: "undecryptable", EventID: "u1", SenderJID: "1@lid", Timestamp: 1760000060})
+	got := u.page(t, "/chats/g@g.us/m/lost")
+	if !strings.Contains(got, "could not be decrypted") {
+		t.Fatalf("trace does not show the gap: %s", got)
+	}
+	if _, code, _ := get(t, u.handler(), "/chats/g@g.us/m/none"); code != http.StatusNotFound {
+		t.Fatalf("unknown message: status %d, want 404", code)
+	}
+}
