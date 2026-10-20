@@ -1,0 +1,194 @@
+[
+ {
+  "name": "f1-no-logout-guard",
+  "file": "internal/wa/pairer.go",
+  "old": "\tcase p.isReady() && !p.c.Paired():\n",
+  "new": "\tcase false:\n",
+  "pkgs": "./internal/wa/",
+  "rf": 1
+ },
+ {
+  "name": "f1-guard-before-ready",
+  "file": "internal/wa/pairer.go",
+  "old": "\tcase p.isReady() && !p.c.Paired():\n",
+  "new": "\tcase !p.c.Paired() && p.cur == nil && p.isReady() && false:\n",
+  "pkgs": "./internal/wa/",
+  "rf": 1
+ },
+ {
+  "name": "f2-web-listening-dropped",
+  "file": "internal/web/server.go",
+  "old": "\tif s.d.Listening != nil {\n\t\ts.d.Listening(l.Addr().String())\n\t}\n",
+  "new": "",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "f2-web-listening-before-listen",
+  "file": "internal/web/server.go",
+  "old": "\tl, err := net.Listen(\"tcp\", listen)\n",
+  "new": "\tif s.d.Listening != nil {\n\t\ts.d.Listening(listen)\n\t}\n\tl, err := net.Listen(\"tcp\", listen)\n",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "f2-main-logs-before-listen",
+  "file": "cmd/archiver/main.go",
+  "old": "\t\tfunc(ctx context.Context) {\n\t\t\tif err := ui.Run",
+  "new": "\t\tfunc(ctx context.Context) {\n\t\t\tlog.Info(\"dashboard listening\", \"listen\", cfg.Web.Listen)\n\t\t\tif err := ui.Run",
+  "pkgs": "./cmd/archiver/",
+  "rf": 1
+ },
+ {
+  "name": "f2-main-never-logs",
+  "file": "cmd/archiver/main.go",
+  "old": "Listening: func(addr string) { log.Info(\"dashboard listening\", \"listen\", addr) }",
+  "new": "Listening: func(addr string) {}",
+  "pkgs": "./cmd/archiver/",
+  "rf": 1
+ },
+ {
+  "name": "f3-row-no-hx-confirm",
+  "file": "internal/web/templates/chats.html",
+  "old": " hx-confirm=\"Stop logging this chat?",
+  "new": " data-x=\"Stop logging this chat?",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "f3-row-no-onsubmit",
+  "file": "internal/web/templates/chats.html",
+  "old": "onsubmit=\"if(!window.htmx&&!confirm(",
+  "new": "data-y=\"if(!window.htmx&&!confirm(",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "f3-bulk-no-confirm",
+  "file": "internal/web/templates/chats.html",
+  "old": "Stop logging these chats?",
+  "new": "Stop logging?",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "f3-start-confirms",
+  "file": "internal/web/templates/chats.html",
+  "old": "{{else}}<form method=\"post\" action=\"/chats/rules\" hx-post=\"/chats/rules\" hx-swap=\"none\">{{end}}",
+  "new": "{{else}}<form method=\"post\" action=\"/chats/rules\" hx-post=\"/chats/rules\" hx-swap=\"none\" hx-confirm=\"Sure?\">{{end}}",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "f4-no-keep-warning",
+  "file": "internal/web/templates/settings.html",
+  "old": "Lowering this deletes the oldest snapshots at the next backup.",
+  "new": "",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "f5-no-cross-site-check",
+  "file": "internal/web/guard.go",
+  "old": "r.Header.Get(\"Sec-Fetch-Site\") == \"cross-site\"",
+  "new": "false",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "f5-cross-site-posts-only",
+  "file": "internal/web/guard.go",
+  "old": "r.Header.Get(\"Sec-Fetch-Site\") == \"cross-site\"",
+  "new": "r.Header.Get(\"Sec-Fetch-Site\") == \"cross-site\" && r.Method == http.MethodPost",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "f5-blocks-same-site",
+  "file": "internal/web/guard.go",
+  "old": "r.Header.Get(\"Sec-Fetch-Site\") == \"cross-site\"",
+  "new": "r.Header.Get(\"Sec-Fetch-Site\") != \"\" && r.Header.Get(\"Sec-Fetch-Site\") != \"same-origin\"",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "f6-seen-failure-fatal",
+  "file": "internal/ingest/pipeline.go",
+  "old": "\t\t\tp.log.Warn(\"chat not marked as seen; will retry at its next message\", \"chat\", r.Chat.JID, \"err\", err)\n",
+  "new": "\t\t\treturn err\n",
+  "pkgs": "./internal/ingest/",
+  "rf": 1
+ },
+ {
+  "name": "f6-seen-failure-silent",
+  "file": "internal/ingest/pipeline.go",
+  "old": "\t\t\tp.log.Warn(\"chat not marked as seen; will retry at its next message\", \"chat\", r.Chat.JID, \"err\", err)\n",
+  "new": "",
+  "pkgs": "./internal/ingest/",
+  "rf": 1
+ },
+ {
+  "name": "f6-seen-retried-by-persist",
+  "file": "internal/ingest/pipeline.go",
+  "old": "\t\tif err := p.seen.mark(ctx, r.Chat.JID, r.Received.Unix()); err != nil {",
+  "new": "\t\tif err := p.persist(ctx, \"mark seen\", func() error { return p.seen.mark(ctx, r.Chat.JID, r.Received.Unix()) }); err != nil {",
+  "pkgs": "./internal/ingest/",
+  "rf": 1
+ },
+ {
+  "name": "f7-logsafe-noop",
+  "file": "internal/logsafe/logsafe.go",
+  "old": "s = strings.ReplaceAll(s, topic, \"/REDACTED\")",
+  "new": "_ = topic",
+  "pkgs": "./internal/logsafe/ ./internal/web/ ./internal/health/",
+  "rf": 1
+ },
+ {
+  "name": "f7-web-unredacted",
+  "file": "internal/web/backups.go",
+  "old": "logsafe.RedactNtfy(logsafe.RedactURLs(err.Error()), s.ntfyURL())",
+  "new": "logsafe.RedactURLs(err.Error())",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "f7-health-unredacted",
+  "file": "internal/health/health.go",
+  "old": "logsafe.RedactNtfy(err.Error(), m.ntfyURL())",
+  "new": "err.Error()",
+  "pkgs": "./internal/health/",
+  "rf": 1
+ },
+ {
+  "name": "f8-feed-utc",
+  "file": "internal/web/dashboard.go",
+  "old": "func (f feedItem) Clock() string { return f.at().Format(",
+  "new": "func (f feedItem) Clock() string { return f.At.Format(",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "f8-sse-no-zone",
+  "file": "internal/web/sse.go",
+  "old": "feedItem{Event: e, Loc: loc}",
+  "new": "feedItem{Event: e}",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "f8-no-data-max-layout",
+  "file": "internal/web/templates/dashboard.html",
+  "old": "data-max=\"200\"",
+  "new": "",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "f8-no-trim",
+  "file": "internal/web/templates/layout.html",
+  "old": "while (f.children.length > max) { f.lastElementChild.remove(); }",
+  "new": "",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ }
+]
