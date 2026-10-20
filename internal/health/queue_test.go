@@ -158,3 +158,23 @@ func TestDroppedAlertFiresAgainOnNextTrigger(t *testing.T) {
 		t.Fatalf("a dropped logged_out must be sent on its next trigger; sent %d: %q", len(n.bodies), n.bodies)
 	}
 }
+
+type failingWithTopic struct{}
+
+func (failingWithTopic) Notify(context.Context, string, string) error {
+	return errors.New(`Post "https://ntfy.sh/secret-topic-123": dial tcp: lookup ntfy.sh: no such host`)
+}
+
+// F7: the monitor's "alert not sent" line does not carry the ntfy topic.
+func TestFailedNotifyLogDoesNotCarryTheNtfyTopic(t *testing.T) {
+	var logs bytes.Buffer
+	cfg := &config.Config{DataDir: t.TempDir(), Alerts: config.AlertConfig{Ntfy: &config.NtfyConfig{URL: "https://ntfy.sh/secret-topic-123"}}}
+	m := NewMonitor(cfg, failingWithTopic{}, &clock{time.Unix(1_700_000_000, 0)}, nil, func() string { return "v" }).
+		WithLogger(slog.New(slog.NewTextHandler(&logs, nil)))
+	stop := running(t, m)
+	m.SetState("logged_out", "401")
+	stop()
+	if !strings.Contains(logs.String(), "alert not sent") || strings.Contains(logs.String(), "secret-topic-123") {
+		t.Fatalf("log:\n%s", logs.String())
+	}
+}

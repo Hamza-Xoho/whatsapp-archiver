@@ -1,8 +1,10 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -220,4 +222,21 @@ func TestBackupsPageUsesTheLiveSchedule(t *testing.T) {
 	}
 	r.h = New(Deps{Store: st, Config: r.cfg, Notifier: r.n, Now: func() time.Time { return dashNow }}).Handler()
 	contains(t, r.page(t), "every day at 01:15, keeping 3 snapshots")
+}
+
+// F7: the journal line for a failed test alert does not carry the ntfy topic either.
+func TestTestAlertLogDoesNotCarryTheNtfyTopic(t *testing.T) {
+	var logs bytes.Buffer
+	saved := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(saved) })
+	r := newBackupsRig(t, true)
+	r.cfg.Alerts.Ntfy = &config.NtfyConfig{URL: "https://ntfy.sh/secret-topic-123"}
+	r.n.err = errors.New(`Post "https://ntfy.sh/secret-topic-123": dial tcp: lookup ntfy.sh: no such host`)
+	if _, code := postForm(t, r.h, "/backups/test-alert", nil); code != http.StatusOK {
+		t.Fatalf("status %d", code)
+	}
+	if !strings.Contains(logs.String(), "test alert not sent") || strings.Contains(logs.String(), "secret-topic-123") {
+		t.Fatalf("log:\n%s", logs.String())
+	}
 }

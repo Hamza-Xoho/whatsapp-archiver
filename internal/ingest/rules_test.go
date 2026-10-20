@@ -1,11 +1,17 @@
 package ingest_test
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"go.mau.fi/whatsmeow/proto/waE2E"
+	"google.golang.org/protobuf/proto"
 
 	"whatsapp-archiver/internal/ingest"
 	"whatsapp-archiver/internal/store"
@@ -120,5 +126,55 @@ func TestPipelineRecordsFirstSightingInStore(t *testing.T) {
 	p.Handle(messageEvent("g@g.us", "A", text("a")))
 	if got := strings.Join(rows(t, st, "SELECT jid,acknowledged FROM chat_seen"), ","); got != "g@g.us|0" {
 		t.Fatalf("chat_seen = %q", got)
+	}
+}
+
+// failingSeen is a chat_seen store whose writes fail (a plain error, not a constraint, so persist would retry it).
+type failingSeen struct {
+	mu    sync.Mutex
+	marks int
+}
+
+func (f *failingSeen) MarkChatSeen(context.Context, string, int64) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.marks++
+	return false, errors.New("disk I/O error")
+}
+func (f *failingSeen) SeenChats(context.Context) ([]store.ChatSeen, error) { return nil, nil }
+
+// F6: the seen flag is a UI convenience. A failing chat_seen write after the message is stored does not fail or
+// retry the event, hold up the media enqueue or the health tick, or mark the chat; the next sighting tries again.
+func TestSeenWriteFailureDoesNotHoldUpCapture(t *testing.T) {
+	st := testkit.Store(t)
+	seen := &failingSeen{}
+	tracker, err := ingest.NewSeenTracker(context.Background(), seen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q, h := &queueFake{}, &healthFake{}
+	var logs bytes.Buffer
+	p := ingest.NewPipeline(st, ingest.NewFilter(nil, nil), q, h, slog.New(slog.NewTextHandler(&logs, nil))).WithSeen(tracker)
+	img := messageEvent("g@g.us", "IMG", &waE2E.Message{ImageMessage: &waE2E.ImageMessage{Mimetype: proto.String("image/jpeg")}})
+	done := make(chan bool, 1)
+	go func() { done <- p.Handle(img) }()
+	select {
+	case ack := <-done:
+		if !ack {
+			t.Fatal("Handle did not acknowledge an event that was stored")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Handle is stuck retrying the chat_seen write")
+	}
+	stats, _ := st.ChatStats(t.Context())
+	if len(stats) != 1 || stats[0].MessageCount != 1 || len(q.items) != 1 || h.seen != 1 || h.failed != 0 {
+		t.Fatalf("stats=%+v media=%d health seen=%d failed=%d", stats, len(q.items), h.seen, h.failed)
+	}
+	if !strings.Contains(logs.String(), "level=WARN") {
+		t.Fatalf("the failed seen write is not logged at Warn:\n%s", logs.String())
+	}
+	p.Handle(messageEvent("g@g.us", "B", text("b")))
+	if seen.marks != 2 {
+		t.Fatalf("chat_seen writes = %d, want a second attempt at the next sighting", seen.marks)
 	}
 }
