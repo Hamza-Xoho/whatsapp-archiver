@@ -37,10 +37,8 @@ func TestSlowSubscriberNeverBlocksPublish(t *testing.T) {
 
 func TestDroppedSubscriberDoesNotAffectOthers(t *testing.T) {
 	b := NewBus(500)
-	_, cancelSlow := b.Subscribe(1)
-	defer cancelSlow()
-	fast, cancelFast := b.Subscribe(100)
-	defer cancelFast()
+	b.Subscribe(1) // never read; no deferred cancels, which would hang a failure if Publish held the lock
+	fast, _ := b.Subscribe(100)
 	published := make(chan struct{})
 	go func() {
 		defer close(published)
