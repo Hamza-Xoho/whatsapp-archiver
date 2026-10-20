@@ -13,6 +13,7 @@ import (
 	_ "time/tzdata" // zone names resolve on hosts without a zoneinfo database (Windows, minimal containers)
 	"whatsapp-archiver/internal/config"
 	"whatsapp-archiver/internal/health"
+	"whatsapp-archiver/internal/ingest"
 	"whatsapp-archiver/internal/store"
 )
 
@@ -182,18 +183,23 @@ func printChats(cfg *config.Config, out io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("read chat statistics: %w", err)
 	}
-	excluded := map[string]bool{}
-	for _, v := range cfg.Exclude {
-		excluded[v] = true
+	// After the import the archive's chat rules are what capture applies; before it (an archive the new build has
+	// not started on yet) config.yaml's exclude list still is.
+	rules := ingest.ExclusionRules(cfg.Exclude)
+	imported, err := st.ConfigImported(ctx)
+	if err != nil {
+		return fmt.Errorf("read chat rules: %w", err)
 	}
+	if imported {
+		if rules, err = st.ChatRules(ctx); err != nil {
+			return fmt.Errorf("read chat rules: %w", err)
+		}
+	}
+	filter := ingest.NewFilter(ingest.NewRuleSet(rules), func(jid string) ([]string, error) { return st.Aliases(ctx, jid) })
 	for _, s := range stats {
-		aliases, err := st.Aliases(ctx, s.CanonicalJID)
+		hit, err := filter.Excluded(s.CanonicalJID)
 		if err != nil {
 			return fmt.Errorf("read aliases of %s: %w", s.CanonicalJID, err)
-		}
-		hit := excluded[s.CanonicalJID]
-		for _, a := range aliases {
-			hit = hit || excluded[a]
 		}
 		answer := "no"
 		if hit {

@@ -122,12 +122,13 @@ func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) er
 		return err
 	}
 	rules := ingest.NewRuleSet(chatRules)
+	aliases := storeAliases(st)
+	warnIgnoredExclusions(log, cfg.Exclude, ingest.NewFilter(rules, aliases))
 	seen, err := ingest.NewSeenTracker(ctx, st)
 	if err != nil {
 		_ = st.Close()
 		return err
 	}
-	aliases := storeAliases(st)
 	live := liveSettings{st: st, cfg: cfg, log: log, rules: rules, aliases: aliases}
 	client, err := wa.Open(ctx, cfg, log)
 	if err != nil {

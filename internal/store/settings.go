@@ -217,6 +217,20 @@ func (s *Store) ImportConfigOnce(ctx context.Context, cfg *config.Config) (bool,
 	return true, nil
 }
 
+// ConfigImported reports whether config.yaml's settings were imported into this archive, so the archive's chat rules
+// are the live ones. An archive from before the settings tables (opened read-only, not migrated) reports false.
+func (s *Store) ConfigImported(ctx context.Context) (bool, error) {
+	var tables int
+	if err := s.read.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='settings'`).Scan(&tables); err != nil {
+		return false, fmt.Errorf("check settings table: %w", err)
+	}
+	if tables == 0 {
+		return false, nil
+	}
+	_, ok, err := s.Setting(ctx, config.ImportMarker)
+	return ok, err
+}
+
 // settingJSON decodes setting key into v and reports whether it is set.
 func (s *Store) settingJSON(ctx context.Context, key string, v any) (bool, error) {
 	raw, ok, err := s.Setting(ctx, key)

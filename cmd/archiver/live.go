@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"whatsapp-archiver/internal/config"
 	"whatsapp-archiver/internal/health"
@@ -76,4 +77,25 @@ func (l liveSettings) backup() config.BackupConfig {
 		return l.cfg.Backup
 	}
 	return b
+}
+
+// warnIgnoredExclusions logs one warning per config.yaml exclude entry that the archive's rules (through aliases, as
+// capture applies them) do not exclude: after the import the dashboard owns the chat rules, so such an entry does
+// nothing. The JID is named only by the last 4 characters of its user part.
+func warnIgnoredExclusions(log *slog.Logger, exclude []string, filter *ingest.Filter) {
+	for _, jid := range exclude {
+		if excluded, err := filter.Excluded(jid); err == nil && excluded {
+			continue
+		}
+		log.Warn("config.yaml exclude is ignored since the dashboard owns chat rules; " + shortJID(jid) + " is being logged")
+	}
+}
+
+// shortJID keeps the last 4 characters of a JID's user part and its server: "…0123@s.whatsapp.net".
+func shortJID(jid string) string {
+	user, server, _ := strings.Cut(jid, "@")
+	if len(user) > 4 {
+		user = user[len(user)-4:]
+	}
+	return "…" + user + "@" + server
 }
