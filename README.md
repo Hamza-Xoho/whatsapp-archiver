@@ -276,26 +276,33 @@ Notes:
 - **Direct chats**: write the phone-number form. When WhatsApp later shows the same person under a `…@lid` address, the exclusion covers it as soon as the archiver has seen the link between the two addresses, which arrives with the messages and with history. **Groups**: WhatsApp never shows a group's address, so it cannot be listed before pairing. After the first capture `archiver chats` lists the groups and their addresses (section 8); add the ones to exclude then. Rows stored before that stay in the database. If a group must never be stored, do a practice pairing first: pair as in section 7 with a throw-away data folder (`--data /var/tmp/practice`; it needs no `config.yaml` and stores everything it sees), run `archiver chats --data /var/tmp/practice`, then unlink the device in WhatsApp (Settings → Linked Devices) and delete the folder with `sudo rm -r /var/tmp/practice`. It costs one extra pairing.
 - After editing the file later, `ls -l` must still show the owner `whatsapp-archiver` and `-rw-------`; repeat the `chown` and `chmod` above if not.
 
-Check the file and test ntfy through the archiver itself. `run` reads the configuration, finds that the phone is not paired yet, sends one alert and exits without contacting WhatsApp. This test is safe only now, before pairing: **never run `archiver run` in a terminal once the service is installed**, because after pairing it connects with the same login as the service:
+Check the file and test ntfy through the archiver itself. `run` reads the configuration, finds that the phone is not paired yet, sends one alert and then stays up serving the dashboard on `web.listen` (127.0.0.1:8080), without contacting WhatsApp until you start pairing from the dashboard. This test is safe only now, before pairing: **never run `archiver run` in a terminal once the service is installed**, because after pairing it connects with the same login as the service:
 
 ```sh
 sudo ls -l /var/lib/whatsapp-archiver
-sudo -u whatsapp-archiver /opt/whatsapp-archiver/archiver run --data /var/lib/whatsapp-archiver; echo "exit code $?"
+sudo -u whatsapp-archiver /opt/whatsapp-archiver/archiver run --data /var/lib/whatsapp-archiver
 ```
 
 Expected:
 
 ```
 -rw------- 1 whatsapp-archiver whatsapp-archiver … config.yaml
-not paired: run `archiver pair` in a terminal first
-exit code 3
+not paired: open the dashboard through the SSH tunnel and pair (or stop the service and run `archiver pair` in a terminal)
 ```
 
-and on the phone a notification titled **WhatsApp Archiver is not paired** with the same "not paired: run … first" text. If `ntfy alert failed: …` is printed instead, the URL in `alerts.ntfy` is wrong or the server has no internet. A different message (`decode config: …`) names the line to fix.
+then lines of JSON (the log), and on the phone a notification titled **WhatsApp Archiver is not paired** with the text "Open the dashboard through the SSH tunnel and pair". Press Ctrl-C to stop it; do not pair from this test run. If `ntfy alert failed: …` is printed instead, the URL in `alerts.ntfy` is wrong or the server has no internet. A different message (`decode config: …`) names the line to fix, and the program exits.
 
 ### 7. Pair the phone
 
-Run this in a Terminal window that is large (about 100 columns wide and 50 lines tall) so the QR code is not cut:
+**In the browser (phase 2, recommended).** Start the service (section 8); unpaired, it waits for you and connects to nothing. On your Mac open a tunnel to the server and keep that window open:
+
+```sh
+ssh -L 8080:localhost:8080 hamza@192.168.0.104
+```
+
+Then open <http://localhost:8080/pair> in the Mac's browser and press **Pair WhatsApp**. A QR code appears (a new one every 20 seconds). On the iPhone open WhatsApp → Settings → Linked Devices → Link a Device and scan it. The page then says `Paired. Capture is running.` with a link to the dashboard; history arrives in the background while the service runs, so nothing has to stay open. If the codes run out, the page says "QR code timed out" and shows the button again. Later visits to `/pair` show "Paired" and the history line.
+
+**In a terminal (as before).** Stop the service first (`sudo systemctl stop archiver`; skip this if it was never started). Run this in a Terminal window that is large (about 100 columns wide and 50 lines tall) so the QR code is not cut:
 
 ```sh
 sudo -u whatsapp-archiver /opt/whatsapp-archiver/archiver pair --data /var/lib/whatsapp-archiver
@@ -360,7 +367,7 @@ Each alert is sent at most once every 6 hours while the problem lasts, and a `<t
 
 | Title on the phone | Meaning and what to do |
 | --- | --- |
-| WhatsApp Archiver is not paired | The service started without a login. Run `archiver pair` (section 7), then start the service. |
+| WhatsApp Archiver is not paired | The service started without a login. It stays up: pair in the browser through the SSH tunnel (section 7). |
 | WhatsApp disconnected | No connection for more than `disconnected_after` (15 minutes). Check the server's network, then `systemctl status archiver`. |
 | WhatsApp logged out | The phone removed this linked device (or WhatsApp did). The service stays up but captures nothing. Re-pair: `sudo systemctl stop archiver`, run `pair`, Ctrl-C, `sudo systemctl start archiver`. Stored messages are kept. |
 | WhatsApp temporarily banned | WhatsApp paused the account for the time in the alert. Capture resumes by itself; do not restart repeatedly. |
@@ -453,7 +460,7 @@ Expected: `command -v rsync` prints `/usr/bin/rsync` (if it prints another path,
 | --- | --- |
 | `systemctl status` shows `status=226/NAMESPACE` | The backup folder (or the data folder) does not exist: section 4. |
 | `permission denied` for `config.yaml`, `archive.db` or `session.db` | A file is owned by root. `sudo chown -R whatsapp-archiver:whatsapp-archiver /var/lib/whatsapp-archiver`, then `sudo chmod 0600 /var/lib/whatsapp-archiver/config.yaml`. |
-| `systemctl status` shows `inactive` / `failed` with `status=3` and the not-paired message | The service was started before pairing. Pair (section 7), then `sudo systemctl start archiver`. systemd does not retry exit code 3 on purpose. |
+| `systemctl status` shows `inactive` / `failed` with `status=3` and the not-paired message | An archiver from before phase 2: it exited because it was not paired. Pair (section 7), then `sudo systemctl start archiver`. Since phase 2 `run` stays up unpaired and pairs from the dashboard. |
 | `no archive at …/archive.db: run archiver first` from `status` | The `--data` path is wrong, or nothing has been captured there yet. |
 | `already paired` from `pair` | The data folder already has a login. To pair again after an unlink, stop the service and run `pair`; if it still says this, ask for help before deleting `session.db`. |
 | `exclude entry "…" is not a chat address` | A line of `exclude:` is not written as `<digits>@s.whatsapp.net`, `<digits>@lid` or `<id>@g.us` (no `+`, no spaces). Correct it; the archiver does not start until then. |
@@ -636,7 +643,7 @@ My values: time zone: <YOUR TIME ZONE, for example Europe/London>. ntfy topic: <
 
 Do the setup yourself, in order: build with `make build-all`, copy the program that matches `uname -m` on the server, create the user and folders (setup guide section 4), write config.yaml (setup guide section 6) with the file owned by whatsapp-archiver and mode 0600, install the service (setup guide section 8). After each command, compare its output with the guide's "Expected" block, and stop and tell me if it differs.
 
-Stop and ask me before: choosing what goes in `exclude` (ask me for the list, do not guess), pairing (I will run `archiver pair` myself in my own terminal and scan the QR code), the first start of the service, and removing the setup sudo window.
+Stop and ask me before: choosing what goes in `exclude` (ask me for the list, do not guess), pairing (I will pair myself, in the browser through the SSH tunnel or with `archiver pair` in my own terminal, and scan the QR code), the first start of the service, and removing the setup sudo window.
 
 Rules you must keep:
 - Never run `archiver pair` or `archiver run` yourself; the service is started only with systemctl, and only after I say so.
@@ -652,7 +659,7 @@ What happens next:
 
 - Claude Code builds the program, copies it, and works through sections 4 to 6 of the setup guide above.
 - It stops and asks for your `exclude` list. Use `441234567890@s.whatsapp.net` style addresses for people. Groups cannot be listed before pairing; see the setup guide's note on a practice pairing.
-- It tells you when to pair. **You** open a terminal, connect to the server with your own login and run section 7 of the setup guide above, scanning the QR code with your phone. Leave it running as the guide says, then press Ctrl-C.
+- It tells you when to pair. **You** pair as in section 7 of the setup guide above: in the browser through the SSH tunnel, or in a terminal with your own login (leave that running as the guide says, then press Ctrl-C).
 - You say "start the service". Claude Code starts it, checks `status` and the log for the `history chunk imported` lines, and reports.
 - Finally you remove the setup window (`sudo rm /etc/sudoers.d/claude-setup`) and create the limited file from step C5. After that, run `ssh archiver-box 'sudo -n -l'` once more and check that the `ALL` line is gone.
 
@@ -697,7 +704,7 @@ archiver <command> [--data DIR]        DIR defaults to ./data
 | Command | Purpose |
 | --- | --- |
 | `pair [--record DIR]` | Show the QR code, link the device, then capture. `--record` also saves supported events for building fixtures. |
-| `run` | Capture as a service. Exits with code 3 (no restart) if not paired. |
+| `run` | Capture as a service, with the dashboard on `web.listen`. If not paired, it sends one alert, serves the dashboard and connects only after you pair at `/pair` (section 7). |
 | `status` | Read-only summary: connection state, client version, last event, history received, per-chat counts, failed and pending media, open gaps, data-folder size. |
 | `chats` | Read-only list of chats with their canonical address and whether each is excluded. Use it to find group addresses for `exclude`. |
 | `backup` | Take a snapshot of `archive.db` now. |
