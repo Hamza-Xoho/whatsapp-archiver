@@ -134,7 +134,7 @@ ORDER BY m.ts DESC,m.id DESC LIMIT ?3`
 
 // ChatPage is one page of the viewer: at most limit messages of the chat older than beforeTS (all when beforeTS is
 // 0), newest first, with their edits, deletion, reactions and media state.
-func (s *Store) ChatPage(ctx context.Context, canonicalJID string, beforeTS int64, limit int) ([]ViewMessage, error) {
+func (s *Store) ChatPage(ctx context.Context, canonicalJID string, beforeTS int64, beforeID string, limit int) ([]ViewMessage, error) {
 	var page []ViewMessage
 	err := s.scanRows(ctx, chatPageQuery, []any{canonicalJID, beforeTS, limit}, func(rows *sql.Rows) error {
 		var m ViewMessage

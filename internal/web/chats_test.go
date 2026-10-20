@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -228,7 +229,7 @@ func TestRuleChangeStopsCaptureEndToEnd(t *testing.T) {
 		t.Fatalf("status %d", code)
 	}
 	p.Handle(liveText("120363000000000009@g.us", "AFTER", "not kept"))
-	page, err := u.st.ChatPage(t.Context(), "120363000000000009@g.us", 0, 10)
+	page, err := u.st.ChatPage(t.Context(), "120363000000000009@g.us", 0, "", 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -323,5 +324,70 @@ func TestPlainFormPostRedirectsToList(t *testing.T) {
 	u.handler().ServeHTTP(w, r)
 	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/chats" || !u.rules.Excluded("1@g.us") {
 		t.Fatalf("status %d, Location %q, excluded %v", w.Code, w.Header().Get("Location"), u.rules.Excluded("1@g.us"))
+	}
+}
+
+// I3: a chat excluded since its first sighting has no messages; it is still listed and can be switched back on.
+func TestRuleOnlyChatListedAndSwitchedOn(t *testing.T) {
+	u := newChatsUI(t)
+	if _, err := u.st.InsertIDMapping(t.Context(), store.IDMapping{LID: "77@lid", PN: "9665@s.whatsapp.net", Source: "test", FirstSeen: time.Unix(1, 0)}); err != nil {
+		t.Fatal(err)
+	}
+	off := []store.ChatRule{{JID: "9665@s.whatsapp.net", Logging: false}, {JID: "77@lid", Logging: false}}
+	if err := u.st.SetChatRules(t.Context(), off); err != nil {
+		t.Fatal(err)
+	}
+	u.rules.Replace(off)
+	got := u.page(t, "/chats")
+	if strings.Count(got, "Not logging") != 1 || strings.Count(got, "77@lid") != 1 || strings.Contains(got, "9665@s.whatsapp.net") {
+		t.Fatalf("want the chat listed once, under its canonical JID, as Not logging: %s", got)
+	}
+	body, code := postForm(t, u.handler(), "/chats/rules", url.Values{"jid[]": {"77@lid"}, "logging": {"on"}})
+	if code != http.StatusOK || strings.Contains(visibleText(body), "Not logging") || !strings.Contains(visibleText(body), "Logging") {
+		t.Fatalf("status %d, updated row %s", code, visibleText(body))
+	}
+	if u.rules.Excluded("77@lid") || u.rules.Excluded("9665@s.whatsapp.net") {
+		t.Fatal("still excluded after switching on")
+	}
+}
+
+// I2: concurrent rule changes (two tabs, a double click) never leave the live rules behind the archive.
+func TestConcurrentRulePostsKeepLiveRulesEqualToStore(t *testing.T) {
+	u := newChatsUI(t)
+	h := u.handler()
+	const n = 20
+	for i := range n {
+		u.message(t, fmt.Sprintf("c%02d@g.us", i), "m")
+	}
+	for round := range 300 {
+		var wg sync.WaitGroup
+		for i := range n {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				logging := "off"
+				if (i+round)%2 == 0 {
+					logging = "on"
+				}
+				r := httptest.NewRequest(http.MethodPost, "/chats/rules", strings.NewReader(url.Values{"jid[]": {fmt.Sprintf("c%02d@g.us", i)}, "logging": {logging}}.Encode()))
+				r.Host = "localhost:8080"
+				r.Header.Set("Origin", "http://localhost:8080")
+				r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				h.ServeHTTP(httptest.NewRecorder(), r)
+			}()
+		}
+		wg.Wait()
+		stored, err := u.st.ChatRules(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(stored) != n {
+			t.Fatalf("round %d: %d stored rules, want %d", round, len(stored), n)
+		}
+		for _, rule := range stored {
+			if u.rules.Excluded(rule.JID) == rule.Logging {
+				t.Fatalf("round %d: %s stored logging=%v but the live rules say excluded=%v", round, rule.JID, rule.Logging, u.rules.Excluded(rule.JID))
+			}
+		}
 	}
 }

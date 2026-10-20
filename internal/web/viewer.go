@@ -53,7 +53,7 @@ func (s *Server) viewer(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "the page could not be rendered", http.StatusInternalServerError)
 		return
 	}
-	msgs, err := s.d.Store.ChatPage(ctx, jid, before, viewerPageSize+1)
+	msgs, err := s.d.Store.ChatPage(ctx, jid, before, "", viewerPageSize+1)
 	if err != nil {
 		http.Error(w, "the archive could not be read", http.StatusInternalServerError)
 		return

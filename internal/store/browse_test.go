@@ -137,14 +137,14 @@ func TestChatPagePagesNewestFirstBeforeTS(t *testing.T) {
 	for i := 1; i <= 10; i++ {
 		browseMsg(t, s, "g@g.us", fmt.Sprintf("m%02d", i), "1@lid", int64(100+i), fmt.Sprint("text", i))
 	}
-	page, err := s.ChatPage(ctx, "g@g.us", 0, 4)
+	page, err := s.ChatPage(ctx, "g@g.us", 0, "", 4)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if ids := viewIDs(page); !slices.Equal(ids, []string{"m10", "m09", "m08", "m07"}) {
 		t.Fatalf("first page %v", ids)
 	}
-	page, err = s.ChatPage(ctx, "g@g.us", page[3].TS, 4)
+	page, err = s.ChatPage(ctx, "g@g.us", page[3].TS, page[3].ID, 4)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +183,7 @@ func TestChatPageResolvesAliasesAndEvents(t *testing.T) {
 	if err := s.InsertMedia(ctx, store.Media{ChatJID: "9665@s.whatsapp.net", MessageID: "b", Type: "image", State: "done"}); err != nil {
 		t.Fatal(err)
 	}
-	page, err := s.ChatPage(ctx, "77@lid", 0, 10)
+	page, err := s.ChatPage(ctx, "77@lid", 0, "", 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,5 +227,84 @@ func TestTraceListsEventsMediaAndGap(t *testing.T) {
 	}
 	if _, err = s.Trace(ctx, "g@g.us", "none"); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("unknown message: err %v, want sql.ErrNoRows", err)
+	}
+}
+
+// I1: the cursor is (ts, id). Messages that share the second of a page's last message, and sort after it, are on the
+// next page instead of being skipped.
+func TestChatPageCursorKeepsMessagesSharingTheBoundarySecond(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	for _, id := range []string{"a", "b", "c", "d"} {
+		browseMsg(t, s, "g@g.us", id, "1@lid", 100, id)
+	}
+	browseMsg(t, s, "g@g.us", "z", "1@lid", 99, "z")
+	page, err := s.ChatPage(ctx, "g@g.us", 0, "", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ids := viewIDs(page); !slices.Equal(ids, []string{"d", "c"}) {
+		t.Fatalf("first page %v", ids)
+	}
+	page, err = s.ChatPage(ctx, "g@g.us", page[1].TS, page[1].ID, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ids := viewIDs(page); !slices.Equal(ids, []string{"b", "a", "z"}) {
+		t.Fatalf("second page %v, want b, a, z", ids)
+	}
+}
+
+// A message stored under both JID forms (before their mapping was known) shows once: the copy that arrived first.
+func TestChatPageDedupeKeepsFirstArrivedCopy(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	browseMsg(t, s, "9665@s.whatsapp.net", "dup", "1@lid", 3, "arrived first")
+	browseMsg(t, s, "77@lid", "dup", "1@lid", 5, "arrived second")
+	if _, err := s.InsertIDMapping(ctx, store.IDMapping{LID: "77@lid", PN: "9665@s.whatsapp.net", Source: "test", FirstSeen: time.Unix(1, 0)}); err != nil {
+		t.Fatal(err)
+	}
+	page, err := s.ChatPage(ctx, "77@lid", 0, "", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page) != 1 || page[0].Text != "arrived first" {
+		t.Fatalf("page %+v, want the first-arrived copy once", page)
+	}
+}
+
+// I3: a chat with no stored messages but a rule (here a logging-off rule on its phone form, and a sighting under its
+// LID form) is listed once under its canonical JID, with zero counts.
+func TestChatListIncludesChatsWithoutMessages(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	if _, err := s.InsertIDMapping(ctx, store.IDMapping{LID: "77@lid", PN: "9665@s.whatsapp.net", Source: "test", FirstSeen: time.Unix(1, 0)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetChatRules(ctx, []store.ChatRule{{JID: "9665@s.whatsapp.net", Logging: false}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.MarkChatSeen(ctx, "77@lid", 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpsertChat(ctx, store.Chat{JID: "120363009@g.us", Name: "Quiet group", Type: "group"}); err != nil {
+		t.Fatal(err)
+	}
+	browseMsg(t, s, "g@g.us", "m", "1@lid", 10, "x")
+	rows, err := s.ChatList(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("%d rows, want 3 (one per chat, aliases merged): %+v", len(rows), rows)
+	}
+	if r := rowFor(t, rows, "77@lid"); r.Logging || r.MessageCount != 0 || !r.New {
+		t.Errorf("rule-only chat %+v", r)
+	}
+	if r := rowFor(t, rows, "120363009@g.us"); r.DisplayName != "Quiet group" || !r.Logging {
+		t.Errorf("chats-only row %+v", r)
+	}
+	if rows[0].CanonicalJID != "g@g.us" {
+		t.Errorf("the chat with messages should sort first: %+v", rows[0])
 	}
 }

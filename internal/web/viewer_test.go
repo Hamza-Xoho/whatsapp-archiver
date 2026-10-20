@@ -75,7 +75,7 @@ func TestViewerShowsSenderNameAndChatName(t *testing.T) {
 	}
 }
 
-var olderRe = regexp.MustCompile(`href="/chats/g@g\.us\?before=(\d+)"`)
+var olderRe = regexp.MustCompile(`href="/chats/g@g\.us\?before=(\d+)&amp;before_id=([^"&]+)"`)
 
 // Review Focus: a large chat pages, newest 200 first, with an "Older" link carrying the 200th message's time.
 func TestViewerPagesLargeChat(t *testing.T) {
@@ -95,13 +95,13 @@ func TestViewerPagesLargeChat(t *testing.T) {
 		t.Fatal("first page is not the newest 200")
 	}
 	m := olderRe.FindStringSubmatch(string(body))
-	if m == nil || m[1] != fmt.Sprint(base+801) {
-		t.Fatalf("Older link %v, want before=%d", m, base+801)
+	if m == nil || m[1] != fmt.Sprint(base+801) || m[2] != "m0801" {
+		t.Fatalf("Older link %v, want before=%d&before_id=m0801", m, base+801)
 	}
 	if !strings.Contains(visibleText(string(body)), "Older") {
 		t.Fatal("no Older link text")
 	}
-	body, code, _ = get(t, u.handler(), "/chats/g@g.us?before="+m[1])
+	body, code, _ = get(t, u.handler(), "/chats/g@g.us?before="+m[1]+"&before_id="+m[2])
 	if code != http.StatusOK {
 		t.Fatalf("status %d", code)
 	}
@@ -181,5 +181,49 @@ func TestTraceShowsGapForUndecryptable(t *testing.T) {
 	}
 	if _, code, _ := get(t, u.handler(), "/chats/g@g.us/m/none"); code != http.StatusNotFound {
 		t.Fatalf("unknown message: status %d, want 404", code)
+	}
+}
+
+// I1: when the 200th and 201st newest messages share a second, the 201st is on the second page.
+func TestViewerOlderPageKeepsMessageSharingBoundarySecond(t *testing.T) {
+	u := newChatsUI(t)
+	const base = 1760000000
+	for i := 1; i <= 201; i++ {
+		ts := base + int64(i)
+		if i == 1 {
+			ts = base + 2 // m0001 (201st newest) shares the second of m0002 (200th newest)
+		}
+		u.msg(t, "g@g.us", fmt.Sprintf("m%04d", i), "1@lid", ts, fmt.Sprintf("body-%04d", i))
+	}
+	body, _, _ := get(t, u.handler(), "/chats/g@g.us")
+	m := olderRe.FindStringSubmatch(string(body))
+	if m == nil || strings.Contains(string(body), "body-0001") {
+		t.Fatalf("first page: Older link %v", m)
+	}
+	body, code, _ := get(t, u.handler(), "/chats/g@g.us?before="+m[1]+"&before_id="+m[2])
+	if code != http.StatusOK || !strings.Contains(string(body), "body-0001") || strings.Contains(string(body), "body-0002") {
+		t.Fatalf("second page (status %d) lacks message 201 or repeats 200: %s", code, visibleText(string(body)))
+	}
+}
+
+// Message ids come from other phones: a "?" or "/" in one is escaped in links, and the link still opens the trace.
+func TestMessageIDIsPathEscapedInLinks(t *testing.T) {
+	u := newChatsUI(t)
+	u.msg(t, "g@g.us", "a?b/c", "1@lid", 1760000000, "odd id")
+	m := store.Message{ChatJID: "g@g.us", ID: "r", SenderJID: "1@lid", Timestamp: 1760000001, ReceivedAt: 1760000001, Source: "live", Text: "reply", QuotedID: "a?b/c", RawProto: []byte("r")}
+	if _, err := u.st.InsertMessage(t.Context(), m); err != nil {
+		t.Fatal(err)
+	}
+	body, _, _ := get(t, u.handler(), "/chats/g@g.us")
+	if !strings.Contains(string(body), `href="/chats/g@g.us/m/a%3Fb%2Fc"`) {
+		t.Fatalf("viewer link not path-escaped: %s", body)
+	}
+	trace, code, _ := get(t, u.handler(), "/chats/g@g.us/m/r")
+	if code != http.StatusOK || !strings.Contains(string(trace), `href="/chats/g@g.us/m/a%3Fb%2Fc"`) {
+		t.Fatalf("trace reply link not path-escaped (status %d): %s", code, trace)
+	}
+	got, code, _ := get(t, u.handler(), "/chats/g@g.us/m/a%3Fb%2Fc")
+	if code != http.StatusOK || !strings.Contains(string(got), "odd id") {
+		t.Fatalf("escaped link does not open the trace: status %d", code)
 	}
 }
