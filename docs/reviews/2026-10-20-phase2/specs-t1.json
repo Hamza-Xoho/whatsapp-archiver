@@ -1,0 +1,9 @@
+[
+ {"name":"t1-skip-version","rf":1,"file":"internal/store/migrate.go","old":"\t\tif applied[m.version] {","new":"\t\tif applied[m.version] || m.version == 2 {","pkgs":"./internal/store/"},
+ {"name":"t1-out-of-order","rf":1,"file":"internal/store/migrate.go","old":"list[i].version < list[j].version","new":"list[i].version > list[j].version","pkgs":"./internal/store/"},
+ {"name":"t1-lexical-order","rf":1,"file":"internal/store/migrate.go","old":"list[i].version < list[j].version","new":"list[i].file < list[j].file","pkgs":"./internal/store/"},
+ {"name":"t1-reapply","rf":1,"file":"internal/store/migrate.go","old":"\t\tif applied[m.version] {","new":"\t\tif false {","pkgs":"./internal/store/"},
+ {"name":"t1-no-rollback","rf":1,"file":"internal/store/migrate.go","old":"\tif _, err = tx.Exec(body); err != nil {\n\t\t_ = tx.Rollback()\n\t\treturn err\n\t}","new":"\tif _, err = tx.Exec(body); err != nil {\n\t\t_ = tx.Commit()\n\t\treturn err\n\t}","pkgs":"./internal/store/"},
+ {"name":"t1-no-version-row","rf":1,"file":"internal/store/migrate.go","old":"m.version, time.Now().Unix())","new":"m.version+100, time.Now().Unix())","pkgs":"./internal/store/"},
+ {"name":"t1-chat-rules-default","rf":1,"file":"internal/store/migrations/0002_settings.sql","old":"logging INTEGER NOT NULL DEFAULT 1","new":"logging INTEGER NOT NULL DEFAULT 0","pkgs":"./internal/store/"}
+]
