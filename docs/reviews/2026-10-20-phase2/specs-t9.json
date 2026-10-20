@@ -67,7 +67,7 @@
   "name": "t9-growth-no-db",
   "file": "internal/store/usage.go",
   "old": "(recentMedia + dbGrowth) / 4",
-  "new": "recentMedia / 4",
+  "new": "(recentMedia + 0*dbGrowth) / 4",
   "pkgs": "./internal/store/",
   "rf": 1
  },
@@ -210,8 +210,8 @@
  {
   "name": "t9-warn-live-level",
   "file": "internal/web/storage.go",
-  "old": "a.DiskFreeMinGB\n\t\t}\n\t}\n\treturn s.config()",
-  "new": "0\n\t\t}\n\t}\n\treturn s.config()",
+  "old": "return a.DiskFreeMinGB",
+  "new": "return s.config().Alerts.DiskFreeMinGB",
   "pkgs": "./internal/web/",
   "rf": 1
  },
@@ -291,7 +291,7 @@
   "name": "t9-live-schedule",
   "file": "internal/web/backups.go",
   "old": "b.Time, b.Keep = sc.Time, sc.Keep",
-  "new": "b.Time, b.Keep = b.Time, b.Keep",
+  "new": "_ = sc",
   "pkgs": "./internal/web/",
   "rf": 1
  },

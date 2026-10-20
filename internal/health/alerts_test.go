@@ -231,7 +231,7 @@ func TestBackupResultRecordedInSnapshot(t *testing.T) {
 	}
 	r.advance(time.Hour)
 	failAt := r.c.now
-	r.m.BackupResult(backup.Report{}, errors.New("destination not writable"))
+	r.m.BackupResult(backup.Report{Snapshot: "/partial/archive.db"}, errors.New("destination not writable"))
 	got = r.m.Status()
 	if !got.LastBackup.Equal(failAt) || got.LastBackupErr != "destination not writable" || got.LastBackupPath != "" {
 		t.Fatalf("after failure: %+v", got)

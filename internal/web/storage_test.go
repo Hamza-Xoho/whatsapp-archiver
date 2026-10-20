@@ -170,6 +170,11 @@ func TestStorageWarnsWhenAlreadyUnderTheAlertLevel(t *testing.T) {
 	contains(t, r.page(t), "Warning: free space is already at or under the 5 GB alert level.")
 }
 
+func TestStorageWarnsWhenExactlyAtTheAlertLevel(t *testing.T) {
+	r := newStorageRig(t, 5*gib)
+	contains(t, r.page(t), "Warning: free space is already at or under the 5 GB alert level.")
+}
+
 func TestStorageWarningUsesTheLiveAlertLevel(t *testing.T) {
 	r := newStorageRig(t, 10*gib)
 	if err := r.st.SetAlertThresholds(t.Context(), config.AlertConfig{NoEventsAfter: time.Hour, DisconnectedAfter: time.Hour, PhoneQuietAfter: time.Hour, DiskFreeMinGB: 20}); err != nil {
