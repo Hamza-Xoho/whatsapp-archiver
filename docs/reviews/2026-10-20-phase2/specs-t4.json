@@ -186,8 +186,8 @@
  {
   "name": "t4-static-lists-dir",
   "file": "internal/web/server.go",
-  "old": "if err != nil || info.IsDir() {",
-  "new": "if err != nil || info.IsDir() && false {",
+  "old": "if _, err := fs.Stat(root, r.URL.Path); err != nil {",
+  "new": "if _, err := fs.Stat(root, r.URL.Path); err != nil && false {",
   "pkgs": "./internal/web/",
   "rf": 1
  },
