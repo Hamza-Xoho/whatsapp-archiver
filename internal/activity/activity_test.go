@@ -6,7 +6,9 @@ import (
 	"time"
 )
 
-func ev(i int) Event { return Event{At: time.Unix(int64(i), 0), Kind: "message", Chat: "g@g.us", Detail: fmt.Sprint(i)} }
+func ev(i int) Event {
+	return Event{At: time.Unix(int64(i), 0), Kind: "message", Chat: "g@g.us", Detail: fmt.Sprint(i)}
+}
 
 // NFR-2: capture never waits on a subscriber.
 func TestSlowSubscriberNeverBlocksPublish(t *testing.T) {
