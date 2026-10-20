@@ -64,9 +64,14 @@ type countingSocket struct {
 	n  int
 }
 
-func (s *countingSocket) ConnectContext(context.Context) error { s.mu.Lock(); s.n++; s.mu.Unlock(); return nil }
-func (s *countingSocket) Disconnect()                          {}
-func (s *countingSocket) connects() int                        { s.mu.Lock(); defer s.mu.Unlock(); return s.n }
+func (s *countingSocket) ConnectContext(context.Context) error {
+	s.mu.Lock()
+	s.n++
+	s.mu.Unlock()
+	return nil
+}
+func (s *countingSocket) Disconnect()   {}
+func (s *countingSocket) connects() int { s.mu.Lock(); defer s.mu.Unlock(); return s.n }
 
 func freeAddr(t *testing.T) string {
 	t.Helper()
