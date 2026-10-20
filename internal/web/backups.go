@@ -3,9 +3,12 @@ package web
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"regexp"
 	"time"
 
+	"whatsapp-archiver/internal/logsafe"
 	"whatsapp-archiver/internal/view"
 )
 
@@ -16,6 +19,13 @@ const testAlertTitle = "Test alert from WhatsApp Archiver"
 
 // testAlertBound caps one test send (the notifier retries a failing server for a while).
 const testAlertBound = 30 * time.Second
+
+// testAlertEvery is the least time between two test alerts.
+const testAlertEvery = 10 * time.Second
+
+// ntfyStatus finds the HTTP status in the notifier's "ntfy status 403 Forbidden" error. It is the only part of a send
+// error the page shows: any other error text can hold the ntfy URL, whose topic is the secret on ntfy.sh.
+var ntfyStatus = regexp.MustCompile(`ntfy status (\d{3}[ A-Za-z]*)`)
 
 type alertResult struct {
 	Sent bool
@@ -41,15 +51,32 @@ func (s *Server) backups(w http.ResponseWriter, r *http.Request) {
 func (s *Server) testAlert(w http.ResponseWriter, r *http.Request) {
 	res := &alertResult{Text: "Phone alerts (ntfy) are not configured, so nothing was sent. Set alerts.ntfy in config.yaml."}
 	if s.d.Notifier != nil {
-		ctx, cancel := context.WithTimeout(r.Context(), testAlertBound)
-		defer cancel()
-		if err := s.d.Notifier.Notify(ctx, testAlertTitle, "This is a test. Nothing is wrong."); err != nil {
-			res.Text = "The test alert failed: " + err.Error()
-		} else {
-			res.Sent, res.Text = true, "Sent. It should appear on your phone in a moment."
-		}
+		res = s.sendTestAlert(r.Context())
 	}
 	s.renderBackups(w, r, res)
+}
+
+// sendTestAlert sends one test notification, at most one every testAlertEvery (an attempt counts, sent or not).
+func (s *Server) sendTestAlert(parent context.Context) *alertResult {
+	s.testAlertMu.Lock()
+	now := s.d.Now()
+	if !s.testAlertAt.IsZero() && now.Sub(s.testAlertAt) < testAlertEvery {
+		s.testAlertMu.Unlock()
+		return &alertResult{Text: "Wait a few seconds before sending another test alert."}
+	}
+	s.testAlertAt = now
+	s.testAlertMu.Unlock()
+	ctx, cancel := context.WithTimeout(parent, testAlertBound)
+	defer cancel()
+	err := s.d.Notifier.Notify(ctx, testAlertTitle, "This is a test. Nothing is wrong.")
+	if err == nil {
+		return &alertResult{Sent: true, Text: "Sent. It should appear on your phone in a moment."}
+	}
+	slog.Warn("test alert not sent", "err", logsafe.RedactURLs(err.Error()))
+	if m := ntfyStatus.FindStringSubmatch(err.Error()); m != nil {
+		return &alertResult{Text: "The test alert failed: ntfy answered " + m[1] + "."}
+	}
+	return &alertResult{Text: "Could not send the test alert; see the journal for details."}
 }
 
 func (s *Server) renderBackups(w http.ResponseWriter, r *http.Request, alert *alertResult) {

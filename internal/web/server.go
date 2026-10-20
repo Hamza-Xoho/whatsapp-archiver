@@ -80,6 +80,9 @@ type Server struct {
 	rulesMu sync.Mutex
 	// storageCache keeps the slow storage figures for five minutes.
 	storageCache storageCache
+	// testAlertAt throttles the test alert button.
+	testAlertMu sync.Mutex
+	testAlertAt time.Time
 }
 
 // New parses the embedded templates once and builds the server.

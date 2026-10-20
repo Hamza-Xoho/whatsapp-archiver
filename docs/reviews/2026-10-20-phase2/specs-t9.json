@@ -302,5 +302,53 @@
   "new": "mux.HandleFunc(\"/backups/test-alert\"",
   "pkgs": "./internal/web/",
   "rf": 1
+ },
+ {
+  "name": "t9f-restart-keeps-backup",
+  "file": "internal/health/health.go",
+  "old": "m.snapshot.LastBackup, m.snapshot.LastBackupErr, m.snapshot.LastBackupPath = prev.LastBackup, prev.LastBackupErr, prev.LastBackupPath",
+  "new": "_, _, _ = prev.LastBackup, prev.LastBackupErr, prev.LastBackupPath",
+  "pkgs": "./internal/health/",
+  "rf": 1
+ },
+ {
+  "name": "t9f-throttle-boundary",
+  "file": "internal/web/backups.go",
+  "old": "now.Sub(s.testAlertAt) < testAlertEvery",
+  "new": "now.Sub(s.testAlertAt) <= testAlertEvery",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t9f-throttle-length",
+  "file": "internal/web/backups.go",
+  "old": "testAlertEvery = 10 * time.Second",
+  "new": "testAlertEvery = 1 * time.Second",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t9f-throttle-never-recorded",
+  "file": "internal/web/backups.go",
+  "old": "s.testAlertAt = now\n",
+  "new": "s.testAlertAt = time.Time{}\n",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t9f-raw-error-shown",
+  "file": "internal/web/backups.go",
+  "old": "\"Could not send the test alert; see the journal for details.\"",
+  "new": "\"Could not send the test alert: \" + err.Error()",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t9f-status-uses-raw-error",
+  "file": "internal/web/backups.go",
+  "old": "ntfy answered \" + m[1] + \".\"",
+  "new": "ntfy answered \" + err.Error() + \".\"",
+  "pkgs": "./internal/web/",
+  "rf": 1
  }
 ]

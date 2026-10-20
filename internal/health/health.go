@@ -79,6 +79,8 @@ func (m *Monitor) learnActiveAlerts() {
 	if json.Unmarshal(data, &prev) != nil {
 		return
 	}
+	// The last backup outlives the process, so the first write after a start does not blank it.
+	m.snapshot.LastBackup, m.snapshot.LastBackupErr, m.snapshot.LastBackupPath = prev.LastBackup, prev.LastBackupErr, prev.LastBackupPath
 	if _, ok := stateTitles[prev.State]; ok {
 		m.gate.fired[prev.State] = prev.UpdatedAt
 	}
