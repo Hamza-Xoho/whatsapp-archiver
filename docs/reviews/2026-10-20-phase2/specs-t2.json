@@ -26,8 +26,8 @@
  {
   "name": "t2-per-chat-rule-ignored",
   "file": "internal/media/rules.go",
-  "old": "if r := q.perChat(chatJID); r != nil {",
-  "new": "if r := q.perChat(chatJID); r != nil && false {",
+  "old": "\t\tif r != nil {\n\t\t\treturn *r, nil\n\t\t}",
+  "new": "\t\tif r != nil && false {\n\t\t\treturn *r, nil\n\t\t}",
   "pkgs": "./internal/media/",
   "rf": 1
  },
@@ -84,6 +84,70 @@
   "file": "cmd/archiver/main.go",
   "old": "st.ImportConfigOnce(ctx, cfg)",
   "new": "false, error(nil)",
+  "pkgs": "./cmd/archiver/",
+  "rf": 1
+ },
+ {
+  "name": "t2-per-chat-passed-nil",
+  "file": "cmd/archiver/main.go",
+  "old": "live.media, live.chatMedia,",
+  "new": "live.media, nil,",
+  "pkgs": "./cmd/archiver/",
+  "rf": 1
+ },
+ {
+  "name": "t2-alias-loop-deleted",
+  "file": "cmd/archiver/live.go",
+  "old": "\tfor _, alias := range aliases {\n\t\tif r := l.rules.Media(alias); r != nil {\n\t\t\treturn r, nil\n\t\t}\n\t}\n",
+  "new": "\t_ = aliases\n",
+  "pkgs": "./cmd/archiver/",
+  "rf": 1
+ },
+ {
+  "name": "t2-alias-error-guessed",
+  "file": "cmd/archiver/live.go",
+  "old": "\tif err != nil {\n\t\treturn nil, err\n\t}",
+  "new": "\tif err != nil {\n\t\treturn nil, nil\n\t}",
+  "pkgs": "./cmd/archiver/",
+  "rf": 1
+ },
+ {
+  "name": "t2-settings-read-error-guessed",
+  "file": "cmd/archiver/live.go",
+  "old": "\t\treturn config.MediaRules{}, fmt.Errorf(\"%w: %w\", health.ErrRead, err)",
+  "new": "\t\treturn l.cfg.Media, nil",
+  "pkgs": "./cmd/archiver/",
+  "rf": 1
+ },
+ {
+  "name": "t2-enqueue-error-swallowed",
+  "file": "internal/media/rules.go",
+  "old": "\t\tif err != nil {\n\t\t\treturn config.MediaRules{}, err\n\t\t}",
+  "new": "\t\tif err != nil {\n\t\t\treturn q.global()\n\t\t}",
+  "pkgs": "./internal/media/",
+  "rf": 1
+ },
+ {
+  "name": "t2-drift-warning-silent",
+  "file": "cmd/archiver/live.go",
+  "old": "\t\tlog.Warn(\"config.yaml exclude is ignored",
+  "new": "\t\tlog.Debug(\"config.yaml exclude is ignored",
+  "pkgs": "./cmd/archiver/",
+  "rf": 1
+ },
+ {
+  "name": "t2-chats-ignores-archive-rules",
+  "file": "cmd/archiver/status.go",
+  "old": "\tif imported {",
+  "new": "\tif imported && false {",
+  "pkgs": "./cmd/archiver/",
+  "rf": 1
+ },
+ {
+  "name": "t2-manual-backup-file-keep",
+  "file": "cmd/archiver/live.go",
+  "old": "\t\tcfg.Backup.Keep = sched.Keep",
+  "new": "\t\t_ = sched",
   "pkgs": "./cmd/archiver/",
   "rf": 1
  }
