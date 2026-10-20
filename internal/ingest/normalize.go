@@ -33,8 +33,24 @@ func FromMessage(evt *events.Message, source string, received time.Time) Result 
 	m := store.Message{ChatJID: chat, ID: string(info.ID), SenderJID: sender, Timestamp: info.Timestamp.Unix(), ReceivedAt: received.Unix(), Source: source, RawProto: raw}
 	r := Result{Kind: KindMessage, Chat: store.Chat{JID: chat}, Sender: store.Participant{JID: sender, DisplayName: info.PushName}, Message: &m, FromMe: info.IsFromMe, Received: received}
 	normalizeContent(evt.Message, &r)
+	if keyOnly(rawMsg) {
+		r.Kind = KindKeyOnly
+	}
 	r.Mappings = messageMappings(info, received)
 	return r
+}
+
+// keyOnly reports whether msg holds a sender key distribution and nothing else but context info. A group message
+// from a sender this device has no key for arrives as such a part and then the content part, with the same ID; storing
+// the key-only part would take the (chat, id) slot and the content would be dropped as a duplicate.
+func keyOnly(msg *waE2E.Message) bool {
+	if msg.GetSenderKeyDistributionMessage() == nil {
+		return false
+	}
+	rest := proto.Clone(msg).(*waE2E.Message)
+	rest.SenderKeyDistributionMessage = nil
+	rest.MessageContextInfo = nil
+	return proto.Size(rest) == 0
 }
 
 // withoutMessageSecrets returns a copy of msg without the message secrets in its context, the one on the message and

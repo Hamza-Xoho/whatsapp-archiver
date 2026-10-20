@@ -27,7 +27,7 @@ func (f *Filter) Decide(chatJID string, kind Kind) (keep, excluded bool, err err
 		return false, false, nil
 	}
 	switch kind {
-	case KindPresence, KindTyping, KindReceipt, KindCall:
+	case KindPresence, KindTyping, KindReceipt, KindCall, KindKeyOnly:
 		return false, false, nil
 	}
 	excluded, err = f.Excluded(chatJID)

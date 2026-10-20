@@ -24,7 +24,8 @@ const (
 	KindTyping          Kind = "typing"
 	KindReceipt         Kind = "receipt"
 	KindCall            Kind = "call"
-	KindStub            Kind = "stub" // a history message with no body (revoke, group change, ciphertext …), Value = its stub type name
+	KindKeyOnly         Kind = "key_only" // a message part holding only a sender key and context info; never stored
+	KindStub            Kind = "stub"     // a history message with no body (revoke, group change, ciphertext …), Value = its stub type name
 )
 
 type Result struct {
