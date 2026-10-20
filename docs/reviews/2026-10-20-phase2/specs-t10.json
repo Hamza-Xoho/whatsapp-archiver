@@ -1,0 +1,274 @@
+[
+ {
+  "name": "t10-connects-while-unpaired",
+  "file": "internal/wa/pairer.go",
+  "old": "\t\tselect {\n\t\tcase <-ctx.Done():\n\t\t\treturn nil\n\t\tcase <-p.start:\n\t\t}",
+  "new": "\t\tselect {\n\t\tcase <-ctx.Done():\n\t\t\treturn nil\n\t\tdefault:\n\t\t}\n\t\tp.mu.Lock()\n\t\tif p.cur == nil {\n\t\t\tp.cur = make(chan PairUpdate, pairUpdates)\n\t\t}\n\t\tp.mu.Unlock()",
+  "pkgs": "./internal/wa/",
+  "rf": 1
+ },
+ {
+  "name": "t10-connects-while-unpaired-cmd",
+  "file": "cmd/archiver/main.go",
+  "old": "connect := func(ctx context.Context) error { return pairer.Run(ctx, handler) }",
+  "new": "connect := func(ctx context.Context) error { return client.Run(ctx, handler, true) }",
+  "pkgs": "./cmd/archiver/",
+  "rf": 1
+ },
+ {
+  "name": "t10-qr-to-stdout",
+  "file": "internal/wa/pairer.go",
+  "old": "\t\t\t\tp.send(out, PairUpdate{QR: item.Code})",
+  "new": "\t\t\t\tfmt.Println(item.Code)",
+  "pkgs": "./internal/wa/",
+  "rf": 1
+ },
+ {
+  "name": "t10-second-pairing-started",
+  "file": "internal/wa/pairer.go",
+  "old": "\tcase p.cur != nil:\n\t\treturn p.cur, nil\n",
+  "new": "",
+  "pkgs": "./internal/wa/",
+  "rf": 1
+ },
+ {
+  "name": "t10-adapter-second-pairing",
+  "file": "cmd/archiver/pair.go",
+  "old": "\tif src == b.src {\n\t\treturn b.out, nil\n\t}\n",
+  "new": "",
+  "pkgs": "./cmd/archiver/",
+  "rf": 1
+ },
+ {
+  "name": "t10-web-second-reader",
+  "file": "internal/web/pair.go",
+  "old": "\tif ch == p.ch {\n\t\treturn\n\t}\n",
+  "new": "",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t10-done-not-sent",
+  "file": "internal/wa/pairer.go",
+  "old": "p.end(out, &PairUpdate{Done: true})",
+  "new": "p.end(out, nil)",
+  "pkgs": "./internal/wa/",
+  "rf": 1
+ },
+ {
+  "name": "t10-not-ready-on-success",
+  "file": "internal/wa/pairer.go",
+  "old": "\t\t\t\tp.markReady()\n\t\t\t\tp.end(out, &PairUpdate{Done: true})",
+  "new": "\t\t\t\tp.end(out, &PairUpdate{Done: true})",
+  "pkgs": "./internal/wa/",
+  "rf": 1
+ },
+ {
+  "name": "t10-err-text",
+  "file": "internal/wa/pairer.go",
+  "old": "p.end(out, &PairUpdate{Err: line})",
+  "new": "p.end(out, &PairUpdate{Err: \"failed\"})",
+  "pkgs": "./internal/wa/",
+  "rf": 1
+ },
+ {
+  "name": "t10-no-cancel-on-error",
+  "file": "internal/wa/pairer.go",
+  "old": "\t\t\t\t\tp.end(out, &PairUpdate{Err: line})\n\t\t\t\t\tcancel()",
+  "new": "\t\t\t\t\tp.end(out, &PairUpdate{Err: line})",
+  "pkgs": "./internal/wa/",
+  "rf": 1
+ },
+ {
+  "name": "t10-paired-not-ready",
+  "file": "internal/wa/pairer.go",
+  "old": "\tif p.c.Paired() {\n\t\tp.markReady()",
+  "new": "\tif p.c.Paired() {",
+  "pkgs": "./internal/wa/",
+  "rf": 1
+ },
+ {
+  "name": "t10-start-when-paired",
+  "file": "internal/wa/pairer.go",
+  "old": "\tcase p.c.Paired():\n\t\treturn nil, errors.New(\"already paired\")\n",
+  "new": "",
+  "pkgs": "./internal/wa/",
+  "rf": 1
+ },
+ {
+  "name": "t10-start-after-stop",
+  "file": "internal/wa/pairer.go",
+  "old": "\tcase p.stopped:\n\t\treturn nil, errPairingStopped\n",
+  "new": "",
+  "pkgs": "./internal/wa/",
+  "rf": 1
+ },
+ {
+  "name": "t10-stop-leaves-open",
+  "file": "internal/wa/pairer.go",
+  "old": "\tif out != nil {\n\t\tp.end(out, nil)\n\t}\n}",
+  "new": "}",
+  "pkgs": "./internal/wa/",
+  "rf": 1
+ },
+ {
+  "name": "t10-run-returns-on-success",
+  "file": "internal/wa/pairer.go",
+  "old": "\t\tif p.isReady() {\n\t\t\treturn err // capture ended by itself after pairing\n\t\t}",
+  "new": "\t\tif p.isReady() || true {\n\t\t\treturn err\n\t\t}",
+  "pkgs": "./internal/wa/",
+  "rf": 1
+ },
+ {
+  "name": "t10-qr-before-connect-dropped",
+  "file": "internal/wa/wa.go",
+  "old": "\t\tgo show(ctx, qr)\n",
+  "new": "",
+  "pkgs": "./internal/wa/",
+  "rf": 1
+ },
+ {
+  "name": "t10-qr-png-level",
+  "file": "internal/web/pair.go",
+  "old": "w.Header().Set(\"Content-Type\", \"image/png\")",
+  "new": "w.Header().Set(\"Content-Type\", \"image/gif\")",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t10-qr-404",
+  "file": "internal/web/pair.go",
+  "old": "\tif text == \"\" {\n\t\thttp.NotFound(w, r)\n\t\treturn\n\t}\n\tcode, err",
+  "new": "\tcode, err",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t10-start-when-paired-web",
+  "file": "internal/web/pair.go",
+  "old": "\tif !s.d.Pairer.Paired() {\n\t\t// Pairing",
+  "new": "\tif true {\n\t\t// Pairing",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t10-start-not-begun",
+  "file": "internal/web/pair.go",
+  "old": "\t\t\ts.beginPairing(ch)\n",
+  "new": "\t\t\t_ = ch\n",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t10-err-keeps-qr",
+  "file": "internal/web/pair.go",
+  "old": "\t\tp.err, p.qr = u.Err, \"\"",
+  "new": "\t\tp.err = u.Err",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t10-done-keeps-qr",
+  "file": "internal/web/pair.go",
+  "old": "\t\tp.done, p.qr = true, \"\"",
+  "new": "\t\tp.done = true",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t10-running-ignores-err",
+  "file": "internal/web/pair.go",
+  "old": "Running: p.ch != nil && !p.done && p.err == \"\"",
+  "new": "Running: p.ch != nil && !p.done",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t10-paired-shows-button",
+  "file": "internal/web/templates/pair.html",
+  "old": "{{else if .Paired}}",
+  "new": "{{else if false}}",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t10-no-notify",
+  "file": "internal/web/pair.go",
+  "old": "\tcase u.QR != \"\":\n\t\tp.qr = u.QR\n\t\tp.seq++\n\tdefault:\n\t\treturn\n\t}\n\tp.notifyLocked()",
+  "new": "\tcase u.QR != \"\":\n\t\tp.qr = u.QR\n\t\tp.seq++\n\t\treturn\n\tdefault:\n\t\treturn\n\t}\n\tp.notifyLocked()",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t10-sse-no-pair",
+  "file": "internal/web/sse.go",
+  "old": "\t\t\terr = s.writePair(r.Context(), w)\n",
+  "new": "",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t10-route-start-get",
+  "file": "internal/web/server.go",
+  "old": "\"POST /pair/start\"",
+  "new": "\"GET /pair/start\"",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t10-alert-body",
+  "file": "cmd/archiver/main.go",
+  "old": "const notPairedBody = \"Open the dashboard through the SSH tunnel and pair\"",
+  "new": "const notPairedBody = notPairedHint",
+  "pkgs": "./cmd/archiver/",
+  "rf": 1
+ },
+ {
+  "name": "t10-still-exits",
+  "file": "cmd/archiver/main.go",
+  "old": "\t\t\talertNotPaired(cfg, errOut)\n\t\t}",
+  "new": "\t\t\talertNotPaired(cfg, errOut)\n\t\t\treturn exitNotPaired\n\t\t}",
+  "pkgs": "./cmd/archiver/",
+  "rf": 1
+ },
+ {
+  "name": "t10-no-alert",
+  "file": "cmd/archiver/main.go",
+  "old": "\t\t\talertNotPaired(cfg, errOut)\n",
+  "new": "",
+  "pkgs": "./cmd/archiver/",
+  "rf": 1
+ },
+ {
+  "name": "t10-queue-ungated",
+  "file": "cmd/archiver/main.go",
+  "old": "\t\tafterPaired(ready, queue.Run),",
+  "new": "\t\tqueue.Run,",
+  "pkgs": "./cmd/archiver/",
+  "rf": 1
+ },
+ {
+  "name": "t10-gate-ignored",
+  "file": "cmd/archiver/lifecycle.go",
+  "old": "\t\tcase <-ready:\n\t\t\tloop(ctx)",
+  "new": "\t\tdefault:\n\t\t\tloop(ctx)",
+  "pkgs": "./cmd/archiver/",
+  "rf": 1
+ },
+ {
+  "name": "t10-adapter-drops",
+  "file": "cmd/archiver/pair.go",
+  "old": "\t\tout <- web.PairUpdate(u)",
+  "new": "\t\tif u.QR != \"\" {\n\t\t\tout <- web.PairUpdate(u)\n\t\t}",
+  "pkgs": "./cmd/archiver/",
+  "rf": 1
+ },
+ {
+  "name": "t10-no-web-pairer",
+  "file": "cmd/archiver/main.go",
+  "old": "Notifier: notifier, Pairer: browser})",
+  "new": "Notifier: notifier})",
+  "pkgs": "./cmd/archiver/",
+  "rf": 1
+ }
+]
