@@ -117,11 +117,11 @@ func (s *Server) render(w http.ResponseWriter, name string, data any) {
 	_, _ = w.Write(buf.Bytes())
 }
 
-// fileOnly answers 404 for a directory, so /static/ never lists its files.
+// fileOnly answers 404 unless the path names an embedded file, so /static/ never lists the folder: its stripped path
+// is empty, which fs.Stat rejects, and the folder has no subfolders.
 func fileOnly(next http.Handler, root fs.FS) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		info, err := fs.Stat(root, r.URL.Path)
-		if err != nil || info.IsDir() {
+		if _, err := fs.Stat(root, r.URL.Path); err != nil {
 			http.NotFound(w, r)
 			return
 		}
