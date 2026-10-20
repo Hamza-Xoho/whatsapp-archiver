@@ -278,3 +278,21 @@ func TestEachNewQRCodeIsStreamed(t *testing.T) {
 		t.Fatalf("pair event after the second code: %q", e.data)
 	}
 }
+
+// A second POST during the same pairing (the Pairer returns the same channel) keeps the shown code and starts no
+// second reader.
+func TestSecondPairStartKeepsTheRunningPairing(t *testing.T) {
+	f := newFakePairer(t, false)
+	h := newPairUI(t, f).Handler()
+	samePost(t, h, "/pair/start", true)
+	f.send(PairUpdate{QR: "2@one"})
+	waitPage(t, h, `src="/pair/qr.png?n=1"`)
+	samePost(t, h, "/pair/start", true)
+	if _, code, _ := get(t, h, "/pair/qr.png"); code != http.StatusOK {
+		t.Fatalf("second start reset the pairing: QR status %d", code)
+	}
+	body, _, _ := get(t, h, "/pair")
+	if !strings.Contains(string(body), `src="/pair/qr.png?n=1"`) {
+		t.Fatalf("second start changed the page:\n%s", body)
+	}
+}
