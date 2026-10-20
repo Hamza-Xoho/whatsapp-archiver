@@ -148,3 +148,49 @@ func TestServeOwnsItsGoroutinesAndGivesThePipelineItsContext(t *testing.T) {
 		}
 	}
 }
+
+// The control UI runs inside `archiver run` as one of runService's loops, on web.listen: it stops with the other
+// loops when the service shuts down, before the store is closed.
+func TestServeRunsTheWebServerAsALoop(t *testing.T) {
+	file, err := parser.ParseFile(token.NewFileSet(), "main.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var newCalled, runInLoops bool
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "serve" {
+			continue
+		}
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			switch x := n.(type) {
+			case *ast.CallExpr:
+				if sel, ok := x.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "New" {
+					if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "web" {
+						newCalled = true
+					}
+				}
+			case *ast.AssignStmt:
+				if id, ok := x.Lhs[0].(*ast.Ident); !ok || id.Name != "loops" {
+					return true
+				}
+				ast.Inspect(x.Rhs[0], func(m ast.Node) bool {
+					call, ok := m.(*ast.CallExpr)
+					if !ok {
+						return true
+					}
+					if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "Run" && len(call.Args) == 2 {
+						if arg, ok := call.Args[1].(*ast.SelectorExpr); ok && arg.Sel.Name == "Listen" {
+							runInLoops = true
+						}
+					}
+					return true
+				})
+			}
+			return true
+		})
+	}
+	if !newCalled || !runInLoops {
+		t.Fatalf("serve must build the server with web.New (%v) and run its Run(ctx, cfg.Web.Listen) in loops (%v)", newCalled, runInLoops)
+	}
+}
