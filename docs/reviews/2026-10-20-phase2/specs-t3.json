@@ -10,8 +10,8 @@
  {
   "name": "t3-drop-keeps-subscriber",
   "file": "internal/activity/activity.go",
-  "old": "\t\t\tdelete(b.subs, s)\n\t\t\tclose(s.ch)\n\t\t}\n\t}\n}",
-  "new": "\t\t\tclose(s.ch)\n\t\t}\n\t}\n}",
+  "old": "\t\tdefault:\n\t\t\tdelete(b.subs, s)\n\t\t\tclose(s.ch)\n",
+  "new": "\t\tdefault:\n\t\t\tclose(s.ch)\n",
   "pkgs": "./internal/activity/",
   "rf": 1
  },
