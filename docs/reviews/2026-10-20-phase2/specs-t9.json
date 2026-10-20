@@ -211,7 +211,7 @@
   "name": "t9-warn-live-level",
   "file": "internal/web/storage.go",
   "old": "return a.DiskFreeMinGB",
-  "new": "return s.config().Alerts.DiskFreeMinGB",
+  "new": "_ = a\n\t\t\treturn s.config().Alerts.DiskFreeMinGB",
   "pkgs": "./internal/web/",
   "rf": 1
  },
