@@ -11,6 +11,7 @@ import (
 	"go.mau.fi/whatsmeow"
 	wmstore "go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
+	"go.mau.fi/whatsmeow/types/events"
 )
 
 // pairRig is a Pairer on a fake socket and fake QR channels: each GetQRChannel call takes the next channel.
@@ -267,5 +268,21 @@ func TestPairedIsSafeToReadWhilePairingCompletes(t *testing.T) {
 	<-readers
 	if !r.p.Paired() {
 		t.Fatal("not paired after Done")
+	}
+}
+
+// Fix round 1: Paired follows PairSuccess and LoggedOut seen by run's handler, and passes the verdict on.
+func TestTrackPairingFollowsPairSuccessAndLogout(t *testing.T) {
+	c := &Client{client: whatsmeow.NewClient(&wmstore.Device{}, nil)}
+	h := c.trackPairing(func(any) bool { return false })
+	if c.Paired() {
+		t.Fatal("paired at start")
+	}
+	if h(&events.PairSuccess{}) || !c.Paired() {
+		t.Fatalf("after PairSuccess: paired=%v (verdict must stay false)", c.Paired())
+	}
+	h(&events.LoggedOut{})
+	if c.Paired() {
+		t.Fatal("still paired after LoggedOut")
 	}
 }

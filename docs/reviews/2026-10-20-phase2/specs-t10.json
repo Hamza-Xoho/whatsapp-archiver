@@ -270,5 +270,85 @@
   "new": "Notifier: notifier, Pairer: func() web.Pairer { _ = browser; return nil }()})",
   "pkgs": "./cmd/archiver/",
   "rf": 1
+ },
+ {
+  "name": "t10f1-timeout-unmapped",
+  "file": "cmd/archiver/pair.go",
+  "old": "\t\tif u.Err == wa.QRTimedOut {\n\t\t\tu.Err = browserQRTimedOut\n\t\t}\n",
+  "new": "",
+  "pkgs": "./cmd/archiver/",
+  "rf": 1
+ },
+ {
+  "name": "t10f1-timeout-text",
+  "file": "cmd/archiver/pair.go",
+  "old": "\"QR code timed out. Press Pair WhatsApp to try again.\"",
+  "new": "\"QR code timed out; run `archiver pair` again.\"",
+  "pkgs": "./cmd/archiver/",
+  "rf": 1
+ },
+ {
+  "name": "t10f1-terminal-text",
+  "file": "internal/wa/pair.go",
+  "old": "const QRTimedOut = \"QR code timed out; run `archiver pair` again.\"",
+  "new": "const QRTimedOut = \"QR code timed out. Press Pair WhatsApp to try again.\"",
+  "pkgs": "./internal/wa/",
+  "rf": 1
+ },
+ {
+  "name": "t10f1-banner-off",
+  "file": "internal/web/server.go",
+  "old": "return s.d.Pairer != nil && !s.d.Pairer.Paired()",
+  "new": "return false",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t10f1-banner-on",
+  "file": "internal/web/server.go",
+  "old": "return s.d.Pairer != nil && !s.d.Pairer.Paired()",
+  "new": "return s.d.Pairer != nil",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t10f1-nav-link",
+  "file": "internal/web/templates/layout.html",
+  "old": "    <a href=\"/pair\">Pairing</a>\n",
+  "new": "",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t10f1-paired-unsynced",
+  "file": "internal/wa/wa.go",
+  "old": "\tc.pairedOnce.Do(func() { c.paired.Store(c.client.Store.ID != nil) })\n\treturn c.paired.Load()",
+  "new": "\treturn c.client.Store.ID != nil",
+  "pkgs": "./internal/wa/",
+  "rf": 1
+ },
+ {
+  "name": "t10f1-success-not-recorded",
+  "file": "internal/wa/pairer.go",
+  "old": "\t\t\t\tp.c.setPaired(true) // the QR channel hears PairSuccess before run's handler does\n",
+  "new": "",
+  "pkgs": "./internal/wa/",
+  "rf": 1
+ },
+ {
+  "name": "t10f1-pairsuccess-ignored",
+  "file": "internal/wa/wa.go",
+  "old": "\t\tcase *events.PairSuccess:\n\t\t\tc.setPaired(true)\n",
+  "new": "",
+  "pkgs": "./internal/wa/",
+  "rf": 1
+ },
+ {
+  "name": "t10f1-logout-ignored",
+  "file": "internal/wa/wa.go",
+  "old": "\t\tcase *events.LoggedOut:\n\t\t\tc.setPaired(false)\n",
+  "new": "",
+  "pkgs": "./internal/wa/",
+  "rf": 1
  }
 ]
