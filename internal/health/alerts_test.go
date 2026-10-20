@@ -332,3 +332,33 @@ func TestThresholdsReadEachCheck(t *testing.T) {
 	r.m.check()
 	wantBodies(t, r.sent(), "1073741824")
 }
+
+func TestLastBackupSurvivesARestart(t *testing.T) {
+	dir := t.TempDir()
+	at := time.Unix(1_700_000_000, 0).UTC()
+	prev := Snapshot{State: "connected", LastBackup: at, LastBackupPath: "/b/20231114/archive.db", LastBackupErr: ""}
+	data, err := json.Marshal(prev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(dir, "health.json"), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c := &clock{at.Add(time.Hour)}
+	m := NewMonitor(&config.Config{DataDir: dir}, &note{}, c, nil, func() string { return "v" })
+	if got := m.Status(); !got.LastBackup.Equal(at) || got.LastBackupPath != prev.LastBackupPath {
+		t.Fatalf("Status after restart = %+v, want the previous last backup", got)
+	}
+	m.Seen(c.now, false) // the next write must keep it
+	data, err = os.ReadFile(filepath.Join(dir, "health.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var disk Snapshot
+	if err = json.Unmarshal(data, &disk); err != nil {
+		t.Fatal(err)
+	}
+	if !disk.LastBackup.Equal(at) || disk.LastBackupPath != prev.LastBackupPath {
+		t.Fatalf("health.json after restart = %+v", disk)
+	}
+}

@@ -41,15 +41,16 @@ type backupsRig struct {
 	snap health.Snapshot
 	n    *fakeNotifier
 	h    http.Handler
+	now  time.Time
 }
 
 func newBackupsRig(t *testing.T, withNotifier bool) *backupsRig {
 	t.Helper()
-	r := &backupsRig{n: &fakeNotifier{}, cfg: &config.Config{
+	r := &backupsRig{now: dashNow, n: &fakeNotifier{}, cfg: &config.Config{
 		DataDir: "/var/lib/whatsapp-archiver", TimeZone: "Asia/Riyadh",
 		Backup: config.BackupConfig{Destination: "/mnt/data/backups/whatsapp-archiver", Time: "03:30", Keep: 7},
 	}}
-	d := Deps{Store: testkit.Store(t), Config: r.cfg, Health: func() health.Snapshot { return r.snap }, Now: func() time.Time { return dashNow }}
+	d := Deps{Store: testkit.Store(t), Config: r.cfg, Health: func() health.Snapshot { return r.snap }, Now: func() time.Time { return r.now }}
 	if withNotifier {
 		d.Notifier = r.n
 	}
@@ -133,7 +134,7 @@ func TestTestAlertSendsOnce(t *testing.T) {
 	}
 }
 
-func TestTestAlertShowsTheError(t *testing.T) {
+func TestTestAlertShowsOnlyTheStatusOfANtfyError(t *testing.T) {
 	r := newBackupsRig(t, true)
 	r.n.err = errors.New("ntfy status 403 Forbidden")
 	body, code := postForm(t, r.h, "/backups/test-alert", nil)
@@ -141,12 +142,38 @@ func TestTestAlertShowsTheError(t *testing.T) {
 		t.Fatalf("status %d", code)
 	}
 	p := visibleText(body)
-	contains(t, p, "ntfy status 403 Forbidden")
-	if body, _ := postForm(t, r.h, "/backups/test-alert", nil); !containsText(body, `class="bad"`) {
+	contains(t, p, "ntfy answered 403 Forbidden")
+	if !containsText(body, `class="bad"`) || containsText(p, "Sent") {
 		t.Errorf("a failed test alert is not shown as an error:\n%s", body)
 	}
-	if containsText(p, "Sent") {
-		t.Errorf("failure reported as sent:\n%s", p)
+}
+
+func TestTestAlertNeverShowsTheNtfyTopic(t *testing.T) {
+	r := newBackupsRig(t, true)
+	r.n.err = errors.New(`Post "https://ntfy.sh/secret-topic-123": dial tcp: lookup ntfy.sh: no such host`)
+	body, code := postForm(t, r.h, "/backups/test-alert", nil)
+	if code != http.StatusOK {
+		t.Fatalf("status %d", code)
+	}
+	if containsText(body, "secret-topic-123") || containsText(body, "ntfy.sh") {
+		t.Fatalf("the page shows the topic or server:\n%s", body)
+	}
+	contains(t, visibleText(body), "Could not send the test alert; see the journal for details")
+}
+
+func TestTestAlertIsThrottledToOneEveryTenSeconds(t *testing.T) {
+	r := newBackupsRig(t, true)
+	postForm(t, r.h, "/backups/test-alert", nil)
+	r.now = r.now.Add(10*time.Second - time.Nanosecond)
+	body, _ := postForm(t, r.h, "/backups/test-alert", nil)
+	contains(t, visibleText(body), "Wait a few seconds before sending another test alert")
+	if got := r.n.calls(); len(got) != 1 {
+		t.Fatalf("calls inside the ten seconds: %q", got)
+	}
+	r.now = r.now.Add(time.Nanosecond)
+	postForm(t, r.h, "/backups/test-alert", nil)
+	if got := r.n.calls(); len(got) != 2 {
+		t.Fatalf("calls after ten seconds: %q, want 2", got)
 	}
 }
 
