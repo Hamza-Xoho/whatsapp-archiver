@@ -108,3 +108,21 @@ func TestMediaRowKeepsFromMe(t *testing.T) {
 		t.Fatalf("media=%+v", r.Media)
 	}
 }
+
+// A group message from a sender this device has no sender key for arrives as two parts with the same ID: a pkmsg
+// holding only the sender key distribution, then the skmsg with the content. whatsmeow dispatches each as its own
+// events.Message, so the key-only part must not take the (chat, id) slot the content needs.
+func TestKeyOnlyPartDoesNotHideGroupMessage(t *testing.T) {
+	st := testkit.Store(t)
+	p := ingest.NewPipeline(st, ingest.NewFilter(nil, nil), &queueFake{}, &healthFake{}, slog.Default())
+	keyOnly := &waE2E.Message{
+		SenderKeyDistributionMessage: &waE2E.SenderKeyDistributionMessage{GroupID: proto.String("g@g.us"), AxolotlSenderKeyDistributionMessage: []byte{1}},
+		MessageContextInfo:           &waE2E.MessageContextInfo{DeviceListMetadataVersion: proto.Int32(2)},
+	}
+	p.Handle(messageEvent("g@g.us", "A", keyOnly))
+	p.Handle(messageEvent("g@g.us", "A", text("hello")))
+	page, err := st.ChatPage(t.Context(), "g@g.us", 1<<62, "", 10)
+	if err != nil || len(page) != 1 || page[0].Text != "hello" {
+		t.Fatalf("page=%+v err=%v", page, err)
+	}
+}
