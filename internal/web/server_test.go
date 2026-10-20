@@ -17,7 +17,10 @@ import (
 	"go.uber.org/goleak"
 
 	"whatsapp-archiver/internal/activity"
+	"whatsapp-archiver/internal/config"
 	"whatsapp-archiver/internal/health"
+	"whatsapp-archiver/internal/ingest"
+	"whatsapp-archiver/internal/testkit"
 )
 
 // sseEvent is one parsed Server-Sent Event.
@@ -357,5 +360,30 @@ func TestRunReportsListeningOnlyAfterListen(t *testing.T) {
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatal(err)
+	}
+}
+
+// F8: a feed line shows its time in the configured time zone, like every other page.
+func TestFeedLineUsesConfiguredTimeZone(t *testing.T) {
+	bus := activity.NewBus(500)
+	events := openStream(t, New(Deps{Activity: bus, Config: &config.Config{TimeZone: "Asia/Riyadh"}}), nil)
+	bus.Publish(activity.Event{At: time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC), Kind: "message", Chat: "a@g.us", Detail: "text"})
+	e := next(t, events, "activity", 2*time.Second)
+	if !strings.Contains(e.data, ">15:00:00<") || strings.Contains(e.data, "12:00:00") {
+		t.Fatalf("activity line %q, want the time as 15:00:00 (Asia/Riyadh)", e.data)
+	}
+}
+
+// F8: the feed on an open page keeps the newest 200 lines: the page carries the cap and the script that applies it
+// after each streamed line.
+func TestFeedPageCapsItsLength(t *testing.T) {
+	body, code, _ := get(t, New(Deps{Activity: activity.NewBus(10), Config: &config.Config{}, Store: testkit.Store(t), Rules: ingest.NewRuleSet(nil)}).Handler(), "/")
+	if code != http.StatusOK {
+		t.Fatalf("GET /: %d", code)
+	}
+	for _, want := range []string{`id="feed"`, `data-max="200"`, "htmx:sseMessage", "lastElementChild.remove()"} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("dashboard page lacks %q", want)
+		}
 	}
 }

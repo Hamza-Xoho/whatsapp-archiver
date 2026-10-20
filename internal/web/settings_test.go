@@ -349,3 +349,11 @@ func TestSettingsMediaFormShowsTypeChoices(t *testing.T) {
 		t.Errorf("a zero cap is not shown as no cap")
 	}
 }
+
+// F4: lowering the number of snapshots to keep deletes the oldest ones at the next backup, and the page says so.
+func TestSettingsWarnsThatLoweringKeepDeletesSnapshots(t *testing.T) {
+	u := settingsUI(t)
+	if got := u.page(t, "/settings"); !strings.Contains(got, "Lowering this deletes the oldest snapshots at the next backup.") {
+		t.Fatalf("settings page lacks the keep warning: %s", got)
+	}
+}

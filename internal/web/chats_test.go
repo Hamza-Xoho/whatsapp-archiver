@@ -391,3 +391,43 @@ func TestConcurrentRulePostsKeepLiveRulesEqualToStore(t *testing.T) {
 		}
 	}
 }
+
+// F3: turning logging off asks first, because messages arriving while it is off are never saved. The confirmation sits
+// on the stop buttons (per row, in htmx and in the plain form) and the bulk form, never on "Start logging".
+func TestStopLoggingNeedsConfirmation(t *testing.T) {
+	u := newChatsUI(t)
+	u.message(t, "1@g.us", "a")
+	u.message(t, "2@g.us", "b")
+	if _, code := postForm(t, u.handler(), "/chats/rules", url.Values{"jid[]": {"2@g.us"}, "logging": {"off"}}); code != http.StatusOK {
+		t.Fatalf("turning chat 2 off: %d", code)
+	}
+	body, code, _ := get(t, u.handler(), "/chats")
+	if code != http.StatusOK {
+		t.Fatalf("GET /chats: %d", code)
+	}
+	const one = "Stop logging this chat? Messages that arrive while logging is off are not saved."
+	const many = "Stop logging these chats? Messages that arrive while logging is off are not saved."
+	stops, starts := 0, 0
+	for _, form := range strings.Split(string(body), "<form")[1:] {
+		form = form[:strings.Index(form, "</form>")]
+		switch {
+		case strings.Contains(form, `id="bulk"`):
+			if !strings.Contains(form, many) {
+				t.Errorf("the bulk form has no confirmation %q:\n%s", many, form)
+			}
+		case strings.Contains(form, ">Stop logging</button>"):
+			stops++
+			if !strings.Contains(form, `hx-confirm="`+one+`"`) || !strings.Contains(form, `onsubmit="`) || strings.Count(form, one) != 2 {
+				t.Errorf("a stop-logging form lacks hx-confirm and onsubmit with %q:\n%s", one, form)
+			}
+		case strings.Contains(form, ">Start logging</button>"):
+			starts++
+			if strings.Contains(form, "confirm") {
+				t.Errorf("Start logging asks for confirmation:\n%s", form)
+			}
+		}
+	}
+	if stops != 1 || starts != 1 {
+		t.Fatalf("found %d stop and %d start forms, want 1 and 1", stops, starts)
+	}
+}
