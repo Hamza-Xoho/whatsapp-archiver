@@ -13,8 +13,7 @@ func ev(i int) Event {
 // NFR-2: capture never waits on a subscriber.
 func TestSlowSubscriberNeverBlocksPublish(t *testing.T) {
 	b := NewBus(500)
-	ch, cancel := b.Subscribe(4)
-	defer cancel()
+	ch, _ := b.Subscribe(4) // no deferred cancel: if Publish blocked it holds the lock and cancel would hang the failure
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
