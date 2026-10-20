@@ -221,6 +221,34 @@ func TestFailedBackupAlertNamesErrorThenRecovers(t *testing.T) {
 	wantBodies(t, r.sent(), "destination not writable", "ecovered")
 }
 
+func TestBackupResultRecordedInSnapshot(t *testing.T) {
+	r := newRig(t, config.AlertConfig{})
+	okAt := r.c.now
+	r.m.BackupResult(backup.Report{Snapshot: "/srv/backups/20261020T033000Z/archive.db", Bytes: 10}, nil)
+	got := r.m.Status()
+	if !got.LastBackup.Equal(okAt) || got.LastBackupPath != "/srv/backups/20261020T033000Z/archive.db" || got.LastBackupErr != "" {
+		t.Fatalf("after success: %+v", got)
+	}
+	r.advance(time.Hour)
+	failAt := r.c.now
+	r.m.BackupResult(backup.Report{}, errors.New("destination not writable"))
+	got = r.m.Status()
+	if !got.LastBackup.Equal(failAt) || got.LastBackupErr != "destination not writable" || got.LastBackupPath != "" {
+		t.Fatalf("after failure: %+v", got)
+	}
+	data, err := os.ReadFile(filepath.Join(r.m.cfg.DataDir, "health.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var disk Snapshot
+	if err = json.Unmarshal(data, &disk); err != nil {
+		t.Fatal(err)
+	}
+	if disk != got {
+		t.Fatalf("health.json = %+v, want %+v", disk, got)
+	}
+}
+
 func TestHealthJSONRoundTrip(t *testing.T) {
 	r := newRig(t, config.AlertConfig{})
 	r.m.Seen(r.c.now, true)
