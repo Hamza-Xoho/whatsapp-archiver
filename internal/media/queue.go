@@ -39,8 +39,8 @@ type Downloader interface {
 type Clock interface{ Now() time.Time }
 type Queue struct {
 	dir     string
-	global  func() config.MediaRules                // the global media rules, read at each Enqueue
-	perChat func(chatJID string) *config.MediaRules // a chat's own rules or nil; may itself be nil
+	global  func() (config.MediaRules, error)                // the global media rules, read at each Enqueue
+	perChat func(chatJID string) (*config.MediaRules, error) // a chat's own rules or nil; may itself be nil
 	workers int
 	store   *store.Store
 	down    Downloader
@@ -55,10 +55,15 @@ type Queue struct {
 }
 
 // NewQueue builds the queue. global and perChat are read at each Enqueue, so a rule change applies to the next media
-// item; a chat's own rules (perChat non-nil) replace the global ones. The worker count and the re-request rate are
-// read from global once, here. onPanic (may be nil) is told "media" for every recovered worker panic.
-func NewQueue(dir string, global func() config.MediaRules, perChat func(chatJID string) *config.MediaRules, st *store.Store, d Downloader, c Clock, l *slog.Logger, onPanic func(string)) *Queue {
-	r := global()
+// item; a chat's own rules (perChat non-nil) replace the global ones. A failed rule read makes Enqueue return the error
+// without deciding, so the pipeline retries it. The worker count and the re-request rate are read from global once,
+// here; if that read fails they take their defaults (1 worker, 10 requests a minute). onPanic (may be nil) is told "media" for every recovered worker panic.
+func NewQueue(dir string, global func() (config.MediaRules, error), perChat func(chatJID string) (*config.MediaRules, error), st *store.Store, d Downloader, c Clock, l *slog.Logger, onPanic func(string)) *Queue {
+	r, err := global()
+	if err != nil {
+		l.Warn("media rules not read at start, using 1 worker and 10 re-requests a minute", "err", err)
+		r = config.MediaRules{}
+	}
 	workers := r.Workers
 	if workers < 1 {
 		workers = 1
@@ -70,7 +75,11 @@ func NewQueue(dir string, global func() config.MediaRules, perChat func(chatJID 
 	return &Queue{dir: dir, global: global, perChat: perChat, workers: workers, store: st, down: d, clock: c, log: l, wake: make(chan struct{}, 1), limiter: rate.NewLimiter(rate.Every(time.Minute/time.Duration(rpm)), rpm), onPanic: onPanic}
 }
 func (q *Queue) Enqueue(ctx context.Context, m store.Media) error {
-	m.State, m.Reason = decide(m, q.rules(m.ChatJID))
+	rules, err := q.rules(m.ChatJID)
+	if err != nil {
+		return fmt.Errorf("media rules of %s: %w", m.ChatJID, err)
+	}
+	m.State, m.Reason = decide(m, rules)
 	m.UpdatedAt = q.clock.Now().Unix()
 	if err := q.store.InsertMedia(ctx, m); err != nil {
 		return err

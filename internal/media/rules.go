@@ -7,11 +7,16 @@ import (
 	"whatsapp-archiver/internal/store"
 )
 
-// rules returns the media rules for a chat: its own when it has them, else the global ones.
-func (q *Queue) rules(chatJID string) config.MediaRules {
+// rules returns the media rules for a chat: its own when it has them, else the global ones. A failed read is an
+// error, never an answer: guessing the global rules would download media of a chat set to download nothing.
+func (q *Queue) rules(chatJID string) (config.MediaRules, error) {
 	if q.perChat != nil {
-		if r := q.perChat(chatJID); r != nil {
-			return *r
+		r, err := q.perChat(chatJID)
+		if err != nil {
+			return config.MediaRules{}, err
+		}
+		if r != nil {
+			return *r, nil
 		}
 	}
 	return q.global()
