@@ -1,0 +1,90 @@
+[
+ {
+  "name": "t2-replace-ignored",
+  "file": "internal/ingest/rules.go",
+  "old": "\tr.cur.Store(st)\n",
+  "new": "\tif r.cur.Load() == nil {\n\t\tr.cur.Store(st)\n\t}\n",
+  "pkgs": "./internal/ingest/",
+  "rf": 1
+ },
+ {
+  "name": "t2-alias-lookup-skipped",
+  "file": "internal/ingest/scope.go",
+  "old": "\tif f.aliases != nil {",
+  "new": "\tif false && f.aliases != nil {",
+  "pkgs": "./internal/ingest/",
+  "rf": 1
+ },
+ {
+  "name": "t2-import-reruns",
+  "file": "internal/store/settings.go",
+  "old": "\tif done != 0 {",
+  "new": "\tif done != 0 && false {",
+  "pkgs": "./internal/store/",
+  "rf": 1
+ },
+ {
+  "name": "t2-per-chat-rule-ignored",
+  "file": "internal/media/rules.go",
+  "old": "if r := q.perChat(chatJID); r != nil {",
+  "new": "if r := q.perChat(chatJID); r != nil && false {",
+  "pkgs": "./internal/media/",
+  "rf": 1
+ },
+ {
+  "name": "t2-loopback-check-removed",
+  "file": "internal/config/config.go",
+  "old": "if err := checkLoopback(cfg.Web.Listen); err != nil {",
+  "new": "if err := checkLoopback(cfg.Web.Listen); err != nil && false {",
+  "pkgs": "./internal/config/",
+  "rf": 1
+ },
+ {
+  "name": "t2-bulk-not-one-transaction",
+  "file": "internal/store/settings.go",
+  "old": "\t\t\treturn errors.New(\"chat rule without a chat\")",
+  "new": "\t\t\t_ = tx.Commit()\n\t\t\treturn errors.New(\"chat rule without a chat\")",
+  "pkgs": "./internal/store/",
+  "rf": 1
+ },
+ {
+  "name": "t2-seen-written-per-message",
+  "file": "internal/ingest/rules.go",
+  "old": "\tif _, ok := t.seen[jid]; ok {",
+  "new": "\tif _, ok := t.seen[jid]; ok && false {",
+  "pkgs": "./internal/ingest/",
+  "rf": 1
+ },
+ {
+  "name": "t2-thresholds-ignored",
+  "file": "internal/health/health.go",
+  "old": "\t\ta = m.limits()",
+  "new": "\t\t_ = m.limits()",
+  "pkgs": "./internal/health/",
+  "rf": 1
+ },
+ {
+  "name": "t2-schedule-ignores-live",
+  "file": "internal/backup/backup.go",
+  "old": "\t\t\trun.Backup.Time, run.Backup.Keep = live.Time, live.Keep",
+  "new": "\t\t\t_ = live",
+  "pkgs": "./internal/backup/",
+  "rf": 1
+ },
+ {
+  "name": "t2-import-skips-existing-chats",
+  "file": "internal/store/settings.go",
+  "old": "SELECT jid,?,1 FROM chats`",
+  "new": "SELECT jid,?,1 FROM chats WHERE 0`",
+  "pkgs": "./internal/store/",
+  "rf": 1
+ },
+ {
+  "name": "t2-serve-no-import",
+  "file": "cmd/archiver/main.go",
+  "old": "st.ImportConfigOnce(ctx, cfg)",
+  "new": "false, error(nil)",
+  "pkgs": "./cmd/archiver/",
+  "rf": 1
+ }
+]
