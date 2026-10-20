@@ -1,6 +1,7 @@
 package web
 
 import (
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -124,6 +125,7 @@ func TestProjectionWarning(t *testing.T) {
 		{"already under the alert level", 4 * uint64(gib), 0, true},
 		{"29 days to the alert level", 5*uint64(gib) + 29*uint64(gib), 7 * gib, true},
 		{"30 days to the alert level", 5*uint64(gib) + 30*uint64(gib), 7 * gib, false},
+		{"exactly at the alert level", 5 * uint64(gib), 0, true},
 		{"no growth", 100 * uint64(gib), 0, false},
 	}
 	for _, c := range cases {
@@ -161,4 +163,45 @@ func TestStorageHasNoDeleteButtons(t *testing.T) {
 	if containsText(string(body), "<form") || containsText(string(body), "<button") {
 		t.Fatalf("storage page has a form or button:\n%s", body)
 	}
+}
+
+func TestStorageWarnsWhenAlreadyUnderTheAlertLevel(t *testing.T) {
+	r := newStorageRig(t, 4*gib)
+	contains(t, r.page(t), "Warning: free space is already at or under the 5 GB alert level.")
+}
+
+func TestStorageWarningUsesTheLiveAlertLevel(t *testing.T) {
+	r := newStorageRig(t, 10*gib)
+	if err := r.st.SetAlertThresholds(t.Context(), config.AlertConfig{NoEventsAfter: time.Hour, DisconnectedAfter: time.Hour, PhoneQuietAfter: time.Hour, DiskFreeMinGB: 20}); err != nil {
+		t.Fatal(err)
+	}
+	contains(t, r.page(t), "already at or under the 20 GB alert level")
+}
+
+func TestStorageWithoutFreeSpaceReading(t *testing.T) {
+	r := newStorageRig(t, 10*gib)
+	r.h = New(Deps{Store: r.st, Config: r.cfg, Now: func() time.Time { return r.now },
+		DiskFree: func(string) (uint64, error) { return 0, fmt.Errorf("no such disk") }}).Handler()
+	contains(t, r.page(t), "Free disk space unavailable", "Disk full in unknown")
+}
+
+func TestStorageListsLargestChatsWithNamesAndStopsAtTen(t *testing.T) {
+	r := newStorageRig(t, 100*gib)
+	for i := range 12 {
+		m := store.Media{ChatJID: fmt.Sprintf("c%02d@g.us", i), MessageID: "m", Type: "image", DeclaredSize: int64(i+1) << 20, State: "done", UpdatedAt: r.now.Unix(), Source: "live"}
+		if err := r.st.InsertMedia(t.Context(), m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.st.UpsertChat(t.Context(), store.Chat{JID: "c11@g.us", Name: "Family"}); err != nil {
+		t.Fatal(err)
+	}
+	p := r.page(t)
+	contains(t, p, "Family c11@g.us 12.0 MB", "c02@g.us 3.0 MB")
+	for _, gone := range []string{"c00@g.us", "c01@g.us"} {
+		if containsText(p, gone) {
+			t.Errorf("%s is not in the ten largest:\n%s", gone, p)
+		}
+	}
+	contains(t, p, "image 78.0 MB")
 }

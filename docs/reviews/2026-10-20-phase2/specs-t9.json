@@ -1,0 +1,306 @@
+[
+ {
+  "name": "t9-chat-order",
+  "file": "internal/store/usage.go",
+  "old": "ORDER BY 2 DESC,1",
+  "new": "ORDER BY 2 ASC,1",
+  "pkgs": "./internal/store/",
+  "rf": 1
+ },
+ {
+  "name": "t9-chat-state",
+  "file": "internal/store/usage.go",
+  "old": "WHERE state='done' GROUP BY chat_jid",
+  "new": "WHERE state<>'skipped' GROUP BY chat_jid",
+  "pkgs": "./internal/store/",
+  "rf": 1
+ },
+ {
+  "name": "t9-type-state",
+  "file": "internal/store/usage.go",
+  "old": "WHERE state='done' GROUP BY type",
+  "new": "WHERE state<>'skipped' GROUP BY type",
+  "pkgs": "./internal/store/",
+  "rf": 1
+ },
+ {
+  "name": "t9-growth-window-media",
+  "file": "internal/store/usage.go",
+  "old": "AND updated_at>=?",
+  "new": "AND updated_at<=?",
+  "pkgs": "./internal/store/",
+  "rf": 1
+ },
+ {
+  "name": "t9-growth-window-days",
+  "file": "internal/store/usage.go",
+  "old": "28 * 24 * time.Hour",
+  "new": "56 * 24 * time.Hour",
+  "pkgs": "./internal/store/",
+  "rf": 1
+ },
+ {
+  "name": "t9-growth-window-messages",
+  "file": "internal/store/usage.go",
+  "old": "SUM(received_at>=?)",
+  "new": "SUM(received_at<=?)",
+  "pkgs": "./internal/store/",
+  "rf": 1
+ },
+ {
+  "name": "t9-growth-weeks",
+  "file": "internal/store/usage.go",
+  "old": "(recentMedia + dbGrowth) / 4",
+  "new": "(recentMedia + dbGrowth) / 2",
+  "pkgs": "./internal/store/",
+  "rf": 1
+ },
+ {
+  "name": "t9-growth-db-recent-only",
+  "file": "internal/store/usage.go",
+  "old": "recentMessages * (info.Size() / messages)",
+  "new": "messages * (info.Size() / messages)",
+  "pkgs": "./internal/store/",
+  "rf": 1
+ },
+ {
+  "name": "t9-growth-no-db",
+  "file": "internal/store/usage.go",
+  "old": "(recentMedia + dbGrowth) / 4",
+  "new": "recentMedia / 4",
+  "pkgs": "./internal/store/",
+  "rf": 1
+ },
+ {
+  "name": "t9-backup-time",
+  "file": "internal/health/health.go",
+  "old": "m.snapshot.LastBackup = m.clock.Now()",
+  "new": "m.snapshot.LastBackup = time.Time{}",
+  "pkgs": "./internal/health/",
+  "rf": 1
+ },
+ {
+  "name": "t9-backup-path",
+  "file": "internal/health/health.go",
+  "old": "m.snapshot.LastBackupErr, m.snapshot.LastBackupPath = \"\", r.Snapshot",
+  "new": "m.snapshot.LastBackupErr, m.snapshot.LastBackupPath = \"\", \"\"",
+  "pkgs": "./internal/health/",
+  "rf": 1
+ },
+ {
+  "name": "t9-backup-err-keeps-path",
+  "file": "internal/health/health.go",
+  "old": "m.snapshot.LastBackupErr, m.snapshot.LastBackupPath = err.Error(), \"\"",
+  "new": "m.snapshot.LastBackupErr, m.snapshot.LastBackupPath = err.Error(), r.Snapshot",
+  "pkgs": "./internal/health/",
+  "rf": 1
+ },
+ {
+  "name": "t9-backup-not-written",
+  "file": "internal/health/health.go",
+  "old": "err.Error(), \"\"\n\t}\n\tm.writeLocked()",
+  "new": "err.Error(), \"\"\n\t}",
+  "pkgs": "./internal/health/",
+  "rf": 1
+ },
+ {
+  "name": "t9-cache-ttl",
+  "file": "internal/web/storage.go",
+  "old": "storageTTL = 5 * time.Minute",
+  "new": "storageTTL = 10 * time.Minute",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t9-cache-boundary",
+  "file": "internal/web/storage.go",
+  "old": "now.Sub(c.at) < storageTTL",
+  "new": "now.Sub(c.at) <= storageTTL",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t9-cache-never-stored",
+  "file": "internal/web/storage.go",
+  "old": "c.at, c.facts, c.ok = now, f, true",
+  "new": "c.at, c.facts, c.ok = now, f, false",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t9-year-boundary",
+  "file": "internal/web/storage.go",
+  "old": "days > 365",
+  "new": "days >= 365",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t9-days-math",
+  "file": "internal/web/storage.go",
+  "old": "days := free * 7 / uint64(weekly)",
+  "new": "days := free * 6 / uint64(weekly)",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t9-no-growth",
+  "file": "internal/web/storage.go",
+  "old": "if weekly <= 0 {\n\t\treturn \"no growth",
+  "new": "if weekly < 0 {\n\t\treturn \"no growth",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t9-one-day",
+  "file": "internal/web/storage.go",
+  "old": "days == 1",
+  "new": "days == 2",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t9-warn-at-level",
+  "file": "internal/web/storage.go",
+  "old": "if free <= min {\n\t\treturn true",
+  "new": "if free < min {\n\t\treturn true",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t9-warn-days",
+  "file": "internal/web/storage.go",
+  "old": "< warnDays",
+  "new": "<= warnDays",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t9-warn-headroom",
+  "file": "internal/web/storage.go",
+  "old": "return weekly > 0 && (free-min)*7",
+  "new": "return weekly > 0 && (free)*7",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t9-warn-no-growth-guard",
+  "file": "internal/web/storage.go",
+  "old": "return weekly > 0 &&",
+  "new": "return weekly >= 0 &&",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t9-warn-text-days",
+  "file": "internal/web/storage.go",
+  "old": "minGB, (free-min)*7/uint64(weekly))",
+  "new": "minGB, free*7/uint64(weekly))",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t9-warn-text-level",
+  "file": "internal/web/storage.go",
+  "old": "case free <= min:\n\t\treturn fmt",
+  "new": "case free < min:\n\t\treturn fmt",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t9-warn-live-level",
+  "file": "internal/web/storage.go",
+  "old": "a.DiskFreeMinGB\n\t\t}\n\t}\n\treturn s.config()",
+  "new": "0\n\t\t}\n\t}\n\treturn s.config()",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t9-top-ten",
+  "file": "internal/web/storage.go",
+  "old": "i == topChats",
+  "new": "i == topChats+5",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t9-chat-name",
+  "file": "internal/web/storage.go",
+  "old": "row.Name, row.JID = name, c.ChatJID",
+  "new": "row.Name = c.ChatJID",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t9-free-error",
+  "file": "internal/web/storage.go",
+  "old": "d.Free = \"unavailable\"",
+  "new": "d.Free = \"0 B\"",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t9-alert-title",
+  "file": "internal/web/backups.go",
+  "old": "\"Test alert from WhatsApp Archiver\"",
+  "new": "\"Test alert\"",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t9-alert-sent-flag",
+  "file": "internal/web/backups.go",
+  "old": "res.Sent, res.Text = true,",
+  "new": "res.Sent, res.Text = false,",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t9-alert-no-notifier",
+  "file": "internal/web/backups.go",
+  "old": "if s.d.Notifier != nil {\n\t\tctx",
+  "new": "if s.d.Notifier == nil {\n\t\tctx",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t9-ntfy-configured",
+  "file": "internal/web/backups.go",
+  "old": "NtfyConfigured: s.d.Notifier != nil,",
+  "new": "NtfyConfigured: s.d.Notifier == nil,",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t9-last-result-ok",
+  "file": "internal/web/backups.go",
+  "old": "snap.LastBackupErr == \"\"",
+  "new": "snap.LastBackupErr != \"\"",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t9-last-result-zero",
+  "file": "internal/web/backups.go",
+  "old": "!snap.LastBackup.IsZero()",
+  "new": "snap.LastBackup.IsZero()",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t9-live-schedule",
+  "file": "internal/web/backups.go",
+  "old": "b.Time, b.Keep = sc.Time, sc.Keep",
+  "new": "b.Time, b.Keep = b.Time, b.Keep",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t9-route-post-only",
+  "file": "internal/web/server.go",
+  "old": "mux.HandleFunc(\"POST /backups/test-alert\"",
+  "new": "mux.HandleFunc(\"/backups/test-alert\"",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ }
+]

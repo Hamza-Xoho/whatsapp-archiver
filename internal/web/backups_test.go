@@ -128,6 +128,9 @@ func TestTestAlertSendsOnce(t *testing.T) {
 		t.Fatalf("notifier calls = %q, want one \"Test alert from WhatsApp Archiver\"", got)
 	}
 	contains(t, visibleText(body), "Sent")
+	if !containsText(body, `class="ok"`) || containsText(body, `class="bad"`) {
+		t.Fatalf("a sent test alert is not shown as ok:\n%s", body)
+	}
 }
 
 func TestTestAlertShowsTheError(t *testing.T) {
@@ -139,6 +142,9 @@ func TestTestAlertShowsTheError(t *testing.T) {
 	}
 	p := visibleText(body)
 	contains(t, p, "ntfy status 403 Forbidden")
+	if body, _ := postForm(t, r.h, "/backups/test-alert", nil); !containsText(body, `class="bad"`) {
+		t.Errorf("a failed test alert is not shown as an error:\n%s", body)
+	}
 	if containsText(p, "Sent") {
 		t.Errorf("failure reported as sent:\n%s", p)
 	}
@@ -177,4 +183,14 @@ func TestTestAlertNeedsSameOrigin(t *testing.T) {
 	if w.Code != http.StatusForbidden || len(r.n.calls()) != 0 {
 		t.Fatalf("cross-origin POST: %d, calls %q", w.Code, r.n.calls())
 	}
+}
+
+func TestBackupsPageUsesTheLiveSchedule(t *testing.T) {
+	r := newBackupsRig(t, true)
+	st := testkit.Store(t)
+	if err := st.SetBackupSchedule(t.Context(), config.BackupConfig{Time: "01:15", Keep: 3}); err != nil {
+		t.Fatal(err)
+	}
+	r.h = New(Deps{Store: st, Config: r.cfg, Notifier: r.n, Now: func() time.Time { return dashNow }}).Handler()
+	contains(t, r.page(t), "every day at 01:15, keeping 3 snapshots")
 }
