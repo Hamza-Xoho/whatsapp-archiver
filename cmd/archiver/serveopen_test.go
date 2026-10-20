@@ -112,3 +112,45 @@ func TestServeImportsConfigBeforeLoadingRules(t *testing.T) {
 		t.Errorf("backup.Schedule called with %d arguments, want 5 (the live schedule)", scheduleArgs)
 	}
 }
+
+// serve gives the media queue the live rule lookups: the global media.rules setting and each chat's own rule
+// (through its aliases). Passing nil or config.yaml's rules would silently ignore the dashboard.
+func TestServeWiresLiveMediaRules(t *testing.T) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "main.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var args []string
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "serve" {
+			continue
+		}
+		ast.Inspect(fn.Body, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "NewQueue" && len(call.Args) > 2 {
+				for _, a := range call.Args[1:3] {
+					s, _ := a.(*ast.SelectorExpr)
+					if s == nil {
+						args = append(args, "?")
+						continue
+					}
+					x, _ := s.X.(*ast.Ident)
+					if x == nil {
+						args = append(args, "?")
+						continue
+					}
+					args = append(args, x.Name+"."+s.Sel.Name)
+				}
+			}
+			return true
+		})
+	}
+	if strings.Join(args, ",") != "live.media,live.chatMedia" {
+		t.Fatalf("serve passes %v to media.NewQueue, want live.media and live.chatMedia", args)
+	}
+}

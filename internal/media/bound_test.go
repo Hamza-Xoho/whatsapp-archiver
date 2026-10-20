@@ -92,7 +92,7 @@ func TestExpiredRowAtAttemptCapFailsWithoutRequest(t *testing.T) {
 func TestResetMediaOnStartFailureIsLogged(t *testing.T) {
 	var sink lockedBuf
 	log := slog.New(slog.NewTextHandler(&sink, nil))
-	q := NewQueue(t.TempDir(), func() config.MediaRules { return config.MediaRules{Download: []string{"image"}, Workers: 1} }, nil, testkit.Store(t), &fakeDown{}, newClock(), log, nil)
+	q := NewQueue(t.TempDir(), func() (config.MediaRules, error) { return config.MediaRules{Download: []string{"image"}, Workers: 1}, nil }, nil, testkit.Store(t), &fakeDown{}, newClock(), log, nil)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	q.Run(ctx)

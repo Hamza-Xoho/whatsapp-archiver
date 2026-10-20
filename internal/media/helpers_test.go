@@ -90,7 +90,7 @@ func newTestQueue(t *testing.T, st *store.Store, d Downloader, r config.MediaRul
 	if st == nil {
 		st = testkit.Store(t)
 	}
-	q := NewQueue(t.TempDir(), func() config.MediaRules { return r }, nil, st, d, c, quietLog(), onPanic)
+	q := NewQueue(t.TempDir(), func() (config.MediaRules, error) { return r, nil }, nil, st, d, c, quietLog(), onPanic)
 	q.sleep = func(time.Duration) {} // backoff waits are seconds long; tests never really sleep
 	return q
 }
