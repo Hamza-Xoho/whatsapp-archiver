@@ -58,8 +58,8 @@
  {
   "name": "t7-chatpage-ignores-before",
   "file": "internal/store/browse.go",
-  "old": "WHERE m.rk=1 AND (?2<=0 OR m.ts<?2)",
-  "new": "WHERE m.rk=1 AND (?2<=0 OR m.ts>0)",
+  "old": "WHERE m.rk=1 AND (?2<=0 OR m.ts<?2 OR (m.ts=?2 AND m.id<?4))",
+  "new": "WHERE m.rk=1 AND (?2<=0 OR m.ts>0 OR ?4='x')",
   "pkgs": "./internal/store/ ./internal/web/",
   "rf": 1
  },
@@ -162,8 +162,8 @@
  {
   "name": "t7-older-link-wrong-ts",
   "file": "internal/web/viewer.go",
-  "old": "data.HasOlder, data.OlderBefore = true, msgs[viewerPageSize-1].TS",
-  "new": "data.HasOlder, data.OlderBefore = true, msgs[0].TS",
+  "old": "data.HasOlder, data.OlderBefore, data.OlderID = true, msgs[viewerPageSize-1].TS, msgs[viewerPageSize-1].ID",
+  "new": "data.HasOlder, data.OlderBefore, data.OlderID = true, msgs[0].TS, msgs[viewerPageSize-1].ID",
   "pkgs": "./internal/web/",
   "rf": 1
  },
@@ -237,6 +237,103 @@
   "old": "h.Set(\"Content-Type\", ctype)",
   "new": "_ = ctype",
   "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-cursor-ts-only",
+  "file": "internal/store/browse.go",
+  "old": "WHERE m.rk=1 AND (?2<=0 OR m.ts<?2 OR (m.ts=?2 AND m.id<?4))",
+  "new": "WHERE m.rk=1 AND (?2<=0 OR m.ts<?2 OR (m.ts=?2 AND 0 AND m.id<?4))",
+  "pkgs": "./internal/store/ ./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-cursor-id-ignored",
+  "file": "internal/store/browse.go",
+  "old": "WHERE m.rk=1 AND (?2<=0 OR m.ts<?2 OR (m.ts=?2 AND m.id<?4))",
+  "new": "WHERE m.rk=1 AND (?2<=0 OR m.ts<?2 OR (m.ts=?2 AND m.id<>?4))",
+  "pkgs": "./internal/store/ ./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-older-link-wrong-id",
+  "file": "internal/web/viewer.go",
+  "old": "data.HasOlder, data.OlderBefore, data.OlderID = true, msgs[viewerPageSize-1].TS, msgs[viewerPageSize-1].ID",
+  "new": "data.HasOlder, data.OlderBefore, data.OlderID = true, msgs[viewerPageSize-1].TS, msgs[0].ID",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-older-link-no-id",
+  "file": "internal/web/templates/viewer.html",
+  "old": "&amp;before_id={{.OlderID}}",
+  "new": "",
+  "pkgs": "./internal/web/",
+  "rf": 1,
+  "count": 2
+ },
+ {
+  "name": "t7-before-id-not-read",
+  "file": "internal/web/viewer.go",
+  "old": "beforeID := r.URL.Query().Get(\"before_id\")",
+  "new": "beforeID := \"\"",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-rules-no-mutex",
+  "file": "internal/web/chats.go",
+  "old": "\ts.rulesMu.Lock()\n\tdefer s.rulesMu.Unlock()\n",
+  "new": "",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-quiet-chats-not-listed",
+  "file": "internal/store/browse.go",
+  "old": "report.Chats = append(report.Chats, ChatStat{CanonicalJID: jid, Name: chats[jid]})",
+  "new": "_ = jid",
+  "pkgs": "./internal/store/ ./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-quiet-chats-not-canonical",
+  "file": "internal/store/browse.go",
+  "old": "`SELECT `+canonicalOf(\"jid\")+`,MAX(name)",
+  "new": "`SELECT jid,MAX(name)",
+  "pkgs": "./internal/store/ ./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-quiet-chats-duplicated",
+  "file": "internal/store/browse.go",
+  "old": "if !listed[jid] {",
+  "new": "if true {",
+  "pkgs": "./internal/store/ ./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-message-id-not-escaped",
+  "file": "internal/web/templates/viewer.html",
+  "old": "{{pathEscape .ID}}",
+  "new": "{{.ID}}",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-quoted-id-not-escaped",
+  "file": "internal/web/templates/trace.html",
+  "old": "{{pathEscape .QuotedID}}",
+  "new": "{{.QuotedID}}",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t7-dedupe-last-arrived",
+  "file": "internal/store/browse.go",
+  "old": "ORDER BY received_at,chat_jid) AS rk",
+  "new": "ORDER BY received_at DESC,chat_jid) AS rk",
+  "pkgs": "./internal/store/ ./internal/web/",
   "rf": 1
  }
 ]
