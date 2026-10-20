@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"sync"
 	"time"
+	"whatsapp-archiver/internal/activity"
 	"whatsapp-archiver/internal/config"
 	"whatsapp-archiver/internal/guard"
 	"whatsapp-archiver/internal/logsafe"
@@ -49,6 +50,7 @@ type Queue struct {
 	wake    chan struct{}
 	limiter *rate.Limiter
 	onPanic func(string)
+	bus     *activity.Bus       // nil: nothing is published
 	sleep   func(time.Duration) // backoff wait; nil waits on a timer that stops with the context
 	pass    sync.Mutex          // one request pass at a time
 	wg      sync.WaitGroup
@@ -73,6 +75,12 @@ func NewQueue(dir string, global func() (config.MediaRules, error), perChat func
 		rpm = 10
 	}
 	return &Queue{dir: dir, global: global, perChat: perChat, workers: workers, store: st, down: d, clock: c, log: l, wake: make(chan struct{}, 1), limiter: rate.NewLimiter(rate.Every(time.Minute/time.Duration(rpm)), rpm), onPanic: onPanic}
+}
+
+// WithActivity makes the queue publish each finished, failed or expired item to the live feed (type and state only).
+func (q *Queue) WithActivity(b *activity.Bus) *Queue {
+	q.bus = b
+	return q
 }
 func (q *Queue) Enqueue(ctx context.Context, m store.Media) error {
 	rules, err := q.rules(m.ChatJID)
@@ -211,6 +219,14 @@ func (q *Queue) save(ctx context.Context, m store.Media) bool {
 	if err := q.store.UpdateMedia(ctx, m); err != nil {
 		q.log.Error("media row not saved", "chat", m.ChatJID, "id", m.MessageID, "state", m.State, "err", err)
 		return false
+	}
+	switch m.State {
+	case "done", "failed", "expired":
+		kind := m.Type
+		if kind == "" {
+			kind = "media"
+		}
+		q.bus.Publish(activity.Event{At: q.clock.Now(), Kind: "media", Chat: m.ChatJID, Detail: kind + " " + m.State})
 	}
 	return true
 }

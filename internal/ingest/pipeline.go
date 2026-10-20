@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"go.mau.fi/whatsmeow/types/events"
+	"whatsapp-archiver/internal/activity"
 	"whatsapp-archiver/internal/guard"
 	"whatsapp-archiver/internal/retry"
 	"whatsapp-archiver/internal/store"
@@ -41,7 +42,8 @@ type Pipeline struct {
 	now    func() time.Time
 	sleep  func(context.Context, time.Duration)
 	parse  HistoryParser
-	seen   *SeenTracker // nil: first sightings are not recorded
+	seen   *SeenTracker  // nil: first sightings are not recorded
+	bus    *activity.Bus // nil: nothing is published
 }
 
 const (
@@ -71,6 +73,35 @@ func (p *Pipeline) WithClock(now func() time.Time, sleep func(time.Duration)) *P
 func (p *Pipeline) WithContext(ctx context.Context) *Pipeline {
 	p.ctx = ctx
 	return p
+}
+
+// WithActivity makes the pipeline publish what it stores to the live feed (never message text; Publish never blocks).
+func (p *Pipeline) WithActivity(b *activity.Bus) *Pipeline {
+	p.bus = b
+	return p
+}
+
+// publish tells the feed about a stored or skipped result: kind, chat and a type or count, never text.
+func (p *Pipeline) publish(r Result, stored bool) {
+	e := activity.Event{At: p.now(), Chat: r.Chat.JID}
+	switch {
+	case !stored:
+		e.Kind, e.Detail = "excluded_skip", string(r.Kind)
+	case r.Kind == KindUndecryptable:
+		e.Kind, e.Detail = "gap", "undecryptable"
+	case r.Message != nil:
+		e.Kind, e.Detail = "message", "text"
+		if r.Message.MediaType != "" {
+			e.Detail = r.Message.MediaType
+		}
+	case r.Event != nil:
+		e.Kind, e.Detail = "event", r.Event.Kind
+	case r.ChatEvent != nil:
+		e.Kind, e.Detail = "chat_event", r.ChatEvent.Kind
+	default:
+		return
+	}
+	p.bus.Publish(e)
 }
 
 func isPermanent(err error) bool { return errors.Is(err, store.ErrConstraint) }
@@ -188,7 +219,10 @@ func (p *Pipeline) Handle(evt any) (ack bool) {
 	return ack
 }
 
-func (p *Pipeline) Ingest(ctx context.Context, r Result) error {
+func (p *Pipeline) Ingest(ctx context.Context, r Result) error { return p.ingest(ctx, r, true) }
+
+// ingest is the one write path; quiet history messages are not published one by one (the chunk is, once).
+func (p *Pipeline) ingest(ctx context.Context, r Result, publish bool) error {
 	for _, m := range r.Mappings {
 		if err := p.persist(ctx, "insert id mapping", func() error {
 			_, err := p.writer.InsertIDMapping(ctx, m)
@@ -198,6 +232,9 @@ func (p *Pipeline) Ingest(ctx context.Context, r Result) error {
 		}
 	}
 	if keep, err := p.keep(ctx, r.Chat.JID, r.Kind); err != nil || !keep {
+		if err == nil && publish {
+			p.publish(r, false)
+		}
 		return err
 	}
 	write := func() error {
@@ -239,5 +276,8 @@ func (p *Pipeline) Ingest(ctx context.Context, r Result) error {
 		}
 	}
 	p.health.Seen(r.Received, r.FromMe)
+	if publish {
+		p.publish(r, true)
+	}
 	return nil
 }

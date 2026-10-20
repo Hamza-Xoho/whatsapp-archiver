@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+	"whatsapp-archiver/internal/activity"
 	"whatsapp-archiver/internal/backup"
 	"whatsapp-archiver/internal/config"
 )
@@ -41,6 +42,7 @@ type Monitor struct {
 	lostAt    time.Time // when this process logged "connection lost"; zero until it has
 	queue     chan alert
 	log       *slog.Logger
+	bus       *activity.Bus // nil: nothing is published
 }
 type alert struct{ title, body string }
 
@@ -90,6 +92,10 @@ func (m *Monitor) WithVersionReason(f func() string) *Monitor { m.reason = f; re
 
 // WithLogger sets where dropped alerts are reported (default slog.Default()).
 func (m *Monitor) WithLogger(l *slog.Logger) *Monitor { m.log = l; return m }
+
+// WithActivity makes the monitor publish each connection state change to the live feed. Publish never blocks, so it
+// cannot hold up the event handler that reports the state.
+func (m *Monitor) WithActivity(b *activity.Bus) *Monitor { m.bus = b; return m }
 func (m *Monitor) Seen(t time.Time, fromMe bool) {
 	m.mu.Lock()
 	m.snapshot.LastEvent = t
@@ -117,6 +123,9 @@ func (m *Monitor) SetState(state, detail string) {
 	}
 	m.writeLocked()
 	m.mu.Unlock()
+	if prev != state {
+		m.bus.Publish(activity.Event{At: m.clock.Now(), Kind: "state", Detail: state})
+	}
 	switch state {
 	case "connected":
 		for key, title := range stateTitles {

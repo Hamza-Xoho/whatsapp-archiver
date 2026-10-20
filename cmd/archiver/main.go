@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+	"whatsapp-archiver/internal/activity"
 	"whatsapp-archiver/internal/backup"
 	"whatsapp-archiver/internal/config"
 	"whatsapp-archiver/internal/health"
@@ -137,14 +138,15 @@ func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) er
 		_ = st.Close()
 		return err
 	}
+	bus := activity.NewBus(500)
 	var notifier health.Notifier
 	if cfg.Alerts.Ntfy != nil {
 		notifier = health.NewNtfy(cfg.Alerts.Ntfy)
 	}
-	mon := health.NewMonitor(cfg, notifier, systemClock{}, health.DiskFree, client.VersionInUse).WithVersionReason(client.VersionReason).WithLogger(log).WithThresholds(live.alerts)
-	queue := media.NewQueue(cfg.DataDir, live.media, live.chatMedia, st, client, systemClock{}, log, mon.Panic)
+	mon := health.NewMonitor(cfg, notifier, systemClock{}, health.DiskFree, client.VersionInUse).WithVersionReason(client.VersionReason).WithLogger(log).WithThresholds(live.alerts).WithActivity(bus)
+	queue := media.NewQueue(cfg.DataDir, live.media, live.chatMedia, st, client, systemClock{}, log, mon.Panic).WithActivity(bus)
 	filter := ingest.NewFilter(rules, aliases)
-	pipeline := ingest.NewPipeline(st, filter, queue, mon, log).WithHistoryParser(client.HistoryParser()).WithContext(ctx).WithSeen(seen)
+	pipeline := ingest.NewPipeline(st, filter, queue, mon, log).WithHistoryParser(client.HistoryParser()).WithContext(ctx).WithSeen(seen).WithActivity(bus)
 	handler := pipeline.Handle
 	if recordDir != "" {
 		handler = ingest.NewRecorder(recordDir).WithFilter(filter).Wrap(handler)
@@ -157,11 +159,26 @@ func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) er
 	loops := []func(context.Context){
 		queue.Run,
 		mon.Run,
-		func(ctx context.Context) { backup.Schedule(ctx, cfg, systemClock{}, mon.BackupResult, live.backup) },
+		func(ctx context.Context) {
+			backup.Schedule(ctx, cfg, systemClock{}, publishBackup(bus, mon.BackupResult), live.backup)
+		},
 	}
 	// Shutdown order: cancel ctx, client.Run returns, the loops are joined, the event handler in flight is waited for
 	// (at most handlerDrainBound), then the client and the store are closed.
 	return runService(ctx, cancel, func(ctx context.Context) error { return client.Run(ctx, handler, pairing) }, loops, handlers.drain, client.Close, st.Close)
+}
+
+// publishBackup wraps the backup result callback so each result also reaches the live feed: the outcome and the
+// size, never the error text (it can name a path).
+func publishBackup(bus *activity.Bus, next func(backup.Report, error)) func(backup.Report, error) {
+	return func(r backup.Report, err error) {
+		e := activity.Event{At: time.Now(), Kind: "backup", Detail: fmt.Sprintf("snapshot done · %d bytes", r.Bytes)}
+		if err != nil {
+			e.Detail = "failed"
+		}
+		bus.Publish(e)
+		next(r, err)
+	}
 }
 
 // storeAliases is the exclusion filter's alias lookup: the other forms (LID or phone) of a chat known to the store.

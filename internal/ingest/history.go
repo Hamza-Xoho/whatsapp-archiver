@@ -8,6 +8,7 @@ import (
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
+	"whatsapp-archiver/internal/activity"
 	"whatsapp-archiver/internal/store"
 )
 
@@ -120,7 +121,7 @@ func (p *Pipeline) ImportHistory(ctx context.Context, evt *events.HistorySync) (
 				skipped++
 				continue
 			}
-			if ingestErr := p.Ingest(ctx, r); ingestErr != nil {
+			if ingestErr := p.ingest(ctx, r, false); ingestErr != nil {
 				if !isPermanent(ingestErr) {
 					return stored, skipped, ingestErr // only a stopped context ends the chunk early
 				}
@@ -135,6 +136,7 @@ func (p *Pipeline) ImportHistory(ctx context.Context, evt *events.HistorySync) (
 	if err = p.persist(ctx, "insert history chunk", func() error { return ledger.InsertHistoryChunk(ctx, chunk) }); err != nil {
 		return stored, skipped, err
 	}
+	p.bus.Publish(activity.Event{At: now, Kind: "history_chunk", Detail: fmt.Sprintf("chunk %s #%d · %d messages", chunk.SyncType, chunk.ChunkOrder, chunk.MessageCount)})
 	p.log.Info("history chunk imported", "progress", chunk.Progress, "stored", stored, "skipped", skipped)
 	return
 }
