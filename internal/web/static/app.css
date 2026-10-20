@@ -1,0 +1,89 @@
+/* WhatsApp Archiver control UI. Plain and readable; light and dark follow the system setting. */
+
+:root {
+  --bg: #f7f7f5;
+  --panel: #ffffff;
+  --text: #1d1d1b;
+  --muted: #6b6b66;
+  --line: #e2e2dc;
+  --accent: #1f7a4d;
+  --warn: #a15c00;
+  --bad: #b3261e;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161715;
+    --panel: #1f201e;
+    --text: #e8e8e3;
+    --muted: #9a9a93;
+    --line: #33352f;
+    --accent: #5cc48c;
+    --warn: #e0a548;
+    --bad: #f08a80;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+a { color: var(--accent); }
+
+.top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 2rem;
+  align-items: baseline;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.top nav { display: flex; flex-wrap: wrap; gap: 1rem; }
+.top nav a { text-decoration: none; }
+
+main {
+  max-width: 60rem;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+h1 { font-size: 1.4rem; margin: 0.5rem 0 1rem; }
+h2 { font-size: 1.05rem; margin: 0 0 0.5rem; }
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+.muted, .chat { color: var(--muted); }
+.warn { color: var(--warn); }
+.bad { color: var(--bad); }
+
+.feed {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 28rem;
+  overflow-y: auto;
+}
+
+.feed-item {
+  padding: 0.2rem 0;
+  border-bottom: 1px solid var(--line);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.feed-item time { color: var(--muted); margin-right: 0.5rem; }
+.feed-item .kind { font-weight: 600; }

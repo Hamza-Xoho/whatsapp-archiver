@@ -1,0 +1,31 @@
+{{define "layout"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · WhatsApp Archiver</title>
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/htmx.min.js"></script>
+<script src="/static/sse.js"></script>
+</head>
+<body hx-ext="sse" sse-connect="/events">
+<header class="top">
+  <strong class="brand">WhatsApp Archiver</strong>
+  <nav>
+    <a href="/">Dashboard</a>
+  </nav>
+</header>
+<main>
+{{block "content" .}}
+  <h1>{{.Title}}</h1>
+  <section class="panel">
+    <h2>Activity</h2>
+    <ul id="feed" class="feed" sse-swap="activity" hx-swap="afterbegin"></ul>
+  </section>
+{{end}}
+</main>
+</body>
+</html>
+{{end}}
+
+{{define "activity_item"}}<li class="feed-item"><time datetime="{{.At.Format "2006-01-02T15:04:05Z07:00"}}">{{.At.Format "15:04:05"}}</time> <span class="kind">{{.Kind}}</span>{{if .Chat}} <span class="chat">{{.Chat}}</span>{{end}} <span class="detail">{{.Detail}}</span></li>{{end}}

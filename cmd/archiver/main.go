@@ -19,6 +19,7 @@ import (
 	"whatsapp-archiver/internal/media"
 	"whatsapp-archiver/internal/store"
 	"whatsapp-archiver/internal/wa"
+	"whatsapp-archiver/internal/web"
 )
 
 // version is set at link time by the Makefile (-ldflags "-X main.version=..."); "dev" marks an unstamped build.
@@ -156,11 +157,19 @@ func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) er
 	if pairing {
 		_, _ = fmt.Fprintln(out, "Scan the QR code from WhatsApp → Linked Devices.")
 	}
+	ui := web.New(web.Deps{Store: st, Rules: rules, Health: mon.Status, Activity: bus, Config: cfg})
 	loops := []func(context.Context){
 		queue.Run,
 		mon.Run,
 		func(ctx context.Context) {
 			backup.Schedule(ctx, cfg, systemClock{}, publishBackup(bus, mon.BackupResult), live.backup)
+		},
+		// The dashboard stops with the other loops. If it cannot listen (the port is taken), capture carries on.
+		func(ctx context.Context) {
+			log.Info("dashboard listening", "listen", cfg.Web.Listen)
+			if err := ui.Run(ctx, cfg.Web.Listen); err != nil {
+				log.Error("dashboard stopped; capture continues", "err", err)
+			}
 		},
 	}
 	// Shutdown order: cancel ctx, client.Run returns, the loops are joined, the event handler in flight is waited for
