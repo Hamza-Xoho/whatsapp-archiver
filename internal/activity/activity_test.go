@@ -41,8 +41,17 @@ func TestDroppedSubscriberDoesNotAffectOthers(t *testing.T) {
 	defer cancelSlow()
 	fast, cancelFast := b.Subscribe(100)
 	defer cancelFast()
-	for i := 0; i < 50; i++ {
-		b.Publish(ev(i))
+	published := make(chan struct{})
+	go func() {
+		defer close(published)
+		for i := 0; i < 50; i++ {
+			b.Publish(ev(i))
+		}
+	}()
+	select {
+	case <-published:
+	case <-time.After(time.Second):
+		t.Fatal("Publish blocked on the slow subscriber")
 	}
 	for i := 0; i < 50; i++ {
 		select {
