@@ -276,3 +276,76 @@ func TestSettingsUnknownSectionIs404(t *testing.T) {
 		t.Fatalf("status %d, want 404", code)
 	}
 }
+
+// The page shows what applies now: config.yaml's alert values until a save, then the saved ones; a rejected form
+// does not change that line.
+func TestSettingsAlertsInUseFollowsSavedValue(t *testing.T) {
+	u := settingsUI(t)
+	if text := u.page(t, "/settings"); !strings.Contains(text, "no events after 6h, disconnected after 15m, phone quiet after 240h, disk free minimum 5 GB") {
+		t.Fatalf("config.yaml thresholds not shown: %s", text)
+	}
+	good := url.Values{"no_events_after": {"8h"}, "disconnected_after": {"20m"}, "phone_quiet_after": {"200h"}, "disk_free_min_gb": {"9"}}
+	if _, code := postForm(t, u.handler(), "/settings/alerts", good); code != http.StatusSeeOther {
+		t.Fatalf("status %d", code)
+	}
+	text := u.page(t, "/settings")
+	if !strings.Contains(text, "no events after 8h, disconnected after 20m, phone quiet after 200h, disk free minimum 9 GB") {
+		t.Fatalf("saved thresholds not shown: %s", text)
+	}
+	bad := url.Values{"no_events_after": {"1h"}, "disconnected_after": {"1m"}, "phone_quiet_after": {"0s"}, "disk_free_min_gb": {"1"}}
+	body, _ := postForm(t, u.handler(), "/settings/alerts", bad)
+	if text = visibleText(body); !strings.Contains(text, "no events after 8h") || !strings.Contains(text, "Phone quiet after must be a duration above zero") {
+		t.Fatalf("a rejected form changed the in-use line or lost its message: %s", text)
+	}
+}
+
+func TestSettingsMediaFieldErrors(t *testing.T) {
+	u := settingsUI(t)
+	for name, mutate := range map[string]func(url.Values){
+		"workers text":   func(f url.Values) { f.Set("workers", "many") },
+		"workers zero":   func(f url.Values) { f.Set("workers", "0") },
+		"retry text":     func(f url.Values) { f.Set("retry_requests_per_minute", "fast") },
+		"retry zero":     func(f url.Values) { f.Set("retry_requests_per_minute", "0") },
+		"unknown skip":   func(f url.Values) { f.Add("skip", "hologram") },
+		"cap over limit": func(f url.Values) { f.Set("video_max_mb", "100001") },
+	} {
+		f := mediaForm("10")
+		mutate(f)
+		body, code := postForm(t, u.handler(), "/settings/media", f)
+		if code != http.StatusUnprocessableEntity {
+			t.Errorf("%s: status %d, want 422", name, code)
+		}
+		if strings.Contains(body, `role="alert"`) == false {
+			t.Errorf("%s: no error shown", name)
+		}
+	}
+	if _, ok, _ := u.st.MediaRules(t.Context()); ok {
+		t.Fatal("an invalid post wrote the rules")
+	}
+	body, _ := postForm(t, u.handler(), "/settings/backup", url.Values{"time": {"25:00"}, "keep": {"7"}})
+	if text := visibleText(body); !strings.Contains(text, `Backup time "25:00" must be HH:MM`) {
+		t.Fatalf("error message not capitalised or missing: %s", text)
+	}
+}
+
+func TestSettingsMediaFormShowsTypeChoices(t *testing.T) {
+	u := settingsUI(t)
+	if err := u.st.SetMediaRules(t.Context(), config.MediaRules{Download: []string{"image", "audio"}, Skip: []string{"gif"}, VideoMaxMB: 0, Workers: 3, RetryRequestsPerMinute: 4}); err != nil {
+		t.Fatal(err)
+	}
+	raw, _, _ := get(t, u.handler(), "/settings")
+	page := string(raw)
+	for _, want := range []string{`name="download" value="image" checked`, `name="download" value="audio" checked`, `name="skip" value="gif" checked`, `name="workers" value="3"`, `name="retry_requests_per_minute" value="4"`} {
+		if !strings.Contains(page, want) {
+			t.Errorf("page lacks %s", want)
+		}
+	}
+	for _, not := range []string{`name="download" value="video" checked`, `name="skip" value="image" checked`} {
+		if strings.Contains(page, not) {
+			t.Errorf("page has %s", not)
+		}
+	}
+	if !strings.Contains(visibleText(page), "largest video no cap") {
+		t.Errorf("a zero cap is not shown as no cap")
+	}
+}
