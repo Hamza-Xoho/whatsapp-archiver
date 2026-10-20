@@ -3,10 +3,12 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -82,5 +84,51 @@ func TestChatsShowsArchiveRulesAfterImport(t *testing.T) {
 	want := "120363111@g.us\tFamily\t5\texcluded=yes\n120363222@g.us\tWork\t1\texcluded=no\n204871@lid\tLayla\t4\texcluded=yes\n"
 	if out != want {
 		t.Fatalf("chats:\n%s\nwant:\n%s", out, want)
+	}
+}
+
+// I4: a manual `archiver backup` keeps as many snapshots as the dashboard's backup.schedule says, not config.yaml's
+// stale keep, so it never prunes snapshots the UI asked to keep.
+func TestManualBackupUsesTheArchivesKeep(t *testing.T) {
+	dir := t.TempDir()
+	dest := t.TempDir()
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(dir, "archive.db"))
+	mustDo(t, err)
+	mustDo(t, st.SetBackupSchedule(ctx, config.BackupConfig{Time: "03:30", Keep: 9}))
+	mustDo(t, st.Close())
+	for day := 1; day <= 10; day++ {
+		mustDo(t, os.MkdirAll(filepath.Join(dest, fmt.Sprintf("202001%02dT000000.000000000Z", day)), 0o700))
+	}
+	writeFile(t, filepath.Join(dir, "config.yaml"), "backup:\n  destination: "+dest+"\n  keep: 2\nwa:\n  check_latest_version: false\n")
+	code, _, errOut := runCmd(t, "backup", "--data", dir)
+	if code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, errOut)
+	}
+	entries, err := os.ReadDir(dest)
+	mustDo(t, err)
+	if len(entries) != 9 {
+		t.Fatalf("%d snapshots kept, want 9 (the archive's keep)", len(entries))
+	}
+}
+
+// Before the import (no backup.schedule) the manual backup keeps config.yaml's number.
+func TestManualBackupFallsBackToConfigKeep(t *testing.T) {
+	dir := t.TempDir()
+	dest := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "archive.db"))
+	mustDo(t, err)
+	mustDo(t, st.Close())
+	for day := 1; day <= 5; day++ {
+		mustDo(t, os.MkdirAll(filepath.Join(dest, fmt.Sprintf("202001%02dT000000.000000000Z", day)), 0o700))
+	}
+	writeFile(t, filepath.Join(dir, "config.yaml"), "backup:\n  destination: "+dest+"\n  keep: 2\nwa:\n  check_latest_version: false\n")
+	if code, _, errOut := runCmd(t, "backup", "--data", dir); code != 0 {
+		t.Fatalf("code=%d stderr=%q", code, errOut)
+	}
+	entries, err := os.ReadDir(dest)
+	mustDo(t, err)
+	if len(entries) != 2 {
+		t.Fatalf("%d snapshots kept, want 2 (config.yaml's keep)", len(entries))
 	}
 }
