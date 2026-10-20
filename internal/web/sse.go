@@ -79,7 +79,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) writeActivity(w http.ResponseWriter, e activity.Event) error {
 	var buf bytes.Buffer
-	if err := s.tmpl.ExecuteTemplate(&buf, "activity_item", e); err != nil {
+	if err := s.tmpl.ExecuteTemplate(&buf, "activity_item", feedItem{Event: e}); err != nil {
 		return err
 	}
 	return writeEvent(w, strconv.FormatInt(e.At.UnixNano(), 10), "activity", buf.String())

@@ -61,7 +61,8 @@ type PairUpdate struct {
 // Server is the control UI's HTTP server.
 type Server struct {
 	d           Deps
-	tmpl        *template.Template // parsed once from templateFiles
+	tmpl        *template.Template            // the layout and shared fragments, parsed once from templateFiles
+	pages       map[string]*template.Template // one clone of tmpl per page, each with its own "content" block
 	static      http.Handler
 	healthEvery time.Duration // how often a quiet stream repeats the health event
 }
@@ -75,12 +76,23 @@ func New(d Deps) *Server {
 	if err != nil {
 		panic(err) // the embed directive guarantees the directory
 	}
+	base := template.Must(template.ParseFS(templateFiles, "templates/layout.html"))
 	return &Server{
-		d:           d,
-		tmpl:        template.Must(template.ParseFS(templateFiles, "templates/*.html")),
+		d:    d,
+		tmpl: base,
+		pages: map[string]*template.Template{
+			"dashboard": pageTemplate(base, "dashboard"),
+		},
 		static:      http.StripPrefix("/static/", fileOnly(http.FileServerFS(sub), sub)),
 		healthEvery: 15 * time.Second,
 	}
+}
+
+// pageTemplate is the layout with one page's templates/<name>.html on top. Pages cannot share a template set: each
+// defines its own "content" block, and the last one parsed would win. Every page is therefore a clone of the layout
+// parsed with its own file. Add a page by creating templates/<name>.html and listing it in New.
+func pageTemplate(layout *template.Template, name string) *template.Template {
+	return template.Must(template.Must(layout.Clone()).ParseFS(templateFiles, "templates/"+name+".html"))
 }
 
 // Handler is every route behind the host and origin guard.
@@ -93,23 +105,20 @@ func (s *Server) Handler() http.Handler {
 // routes registers the pages. Later tasks add theirs here.
 func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /{$}", s.dashboard)
+	mux.HandleFunc("GET /partials/health", s.healthPartial)
 	mux.HandleFunc("GET /events", s.events)
 	mux.Handle("GET /static/", s.static)
 }
 
-// page is what the layout renders.
+// page is what the layout renders; a page's own data embeds it.
 type page struct {
 	Title string
 }
 
-func (s *Server) dashboard(w http.ResponseWriter, _ *http.Request) {
-	s.render(w, "layout", page{Title: "Dashboard"})
-}
-
-// render executes a template into memory first, so a failure is a clean 500 and never half a page.
-func (s *Server) render(w http.ResponseWriter, name string, data any) {
+// render executes the template name of t into memory first, so a failure is a clean 500 and never half a page.
+func (s *Server) render(w http.ResponseWriter, t *template.Template, name string, data any) {
 	var buf bytes.Buffer
-	if err := s.tmpl.ExecuteTemplate(&buf, name, data); err != nil {
+	if err := t.ExecuteTemplate(&buf, name, data); err != nil {
 		http.Error(w, "the page could not be rendered", http.StatusInternalServerError)
 		return
 	}

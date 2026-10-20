@@ -28,4 +28,4 @@
 </html>
 {{end}}
 
-{{define "activity_item"}}<li class="feed-item"><time datetime="{{.At.Format "2006-01-02T15:04:05Z07:00"}}">{{.At.Format "15:04:05"}}</time> <span class="kind">{{.Kind}}</span>{{if .Chat}} <span class="chat">{{.Chat}}</span>{{end}} <span class="detail">{{.Detail}}</span></li>{{end}}
+{{define "activity_item"}}<li class="feed-item"><time datetime="{{.At.Format "2006-01-02T15:04:05Z07:00"}}">{{.At.Format "15:04:05"}}</time> <span class="kind">{{.Kind}}</span>{{if .Name}} <span class="name">{{.Name}}</span>{{end}}{{if .Chat}} <span class="chat">{{.Chat}}</span>{{end}} <span class="detail">{{.Detail}}</span></li>{{end}}

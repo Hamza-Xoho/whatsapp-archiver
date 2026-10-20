@@ -87,3 +87,11 @@ h2 { font-size: 1.05rem; margin: 0 0 0.5rem; }
 
 .feed-item time { color: var(--muted); margin-right: 0.5rem; }
 .feed-item .kind { font-weight: 600; }
+
+.state { font-size: 1.15rem; margin: 0 0 0.5rem; }
+.state.ok strong { color: var(--accent); }
+.facts { display: grid; grid-template-columns: max-content 1fr; gap: 0.2rem 1rem; margin: 0; }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; }
+.counts { margin: 0.5rem 0 0; padding-left: 1.2rem; }
+.feed-item .name { font-weight: 500; }

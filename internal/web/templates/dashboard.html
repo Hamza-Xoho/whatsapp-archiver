@@ -1,0 +1,31 @@
+{{define "health_panel"}}<section class="panel" id="health" hx-get="/partials/health" hx-trigger="sse:health" hx-swap="outerHTML">
+  <h2>Connection</h2>
+  <p class="state {{.StateClass}}"><strong>{{.State}}</strong>{{if .Detail}} <span class="muted">{{.Detail}}</span>{{end}}</p>
+  {{if .PhoneQuiet}}<p class="warn" role="alert">Your phone has not been active for {{.PhoneQuietFor}}. Open WhatsApp on your phone soon, or WhatsApp will unlink this archiver after 14 days of inactivity.</p>{{end}}
+  <dl class="facts">
+    <dt>WhatsApp client version</dt><dd>{{.Version}}</dd>
+    <dt>Last event</dt><dd>{{.LastEvent}}</dd>
+    <dt>Phone last active</dt><dd>{{.PhoneLastActive}}</dd>
+    {{if .Panics}}<dt>Recovered errors</dt><dd class="warn">{{.Panics}}</dd>{{end}}
+  </dl>
+</section>{{end}}
+
+{{define "content"}}
+  <h1>{{.Title}}</h1>
+  {{template "health_panel" .Health}}
+  {{if .HasArchive}}
+  <section class="panel">
+    <h2>Archive</h2>
+    <p>{{.History}}</p>
+    <ul class="counts">
+      <li>Logging: <strong>{{.Logging}}</strong> {{.LoggingNoun}}</li>
+      <li>Not logging: <strong>{{.NotLogging}}</strong> {{.NotLoggingNoun}}</li>
+      <li class="{{if .Gaps}}warn{{end}}">Open gaps: <strong>{{.Gaps}}</strong></li>
+    </ul>
+  </section>
+  {{end}}
+  <section class="panel">
+    <h2>Activity</h2>
+    <ul id="feed" class="feed" sse-swap="activity" hx-swap="afterbegin">{{range .Events}}{{template "activity_item" .}}{{end}}</ul>
+  </section>
+{{end}}
