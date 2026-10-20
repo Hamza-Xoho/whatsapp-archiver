@@ -1,0 +1,290 @@
+[
+ {
+  "name": "t8-cap-negative",
+  "file": "internal/config/config.go",
+  "old": "r.VideoMaxMB < 0 ||",
+  "new": "r.VideoMaxMB < -1 ||",
+  "pkgs": "./internal/config/",
+  "rf": 1
+ },
+ {
+  "name": "t8-cap-limit",
+  "file": "internal/config/config.go",
+  "old": "r.VideoMaxMB > maxVideoMB {",
+  "new": "r.VideoMaxMB > maxVideoMB+1 {",
+  "pkgs": "./internal/config/",
+  "rf": 1
+ },
+ {
+  "name": "t8-workers-zero",
+  "file": "internal/config/config.go",
+  "old": "r.Workers < 1 ||",
+  "new": "r.Workers < 0 ||",
+  "pkgs": "./internal/config/",
+  "rf": 1
+ },
+ {
+  "name": "t8-workers-max",
+  "file": "internal/config/config.go",
+  "old": "r.Workers > maxWorkers {",
+  "new": "r.Workers > maxWorkers+1 {",
+  "pkgs": "./internal/config/",
+  "rf": 1
+ },
+ {
+  "name": "t8-retry-zero",
+  "file": "internal/config/config.go",
+  "old": "r.RetryRequestsPerMinute < 1 ||",
+  "new": "r.RetryRequestsPerMinute < 0 ||",
+  "pkgs": "./internal/config/",
+  "rf": 1
+ },
+ {
+  "name": "t8-retry-max",
+  "file": "internal/config/config.go",
+  "old": "r.RetryRequestsPerMinute > maxRetryRate {",
+  "new": "r.RetryRequestsPerMinute > maxRetryRate+1 {",
+  "pkgs": "./internal/config/",
+  "rf": 1
+ },
+ {
+  "name": "t8-skip-types-unchecked",
+  "file": "internal/config/config.go",
+  "old": "{\"skip\", r.Skip}",
+  "new": "{\"skip\", nil}",
+  "pkgs": "./internal/config/",
+  "rf": 1
+ },
+ {
+  "name": "t8-download-types-unchecked",
+  "file": "internal/config/config.go",
+  "old": "{\"download\", r.Download},",
+  "new": "{\"download\", nil},",
+  "pkgs": "./internal/config/",
+  "rf": 1
+ },
+ {
+  "name": "t8-duration-zero-allowed",
+  "file": "internal/config/config.go",
+  "old": "if d.v <= 0 {",
+  "new": "if d.v < 0 {",
+  "pkgs": "./internal/config/",
+  "rf": 1
+ },
+ {
+  "name": "t8-disk-negative",
+  "file": "internal/config/config.go",
+  "old": "a.DiskFreeMinGB < 0",
+  "new": "a.DiskFreeMinGB < -1",
+  "pkgs": "./internal/config/",
+  "rf": 1
+ },
+ {
+  "name": "t8-time-24",
+  "file": "internal/config/config.go",
+  "old": "2[0-3]",
+  "new": "2[0-9]",
+  "pkgs": "./internal/config/",
+  "rf": 1
+ },
+ {
+  "name": "t8-time-minutes",
+  "file": "internal/config/config.go",
+  "old": ":[0-5]\\d$",
+  "new": ":[0-9]\\d$",
+  "pkgs": "./internal/config/",
+  "rf": 1
+ },
+ {
+  "name": "t8-keep-zero",
+  "file": "internal/config/config.go",
+  "old": "keep < 1 ||",
+  "new": "keep < 0 ||",
+  "pkgs": "./internal/config/",
+  "rf": 1
+ },
+ {
+  "name": "t8-keep-max",
+  "file": "internal/config/config.go",
+  "old": "keep > maxBackupKeep",
+  "new": "keep > maxBackupKeep+1",
+  "pkgs": "./internal/config/",
+  "rf": 1
+ },
+ {
+  "name": "t8-load-skips-media",
+  "file": "internal/config/config.go",
+  "old": "if err := ValidateMediaRules(cfg.Media); err != nil {",
+  "new": "if err := error(nil); err != nil {",
+  "pkgs": "./internal/config/",
+  "rf": 1
+ },
+ {
+  "name": "t8-load-skips-alerts",
+  "file": "internal/config/config.go",
+  "old": "if err := ValidateAlertThresholds(cfg.Alerts); err != nil {",
+  "new": "if err := error(nil); err != nil {",
+  "pkgs": "./internal/config/",
+  "rf": 1
+ },
+ {
+  "name": "t8-load-skips-backup",
+  "file": "internal/config/config.go",
+  "old": "if err := ValidateBackupSchedule(cfg.Backup.Time, cfg.Backup.Keep); err != nil {",
+  "new": "if err := error(nil); err != nil {",
+  "pkgs": "./internal/config/",
+  "rf": 1
+ },
+ {
+  "name": "t8-media-validate-skipped",
+  "file": "internal/web/settings.go",
+  "old": "if err := config.ValidateMediaRules(rules); err != nil {",
+  "new": "if err := error(nil); err != nil {",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t8-alerts-validate-skipped",
+  "file": "internal/web/settings.go",
+  "old": "if err := config.ValidateAlertThresholds(a); err != nil {",
+  "new": "if err := error(nil); err != nil {",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t8-backup-validate-skipped",
+  "file": "internal/web/settings.go",
+  "old": "if err := config.ValidateBackupSchedule(f.Time, keep); err != nil {",
+  "new": "if err := error(nil); err != nil {",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t8-media-not-written",
+  "file": "internal/web/settings.go",
+  "old": "return f, \"\", s.d.Store.SetMediaRules(r.Context(), rules)",
+  "new": "return f, \"\", nil",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t8-alerts-not-written",
+  "file": "internal/web/settings.go",
+  "old": "return f, \"\", s.d.Store.SetAlertThresholds(r.Context(), a)",
+  "new": "return f, \"\", nil",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t8-backup-not-written",
+  "file": "internal/web/settings.go",
+  "old": "return f, \"\", s.d.Store.SetBackupSchedule(r.Context(), config.BackupConfig{Time: f.Time, Keep: keep})",
+  "new": "return f, \"\", nil",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t8-invalid-status-200",
+  "file": "internal/web/settings.go",
+  "old": "w.WriteHeader(http.StatusUnprocessableEntity)",
+  "new": "w.WriteHeader(http.StatusOK)",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t8-saved-not-redirected",
+  "file": "internal/web/settings.go",
+  "old": "http.StatusSeeOther)",
+  "new": "http.StatusFound)",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t8-any-section-accepted",
+  "file": "internal/web/settings.go",
+  "old": "if section != \"media\" && section != \"alerts\" && section != \"backup\" {",
+  "new": "if false {",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t8-unknown-type-accepted",
+  "file": "internal/web/settings.go",
+  "old": "if !slices.Contains(config.MediaTypes, t) {",
+  "new": "if false {",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t8-skip-not-read",
+  "file": "internal/web/settings.go",
+  "old": "Skip: slices.Contains(r.PostForm[\"skip\"], t)}",
+  "new": "Skip: false}",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t8-saved-media-ignored",
+  "file": "internal/web/settings.go",
+  "old": "\t\t} else if ok {\n\t\t\tm = r\n",
+  "new": "\t\t} else if ok {\n\t\t\t_ = r\n",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t8-saved-alerts-ignored",
+  "file": "internal/web/settings.go",
+  "old": "\t\t} else if ok {\n\t\t\ta = t\n",
+  "new": "\t\t} else if ok {\n\t\t\t_ = t\n",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t8-saved-backup-ignored",
+  "file": "internal/web/settings.go",
+  "old": "b.Time, b.Keep = sc.Time, sc.Keep",
+  "new": "_ = sc",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t8-ntfy-always-configured",
+  "file": "internal/web/settings.go",
+  "old": "cfg.Alerts.Ntfy != nil,",
+  "new": "true,",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t8-hours-not-shortened",
+  "file": "internal/web/settings.go",
+  "old": "case d > 0 && d%time.Hour == 0:",
+  "new": "case false:",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t8-minutes-not-shortened",
+  "file": "internal/web/settings.go",
+  "old": "case d > 0 && d%time.Minute == 0:",
+  "new": "case false:",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t8-error-not-capitalised",
+  "file": "internal/web/settings.go",
+  "old": "return string(unicode.ToUpper(r)) + s[i+len(string(r)):]",
+  "new": "return s",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t8-zero-cap-shown-as-zero",
+  "file": "internal/web/settings.go",
+  "old": "if m.VideoMaxMB == 0 {",
+  "new": "if false {",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ }
+]
