@@ -32,7 +32,9 @@ func TestQueuePublishesDoneWithoutPathsOrURLs(t *testing.T) {
 func TestQueuePublishesAFailedItem(t *testing.T) {
 	st := testkit.Store(t)
 	bus := activity.NewBus(500)
-	d := &fakeDown{download: func([]byte, string) ([]byte, error) { return nil, errors.New("https://mmg.whatsapp.net/x?token=abc: boom") }}
+	d := &fakeDown{download: func([]byte, string) ([]byte, error) {
+		return nil, errors.New("https://mmg.whatsapp.net/x?token=abc: boom")
+	}}
 	q := newTestQueue(t, st, d, config.MediaRules{Download: []string{"image"}, Workers: 1}, newClock(), nil).WithActivity(bus)
 	enqueue(t, q, store.Media{ChatJID: "g@g.us", MessageID: "B", Type: "image", MIME: "image/jpeg", Attempts: maxAttempts})
 	stop := start(t, q)
