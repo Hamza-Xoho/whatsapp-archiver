@@ -95,3 +95,21 @@ h2 { font-size: 1.05rem; margin: 0 0 0.5rem; }
 .facts dd { margin: 0; }
 .counts { margin: 0.5rem 0 0; padding-left: 1.2rem; }
 .feed-item .name { font-weight: 500; }
+
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; }
+td.num { font-variant-numeric: tabular-nums; }
+.ok { color: var(--accent); }
+.badge { display: inline-block; padding: 0 0.4rem; border-radius: 4px; background: var(--accent); color: var(--panel); font-size: 0.8rem; }
+.actions form { display: inline; }
+.bulk label, .search label { margin-right: 1rem; }
+.bulk fieldset { border: 1px solid var(--line); margin: 0.5rem 0; }
+.messages { list-style: none; margin: 0; padding: 0; }
+.msg { padding: 0.5rem 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.msg .meta time { color: var(--muted); margin: 0 0.5rem; }
+.msg .text { white-space: pre-wrap; }
+.msg .original { white-space: pre-wrap; font-size: 0.9rem; }
+.msg.deleted .text { text-decoration: line-through; }
+.msg .media { max-width: 18rem; max-height: 18rem; display: block; margin-top: 0.3rem; }
+.reactions span { margin-right: 0.3rem; }
+@media (max-width: 40rem) { .chats th:nth-child(4), .chats td:nth-child(4) { display: none; } }

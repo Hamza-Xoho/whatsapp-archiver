@@ -1,0 +1,63 @@
+{{define "chat_row"}}<tr id="{{.RowID}}"{{if .OOB}} hx-swap-oob="true"{{end}}>
+  <td><input type="checkbox" name="jid[]" value="{{.CanonicalJID}}" form="bulk" aria-label="Select {{.DisplayName}}"></td>
+  <td><a href="/chats/{{.CanonicalJID}}">{{.DisplayName}}</a>{{if .New}} <span class="badge">New</span>{{end}}
+    {{if ne .DisplayName .CanonicalJID}}<br><span class="chat">{{.CanonicalJID}}</span>{{end}}</td>
+  <td class="num">{{.MessageCount}}</td>
+  <td>{{.LastMessage}}</td>
+  <td>{{if .Logging}}<span class="ok">Logging</span>{{else}}<span class="bad">Not logging</span>{{end}}</td>
+  <td>{{if .HasMediaRule}}Own media rules{{else}}Default media{{end}}</td>
+  <td class="actions">
+    <form method="post" action="/chats/rules" hx-post="/chats/rules" hx-swap="none">
+      <input type="hidden" name="jid[]" value="{{.CanonicalJID}}">
+      {{if .Logging}}<input type="hidden" name="logging" value="off"><button>Stop logging</button>
+      {{else}}<input type="hidden" name="logging" value="on"><button>Start logging</button>{{end}}
+    </form>
+    {{if .New}}<form method="post" action="/chats/ack" hx-post="/chats/ack" hx-swap="none">
+      <input type="hidden" name="jid[]" value="{{.CanonicalJID}}"><button>Mark as seen</button>
+    </form>{{end}}
+  </td>
+</tr>{{end}}
+
+{{define "chat_rows"}}{{range .}}{{template "chat_row" .}}
+{{end}}{{end}}
+
+{{define "content"}}
+  <h1>{{.Title}}</h1>
+  <form class="panel search" method="get" action="/chats">
+    <label>Find a chat <input type="search" name="q" value="{{.Query}}" placeholder="Name or number"></label>
+    <button>Find</button>
+  </form>
+  <form id="bulk" class="panel bulk" method="post" action="/chats/rules" hx-post="/chats/rules" hx-swap="none">
+    <h2>Change the selected chats</h2>
+    <label>Logging
+      <select name="logging">
+        <option value="">Leave as it is</option>
+        <option value="on">Start logging</option>
+        <option value="off">Stop logging</option>
+      </select>
+    </label>
+    <label>Media
+      <select name="media">
+        <option value="">Leave as it is</option>
+        <option value="default">Default media rules</option>
+        <option value="text-only">Text only (no media)</option>
+        <option value="custom">Choose below</option>
+      </select>
+    </label>
+    <fieldset>
+      <legend>When "Choose below": download</legend>
+      {{range .MediaTypes}}<label><input type="checkbox" name="download" value="{{.}}"> {{.}}</label> {{end}}
+      <label>Largest video (MB, 0 for no cap) <input type="number" name="video_max_mb" min="0" value="0"></label>
+    </fieldset>
+    <button>Apply to selected</button>
+    <button formaction="/chats/ack" hx-post="/chats/ack">Mark selected as seen</button>
+  </form>
+  <section class="panel">
+    {{if .Rows}}
+    <table class="chats">
+      <thead><tr><th></th><th>Chat</th><th>Messages</th><th>Last message</th><th>Status</th><th>Media</th><th></th></tr></thead>
+      <tbody id="chat-rows">{{template "chat_rows" .Rows}}</tbody>
+    </table>
+    {{else}}<p class="muted">No chats{{if .Query}} match "{{.Query}}"{{end}}.</p>{{end}}
+  </section>
+{{end}}

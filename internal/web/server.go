@@ -82,6 +82,9 @@ func New(d Deps) *Server {
 		tmpl: base,
 		pages: map[string]*template.Template{
 			"dashboard": pageTemplate(base, "dashboard"),
+			"chats":     pageTemplate(base, "chats"),
+			"viewer":    pageTemplate(base, "viewer"),
+			"trace":     pageTemplate(base, "trace"),
 		},
 		static:      http.StripPrefix("/static/", fileOnly(http.FileServerFS(sub), sub)),
 		healthEvery: 15 * time.Second,
@@ -107,6 +110,12 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /{$}", s.dashboard)
 	mux.HandleFunc("GET /partials/health", s.healthPartial)
 	mux.HandleFunc("GET /events", s.events)
+	mux.HandleFunc("GET /chats", s.chats)
+	mux.HandleFunc("POST /chats/rules", s.chatRules)
+	mux.HandleFunc("POST /chats/ack", s.chatAck)
+	mux.HandleFunc("GET /chats/{jid}", s.viewer)
+	mux.HandleFunc("GET /chats/{jid}/m/{id}", s.trace)
+	mux.HandleFunc("GET /media", s.media)
 	mux.Handle("GET /static/", s.static)
 }
 

@@ -1,0 +1,32 @@
+{{define "content"}}
+  <h1>{{.Name}}</h1>
+  {{if ne .Name .JID}}<p class="chat">{{.JID}}</p>{{end}}
+  <p><a href="/chats">All chats</a>{{if .Before}} · <a href="/chats/{{.JID}}">Newest messages</a>{{end}}</p>
+  {{if .HasOlder}}<p><a href="/chats/{{.JID}}?before={{.OlderBefore}}">Older messages</a></p>{{end}}
+  <section class="panel">
+    {{if not .Messages}}<p class="muted">No messages{{if .Before}} older than this{{end}}.</p>{{end}}
+    <ol class="messages">
+    {{range .Messages}}
+      <li class="msg{{if .Deleted}} deleted{{end}}">
+        <div class="meta"><strong class="name">{{.From}}</strong> <time>{{.Time}}</time>
+          <a class="muted" href="/chats/{{$.JID}}/m/{{.ID}}">Details</a></div>
+        {{if .QuotedID}}<div class="muted">Reply to an earlier message</div>{{end}}
+        {{if .Deleted}}<div class="warn">Deleted by the sender. The archived copy is kept below.</div>{{end}}
+        {{if .EditedText}}
+          <div class="text">{{.EditedText}}</div>
+          <div class="original"><span class="muted">Edited. Original:</span> {{.Text}}</div>
+        {{else if .Text}}
+          <div class="text">{{.Text}}</div>
+        {{end}}
+        {{if .ShowMedia}}
+          {{if .IsImage}}<a href="/media?chat={{$.JID}}&amp;id={{.ID}}"><img class="media" src="/media?chat={{$.JID}}&amp;id={{.ID}}" alt="Picture" loading="lazy"></a>
+          {{else}}<a href="/media?chat={{$.JID}}&amp;id={{.ID}}">Open {{if .MediaType}}{{.MediaType}}{{else}}file{{end}}</a>{{end}}
+        {{else if .MediaType}}<div class="muted">{{.MediaType}}{{if .MediaState}} ({{.MediaState}}){{else}} (not downloaded){{end}}</div>
+        {{end}}
+        {{if .Reactions}}<div class="reactions">{{range .Reactions}}<span>{{.}}</span> {{end}}</div>{{end}}
+      </li>
+    {{end}}
+    </ol>
+  </section>
+  {{if .HasOlder}}<p><a href="/chats/{{.JID}}?before={{.OlderBefore}}">Older messages</a></p>{{end}}
+{{end}}
