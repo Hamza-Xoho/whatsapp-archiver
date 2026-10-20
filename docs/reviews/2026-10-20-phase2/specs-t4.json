@@ -1,0 +1,194 @@
+[
+ {
+  "name": "t4-host-check-bypassed",
+  "file": "internal/web/guard.go",
+  "old": "\t\tif !loopbackHost(r.Host) {",
+  "new": "\t\tif false {",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t4-origin-check-bypassed",
+  "file": "internal/web/guard.go",
+  "old": "r.Method != http.MethodHead && !sameOrigin(r) {",
+  "new": "r.Method != http.MethodHead && false {",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t4-origin-only-on-post",
+  "file": "internal/web/guard.go",
+  "old": "if r.Method != http.MethodGet && r.Method != http.MethodHead && !sameOrigin(r) {",
+  "new": "if r.Method == http.MethodPost && !sameOrigin(r) {",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t4-any-host-name",
+  "file": "internal/web/guard.go",
+  "old": "\tswitch strings.ToLower(name) {\n\tcase \"localhost\", \"127.0.0.1\", \"::1\":\n\t\treturn true\n\t}\n\treturn false",
+  "new": "\treturn name != \"\" || strings.ToLower(name) != \"\"",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t4-port-not-checked",
+  "file": "internal/web/guard.go",
+  "old": "err != nil || n < 1 || n > 65535 {",
+  "new": "false {",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t4-host-case-sensitive",
+  "file": "internal/web/guard.go",
+  "old": "switch strings.ToLower(name) {",
+  "new": "switch name {",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t4-referer-prefix-match",
+  "file": "internal/web/guard.go",
+  "old": "\treturn \"http://\"+ref.Host == want",
+  "new": "\treturn strings.HasPrefix(r.Header.Get(\"Referer\"), want)",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t4-foreign-origin-falls-to-referer",
+  "file": "internal/web/guard.go",
+  "old": "origin != \"\" {\n\t\treturn origin == want\n\t}",
+  "new": "origin == want {\n\t\treturn true\n\t}",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t4-null-or-any-origin",
+  "file": "internal/web/guard.go",
+  "old": "\t\treturn origin == want\n",
+  "new": "\t\treturn true\n",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t4-no-frame-deny",
+  "file": "internal/web/guard.go",
+  "old": "\t\th.Set(\"X-Frame-Options\", \"DENY\")\n",
+  "new": "",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t4-sse-ignores-client-gone",
+  "file": "internal/web/sse.go",
+  "old": "\t\tcase <-r.Context().Done():\n\t\t\treturn\n",
+  "new": "",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t4-sse-spins-on-closed-feed",
+  "file": "internal/web/sse.go",
+  "old": "\t\t\t\treturn // dropped for falling behind",
+  "new": "\t\t\t\tcontinue // dropped for falling behind",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t4-sse-no-flush-in-loop",
+  "file": "internal/web/sse.go",
+  "old": "\t\tif err != nil {\n\t\t\treturn\n\t\t}\n\t\tflusher.Flush()\n",
+  "new": "\t\tif err != nil {\n\t\t\treturn\n\t\t}\n",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t4-sse-replay-ignored",
+  "file": "internal/web/sse.go",
+  "old": "10, 64); err == nil {",
+  "new": "10, 64); err == nil && false {",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t4-sse-replay-resends-seen",
+  "file": "internal/web/sse.go",
+  "old": "e.At.UnixNano() > last &&",
+  "new": "e.At.UnixNano() >= last &&",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t4-sse-first-connect-replays",
+  "file": "internal/web/sse.go",
+  "old": "if last, err := strconv.ParseInt(r.Header.Get(\"Last-Event-ID\"), 10, 64); err == nil {",
+  "new": "if last, _ := strconv.ParseInt(r.Header.Get(\"Last-Event-ID\"), 10, 64); true {",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t4-sse-no-health-on-state",
+  "file": "internal/web/sse.go",
+  "old": "if err == nil && e.Kind == \"state\" {",
+  "new": "if false {",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t4-sse-no-health-tick",
+  "file": "internal/web/sse.go",
+  "old": "\t\tcase <-tick.C:\n\t\t\terr = s.writeHealth(w)\n",
+  "new": "\t\tcase <-tick.C:\n",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t4-sse-no-event-id",
+  "file": "internal/web/sse.go",
+  "old": "return writeEvent(w, strconv.FormatInt(e.At.UnixNano(), 10), \"activity\", buf.String())",
+  "new": "return writeEvent(w, \"\", \"activity\", buf.String())",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t4-run-no-base-context",
+  "file": "internal/web/server.go",
+  "old": "\t\tBaseContext:       func(net.Listener) context.Context { return ctx },\n",
+  "new": "",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t4-run-swallows-listen-error",
+  "file": "internal/web/server.go",
+  "old": "\t\treturn fmt.Errorf(\"web: listen on %s: %w\", listen, err)",
+  "new": "\t\treturn nil",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t4-run-ignores-ctx",
+  "file": "internal/web/server.go",
+  "old": "\tcase <-ctx.Done():\n\t}",
+  "new": "\tcase <-make(chan struct{}):\n\t}",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t4-static-lists-dir",
+  "file": "internal/web/server.go",
+  "old": "if err != nil || info.IsDir() {",
+  "new": "if err != nil {",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t4-serve-no-web-loop",
+  "file": "cmd/archiver/main.go",
+  "old": "\t\t\tif err := ui.Run(ctx, cfg.Web.Listen); err != nil {",
+  "new": "\t\t\t_ = ui\n\t\t\tif err := error(nil); err != nil {",
+  "pkgs": "./cmd/archiver/",
+  "rf": 1
+ }
+]
