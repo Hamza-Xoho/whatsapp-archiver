@@ -34,8 +34,16 @@
  {
   "name": "t4-port-not-checked",
   "file": "internal/web/guard.go",
+  "old": "if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {",
+  "new": "if _, err := strconv.Atoi(port); err != nil && false {",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t4-port-range-not-checked",
+  "file": "internal/web/guard.go",
   "old": "err != nil || n < 1 || n > 65535 {",
-  "new": "false {",
+  "new": "err != nil || n < 0 {",
   "pkgs": "./internal/web/",
   "rf": 1
  },
@@ -43,7 +51,7 @@
   "name": "t4-host-case-sensitive",
   "file": "internal/web/guard.go",
   "old": "switch strings.ToLower(name) {",
-  "new": "switch name {",
+  "new": "switch strings.TrimSpace(name) {",
   "pkgs": "./internal/web/",
   "rf": 1
  },
@@ -179,7 +187,7 @@
   "name": "t4-static-lists-dir",
   "file": "internal/web/server.go",
   "old": "if err != nil || info.IsDir() {",
-  "new": "if err != nil {",
+  "new": "if err != nil || info.IsDir() && false {",
   "pkgs": "./internal/web/",
   "rf": 1
  },
