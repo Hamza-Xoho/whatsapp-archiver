@@ -166,5 +166,37 @@
   "new": "",
   "pkgs": "./cmd/archiver/",
   "rf": 1
+ },
+ {
+  "name": "t3-skip-on-any-refusal",
+  "file": "internal/ingest/pipeline.go",
+  "old": "if err == nil && excluded && publish {",
+  "new": "if err == nil && publish {",
+  "pkgs": "./internal/ingest/",
+  "rf": 1
+ },
+ {
+  "name": "t3-decide-reports-excluded-for-status",
+  "file": "internal/ingest/scope.go",
+  "old": "\tif chatJID == \"status@broadcast\" {\n\t\treturn false, false, nil",
+  "new": "\tif chatJID == \"status@broadcast\" {\n\t\treturn false, true, nil",
+  "pkgs": "./internal/ingest/",
+  "rf": 1
+ },
+ {
+  "name": "t3-decide-never-excluded",
+  "file": "internal/ingest/scope.go",
+  "old": "return !excluded, excluded, nil",
+  "new": "return !excluded, false, nil",
+  "pkgs": "./internal/ingest/",
+  "rf": 1
+ },
+ {
+  "name": "t3-slow-sub-never-closed",
+  "file": "internal/activity/activity.go",
+  "old": "\t\tdefault:\n\t\t\tdelete(b.subs, s)\n\t\t\tclose(s.ch)\n",
+  "new": "\t\tdefault:\n\t\t\tdelete(b.subs, s)\n",
+  "pkgs": "./internal/activity/",
+  "rf": 1
  }
 ]
