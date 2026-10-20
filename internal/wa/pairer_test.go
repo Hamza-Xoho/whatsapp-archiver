@@ -228,3 +228,44 @@ func TestPairingChannelClosesWhenRunStops(t *testing.T) {
 		t.Fatal("StartPairing after Run stopped succeeded")
 	}
 }
+
+// Fix round 1: Paired is read from HTTP goroutines while pairing completes; with -race the reads must not touch the
+// device whatsmeow writes.
+func TestPairedIsSafeToReadWhilePairingCompletes(t *testing.T) {
+	r := newPairRig(t, false)
+	if r.p.Paired() {
+		t.Fatal("paired before pairing")
+	}
+	ch, err := r.p.StartPairing(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.sock.waitConnects(t, 1)
+	stop := make(chan struct{})
+	readers := make(chan struct{})
+	go func() {
+		defer close(readers)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				_ = r.p.Paired()
+			}
+		}
+	}()
+	time.Sleep(10 * time.Millisecond)
+	own := types.NewJID("15550001111", types.DefaultUserServer)
+	r.device.ID = &own // what handlePair does, on whatsmeow's goroutine
+	r.qrs[0] <- whatsmeow.QRChannelSuccess
+	for {
+		if u, ok := recv(t, ch); !ok || u.Done {
+			break
+		}
+	}
+	close(stop)
+	<-readers
+	if !r.p.Paired() {
+		t.Fatal("not paired after Done")
+	}
+}

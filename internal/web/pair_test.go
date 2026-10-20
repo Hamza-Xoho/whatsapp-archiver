@@ -296,3 +296,25 @@ func TestSecondPairStartKeepsTheRunningPairing(t *testing.T) {
 		t.Fatalf("second start changed the page:\n%s", body)
 	}
 }
+
+// Fix round 1: every page says when WhatsApp is not paired and links to /pair; the nav always has Pairing.
+func TestBannerWhenUnpaired(t *testing.T) {
+	for _, paired := range []bool{false, true} {
+		f := newFakePairer(t, paired)
+		h := newPairUI(t, f).Handler()
+		for _, path := range []string{"/", "/settings"} {
+			body, code, _ := get(t, h, path)
+			if code != http.StatusOK {
+				t.Fatalf("GET %s: %d", path, code)
+			}
+			page := string(body)
+			banner := strings.Contains(page, `<a href="/pair">Pair it now</a>`) && strings.Contains(visibleText(page), "WhatsApp is not paired yet. Pair it now")
+			if banner == paired {
+				t.Fatalf("paired=%v GET %s banner=%v:\n%s", paired, path, banner, page)
+			}
+			if !strings.Contains(page, `<a href="/pair">Pairing</a>`) {
+				t.Fatalf("GET %s: no Pairing link in the nav", path)
+			}
+		}
+	}
+}

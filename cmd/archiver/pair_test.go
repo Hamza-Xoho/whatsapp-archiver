@@ -6,10 +6,13 @@ import (
 	"go/parser"
 	"go/token"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"whatsapp-archiver/internal/config"
 	"whatsapp-archiver/internal/wa"
 	"whatsapp-archiver/internal/web"
 )
@@ -168,5 +171,94 @@ func TestRunConnectsOnlyAfterPairingIsStarted(t *testing.T) {
 	}
 	if code, errOut := r.stop(t); code != 0 {
 		t.Fatalf("code=%d stderr=%q", code, errOut)
+	}
+}
+
+// multiPairer hands out a new channel per StartPairing, like wa after a failed attempt.
+type multiPairer struct {
+	mu  sync.Mutex
+	chs []chan wa.PairUpdate
+}
+
+func (m *multiPairer) Paired() bool { return false }
+func (m *multiPairer) StartPairing(context.Context) (<-chan wa.PairUpdate, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ch := make(chan wa.PairUpdate, 4)
+	m.chs = append(m.chs, ch)
+	return ch, nil
+}
+func (m *multiPairer) attempt(i int) chan wa.PairUpdate {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if i >= len(m.chs) {
+		return nil
+	}
+	return m.chs[i]
+}
+
+func pairRequest(t *testing.T, h http.Handler, method, path string) (int, string) {
+	t.Helper()
+	r := httptest.NewRequest(method, path, nil)
+	r.Host = "localhost:8080"
+	if method == http.MethodPost {
+		r.Header.Set("Origin", "http://localhost:8080")
+	}
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	return w.Code, w.Body.String()
+}
+
+func waitPairBody(t *testing.T, h http.Handler, want string) string {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		_, body := pairRequest(t, h, http.MethodGet, "/pair")
+		if strings.Contains(body, want) {
+			return body
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("GET /pair never showed %q:\n%s", want, body)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// Fix round 1, I1: in the browser a QR timeout never says to run `archiver pair` (a second process on the same
+// archive and session) while the service runs; it says to press the button, and the button starts a new attempt.
+func TestBrowserQRTimeoutSaysPressPairAgain(t *testing.T) {
+	m := &multiPairer{}
+	h := web.New(web.Deps{Config: &config.Config{TimeZone: "UTC"}, Pairer: &browserPairer{p: m}}).Handler()
+	if code, _ := pairRequest(t, h, http.MethodPost, "/pair/start"); code != http.StatusSeeOther {
+		t.Fatalf("POST /pair/start: %d", code)
+	}
+	first := m.attempt(0)
+	first <- wa.PairUpdate{QR: "2@one"}
+	waitPairBody(t, h, `src="/pair/qr.png`)
+	first <- wa.PairUpdate{Err: wa.QRTimedOut}
+	close(first)
+	body := waitPairBody(t, h, "QR code timed out. Press Pair WhatsApp to try again.")
+	if strings.Contains(body, "archiver pair") {
+		t.Fatalf("the browser is told to run archiver pair:\n%s", body)
+	}
+	if !strings.Contains(body, `action="/pair/start"`) {
+		t.Fatalf("no Pair WhatsApp button after the timeout:\n%s", body)
+	}
+	if code, _ := pairRequest(t, h, http.MethodPost, "/pair/start"); code != http.StatusSeeOther {
+		t.Fatalf("second POST /pair/start: %d", code)
+	}
+	second := m.attempt(1)
+	if second == nil {
+		t.Fatal("the second POST did not start a new attempt")
+	}
+	second <- wa.PairUpdate{QR: "2@again"}
+	waitPairBody(t, h, `src="/pair/qr.png?n=2"`)
+	close(second)
+}
+
+// The terminal keeps pairLine's text: only the browser adapter rewrites the timeout.
+func TestQRTimedOutIsTheTerminalLine(t *testing.T) {
+	if wa.QRTimedOut != "QR code timed out; run `archiver pair` again." {
+		t.Fatalf("wa.QRTimedOut=%q", wa.QRTimedOut)
 	}
 }
