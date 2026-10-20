@@ -27,6 +27,6 @@
 <pre>sudo -u whatsapp-archiver sh -c 'mkdir -p -m 700 /var/tmp/snapshot-check &amp;&amp; cp "$(ls -1d {{.Dest}}/*/ | tail -n 1)archive.db" /var/tmp/snapshot-check/'
 sudo -u whatsapp-archiver /opt/whatsapp-archiver/archiver status --data /var/tmp/snapshot-check
 sudo rm -r /var/tmp/snapshot-check</pre>
-    <p>Then, with the service stopped, put that <code>archive.db</code> in the data folder ({{.DataDir}}) and start the service again. The full steps are in the README, section Backups.</p>
+    <p>Then, with the service stopped, put that <code>archive.db</code> in a fresh data folder ({{.DataDir}}), check it with <code>PRAGMA integrity_check</code>, start the service and pair again on the Pairing page. The full commands are in the README, section 13, Restore a backup.</p>
   </section>
 {{end}}

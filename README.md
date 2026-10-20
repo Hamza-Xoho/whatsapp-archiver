@@ -49,7 +49,8 @@ The invariants, package boundaries and workflow rules are in [AGENTS.md](AGENTS.
 ## Contents
 
 - [Read this first](#read-this-first), [What it does](#what-it-does), [How it works](#how-it-works)
-- **[Setup guide](#setup-guide)**: install Ubuntu, build, configure, pair, run, update, back up, troubleshoot
+- **[Setup guide](#setup-guide)**: install Ubuntu, build, configure, pair, run, update, back up, restore, troubleshoot
+- **[Dashboard](#dashboard)**: the browser screens, what moved out of `config.yaml`
 - **[Let Claude Code do the setup](#let-claude-code-do-the-setup-optional)**: an optional way to do the setup guide over SSH from your main computer
 - [Command reference](#command-reference) and [What is on disk](#what-is-on-disk)
 - [Quick start for developers](#quick-start-developers), [Development](#development), [What is left](#what-is-left)
@@ -238,6 +239,8 @@ time_zone: Europe/London
 
 # Chats that must never be stored. Direct chats: the other person's phone number as digits only,
 # country code first, no "+" and no leading 0 after the country code, then @s.whatsapp.net.
+# Read only on the first start of a build that has the dashboard (it copies the list into the archive);
+# after that the Chats page owns it and this list is ignored.
 # CHANGE (default: none)
 exclude:
   - "441234567890@s.whatsapp.net"
@@ -245,7 +248,7 @@ exclude:
 # What the phone is asked to send when you pair. WhatsApp may send less.
 history: {days_limit: 3650, size_mb_limit: 4096}
 
-# Media downloads.
+# Media downloads. First-start values: after the first start the Settings page owns these.
 media:
   download: [document, image, audio, video]
   video_max_mb: 100
@@ -253,6 +256,8 @@ media:
   workers: 2
   retry_requests_per_minute: 10
 
+# The three durations and disk_free_min_gb are first-start values (the Settings page owns them afterwards);
+# ntfy stays here.
 alerts:
   # CHANGE the topic to yours from section 5 (default: no alerts at all)
   ntfy: {url: "https://ntfy.sh/CHANGE-TO-A-PRIVATE-TOPIC", token: ""}
@@ -262,7 +267,8 @@ alerts:
   disk_free_min_gb: 5        # "Disk space low" alert
 
 # Nightly snapshot of archive.db (default destination: none, so the nightly backup fails and alerts).
-# `time` is in the server's time zone; `keep` is how many snapshots to keep.
+# `time` is in the server's time zone; `keep` is how many snapshots to keep. `destination` stays here;
+# `time` and `keep` are first-start values (the Settings page owns them afterwards).
 backup: {destination: "/srv/backups/whatsapp-archiver", time: "03:30", keep: 7}
 
 wa:
@@ -274,6 +280,21 @@ Notes:
 
 - A misspelled key is an error, not ignored: `decode config: yaml: unmarshal errors: line 7: field exclud not found in type config.Config`. Do not add `data_dir`: the `--data` option decides the folder.
 - **Direct chats**: write the phone-number form. When WhatsApp later shows the same person under a `…@lid` address, the exclusion covers it as soon as the archiver has seen the link between the two addresses, which arrives with the messages and with history. **Groups**: WhatsApp never shows a group's address, so it cannot be listed before pairing. After the first capture `archiver chats` lists the groups and their addresses (section 8); add the ones to exclude then. Rows stored before that stay in the database. If a group must never be stored, do a practice pairing first: pair as in section 7 with a throw-away data folder (`--data /var/tmp/practice`; it needs no `config.yaml` and stores everything it sees), run `archiver chats --data /var/tmp/practice`, then unlink the device in WhatsApp (Settings → Linked Devices) and delete the folder with `sudo rm -r /var/tmp/practice`. It costs one extra pairing.
+- **Limits `config.yaml` must meet.** The archiver checks these when it reads the file, and a value outside them stops the service at start with a message naming the key (for example `media: workers must be a whole number from 1 to 16`). The Settings page enforces the same limits.
+
+  | Key | Allowed |
+  | --- | --- |
+  | `media.workers` | a whole number from 1 to 16 |
+  | `media.retry_requests_per_minute` | a whole number from 1 to 600 |
+  | `media.video_max_mb` | a whole number from 0 (no cap) to 100000 |
+  | `media.download`, `media.skip` | only `image`, `video`, `audio`, `document`, `sticker`, `gif`; an empty `download` list means text only |
+  | `alerts.no_events_after`, `alerts.disconnected_after`, `alerts.phone_quiet_after` | a duration above zero, such as `6h` or `15m` |
+  | `alerts.disk_free_min_gb` | a whole number of GB, 0 or more |
+  | `backup.time` | `HH:MM` on a 24-hour clock, such as `03:30` |
+  | `backup.keep` | a whole number of snapshots from 1 to 3650 |
+  | `web.listen` | `host:port` with the host `127.0.0.1`, `::1` or `localhost` (the dashboard has no login) |
+  | `wa.version_override` | empty, or three numbers separated by dots |
+  | `exclude` entries | `<digits>@s.whatsapp.net`, `<digits>@lid` or `<id>@g.us` |
 - After editing the file later, `ls -l` must still show the owner `whatsapp-archiver` and `-rw-------`; repeat the `chown` and `chmod` above if not.
 
 Check the file and test ntfy through the archiver itself. `run` reads the configuration, finds that the phone is not paired yet, sends one alert and then stays up serving the dashboard on `web.listen` (127.0.0.1:8080), without contacting WhatsApp until you start pairing from the dashboard. This test is safe only now, before pairing: **never run `archiver run` in a terminal once the service is installed**, because after pairing it connects with the same login as the service:
@@ -359,7 +380,7 @@ data folder: 85.8 MB
 - `open gaps` counts messages the archiver received but could not decrypt and has not yet received again. It should fall to 0 by itself.
 - `media pending` / `expired` / `failed` count downloads that have not finished; stickers, GIFs and videos over 100 MB are deliberately skipped and are not counted.
 
-Expected for `chats`: one line per chat, `canonical JID`, name, message count and `excluded=yes` or `excluded=no`, for example `120363…@g.us	Course group	412	excluded=no`. Use it to find the addresses for the `exclude:` list; after changing the file run `sudo systemctl restart archiver`.
+Expected for `chats`: one line per chat, `canonical JID`, name, message count and `excluded=yes` or `excluded=no`, for example `120363…@g.us	Course group	412	excluded=no`. Use it to find chat addresses; to change what is logged use the dashboard's Chats page (see [Dashboard](#dashboard)). `exclude:` in `config.yaml` is read only on the first start of a build that has the dashboard.
 
 ### 9. Alerts: what they mean
 
@@ -418,7 +439,7 @@ Expected: `sha256sum` starts with the same characters as the Mac's `shasum`; `ve
   ```
 
   Expected: `snapshot /srv/backups/whatsapp-archiver/20261015T033000.123456789Z/archive.db (… bytes, …ms)` and one folder per snapshot. A failure prints the reason and sends a `Backup failed` alert at night.
-- **`session.db` is never backed up, copied or restored.** It is the WhatsApp login; a copy used on two machines gets the login replaced. Moving to a new server or recovering from a disaster means pairing again, with a snapshot's `archive.db` placed in the new data folder first.
+- **`session.db` is never backed up, copied or restored.** It is the WhatsApp login; a copy used on two machines gets the login replaced. Moving to a new server or recovering from a disaster means pairing again, with a snapshot's `archive.db` placed in the new data folder first: see [13. Restore a backup](#13-restore-a-backup).
 - **Media** (`media/`) is not in the snapshots; copy it every night with a systemd timer, as below. The copy never deletes files (no `--delete`), so an accidental wipe of the data folder is not mirrored into the backup.
 
 Create the media timer on the server. The `ConditionPathExists` line skips a run while no media has been downloaded yet (the `media` folder appears with the first download):
@@ -466,6 +487,65 @@ Expected: `command -v rsync` prints `/usr/bin/rsync` (if it prints another path,
 | `exclude entry "…" is not a chat address` | A line of `exclude:` is not written as `<digits>@s.whatsapp.net`, `<digits>@lid` or `<id>@g.us` (no `+`, no spaces). Correct it; the archiver does not start until then. |
 | `Exec format error` when the program or the service starts | The wrong Linux build was copied. Copy `archiver-linux-arm64` when `uname -m` prints `aarch64`, `archiver-linux-amd64` when it prints `x86_64` (section 3). |
 | `Text file busy` while installing a new program | The service is still running: `sudo systemctl stop archiver` first. |
+
+### 13. Restore a backup
+
+Use this on a new server, or after the data folder was lost or damaged. There is no restore button in the dashboard: restoring replaces the archive, so it is a command you run. Only `archive.db` comes back. **`session.db` is never copied or restored** (ADR-26): a copied login breaks WhatsApp's encryption sessions and leaves silent gaps, so after a restore you pair again, from the dashboard's Pairing page. A new server first needs sections 1 to 6 (the program, the `whatsapp-archiver` user, the folders and `config.yaml`), but not section 7.
+
+On the server:
+
+```sh
+sudo systemctl stop archiver
+sudo mv /var/lib/whatsapp-archiver /var/lib/whatsapp-archiver.old
+sudo install -d -o whatsapp-archiver -g whatsapp-archiver -m 0700 /var/lib/whatsapp-archiver
+sudo -u whatsapp-archiver sh -c 'cp "$(ls -1d /srv/backups/whatsapp-archiver/*/ | tail -n 1)archive.db" /var/lib/whatsapp-archiver/'
+sudo -u whatsapp-archiver sqlite3 -readonly /var/lib/whatsapp-archiver/archive.db 'PRAGMA integrity_check;'
+```
+
+(Skip the `mv` on a new server where the folder is empty or missing; the `install -d` line creates it.) The snapshot folders are named by UTC time, so the last one is the newest. Expected from the check: the single line `ok`. Anything else means that snapshot is damaged: delete the copy and use the next older folder (`ls -1d /srv/backups/whatsapp-archiver/*/`). Then put `config.yaml` back (copy it from `/var/lib/whatsapp-archiver.old/config.yaml`, or write it again as in section 6) and check what the snapshot holds:
+
+```sh
+sudo -u whatsapp-archiver cp /var/lib/whatsapp-archiver.old/config.yaml /var/lib/whatsapp-archiver/
+sudo -u whatsapp-archiver /opt/whatsapp-archiver/archiver status --data /var/lib/whatsapp-archiver
+sudo ls -A /var/lib/whatsapp-archiver
+```
+
+Expected: `status` shows `state: unknown (health.json not found)` and the chats and message counts of the snapshot; the folder lists `archive.db` and `config.yaml` and **no `session.db`**. Media is not in the snapshots; if you kept the media copy of section 11, put it back with `sudo -u whatsapp-archiver rsync -a /srv/backups/whatsapp-archiver-media/ /var/lib/whatsapp-archiver/media/`. Then start the service and pair:
+
+```sh
+sudo systemctl start archiver
+```
+
+The archive carries the chat rules and settings you had set in the dashboard, so they come back with it. The service starts unpaired, sends the "not paired" alert, and waits: open the tunnel (section 7) and press **Pair WhatsApp** on the Pairing page. Messages WhatsApp did not deliver to the archiver while it was away are not recovered by a restore. When capture is running and `status` shows the counts you expect, remove the old folder with `sudo rm -r /var/lib/whatsapp-archiver.old` (it holds the old `session.db`: do not copy it back).
+
+## Dashboard
+
+Since phase 2 the service also serves a control dashboard, in the same process as the capture. It is read-only for your messages: you can look at chats, messages, edits, deletions, reactions and media, and change what is logged, but nothing in it deletes data or sends anything to WhatsApp. It has no login, so it listens on this computer only (`web.listen`, default `127.0.0.1:8080`; any other host is refused at start). You reach it over an SSH tunnel from your Mac. Keep this window open while you use it:
+
+```sh
+ssh -L 8080:localhost:8080 hamza@192.168.0.104
+```
+
+Then open <http://localhost:8080> in the Mac's browser. (`192.168.0.104` is this server; use your own address and user.) Requests whose `Host` is not `localhost`, `127.0.0.1` or `[::1]` with the port, and posts from another site, are answered with 403.
+
+| Screen | What it shows or does |
+| --- | --- |
+| Dashboard (`/`) | Connection state, WhatsApp client version, last event, a warning when the phone has been quiet, how many chats are logged and not, open gaps, and a live activity feed (a new message shows within about 2 seconds). The feed never shows message text. |
+| Chats (`/chats`) | Every chat with its message count, last message and whether it is Logging or Not logging. Stop or start logging for one chat or a selection; give a chat its own media rules ("Default media", "Text only", or a custom list). Chats that appeared since you last looked are marked **New**; **Mark as seen** clears it. Open a chat to read it: newest 200 messages first with an "older" link, names, edits, deletions, reactions and media. Open a message for its trace: when it arrived and what happened to it. |
+| Settings (`/settings`) | Media rules, alert thresholds and the backup time and number of snapshots to keep. Changes apply as soon as they are saved; the number of download workers and the retry rate are read when the archiver starts. The limits are the ones in the table in section 6. |
+| Storage (`/storage`) | Sizes of the database, media and backup folder, free disk space, growth per week and the estimated time until the disk is full. Display only: no delete or retention buttons. |
+| Backups (`/backups`) | The schedule, the last backup result, a button that sends a test phone alert, and how to restore (section 13). No restore button. |
+| Pairing (`/pair`) | Pair the phone from the browser (section 7). |
+
+**What moved out of `config.yaml`.** Chat exclusions, media rules, alert thresholds (the three durations and the disk floor) and the backup time and number to keep now live in the archive and are edited in the dashboard. The first start of a build with the dashboard copies the values from `config.yaml` into the archive once; after that the dashboard's copy is the one that applies. **`exclude` in `config.yaml` is ignored after that first start**: if you add a chat there later, nothing happens, and the service logs a warning for each ignored entry that is still being logged (`config.yaml exclude is ignored since the dashboard owns chat rules; …<last digits> is being logged`). Use the Chats page.
+
+**What stays in `config.yaml`:** `data_dir` (the `--data` option decides), `time_zone`, `history`, `wa`, `alerts.ntfy`, `backup.destination` and `web.listen`. The Settings page shows them read-only. Changing them still needs an edit on the server and `sudo systemctl restart archiver`.
+
+**Pairing.** When the service starts without a login (a new install, or after a restore) it stays up, sends one "not paired" alert and connects to nothing. Open the dashboard (a banner and the Pairing link say so), press **Pair WhatsApp** and scan the QR code. **Never run `archiver pair` while the service is running**: it would link the same login a second time and the two would fight over it. Use `archiver pair` only with the service stopped (section 7).
+
+**Not in the dashboard yet:** choosing chats to log instead of excluding some (every chat is logged unless you stop it), search, restore and media deletion buttons, a login and remote access. They come in later phases.
+
+After deploying a new build, follow [docs/phase2-acceptance.md](docs/phase2-acceptance.md).
 
 ## Let Claude Code do the setup (optional)
 
@@ -716,10 +796,10 @@ archiver <command> [--data DIR]        DIR defaults to ./data
 
 | Path (inside the data folder) | Contents | Backed up |
 | --- | --- | --- |
-| `archive.db` | Messages, events, chats, id mappings, history ledger, media queue | Yes, nightly |
+| `archive.db` | Messages, events, chats, id mappings, history ledger, media queue, and the settings and chat rules edited in the dashboard | Yes, nightly |
 | `session.db` | The WhatsApp login (device keys) | **Never** |
 | `media/` | Downloaded files | No |
-| `config.yaml`, `health.json` | Settings; last known health state | No |
+| `config.yaml`, `health.json` | Settings that stay in the file (and the first-start values of the others); last known health state | No |
 
 ## Quick start (developers)
 
