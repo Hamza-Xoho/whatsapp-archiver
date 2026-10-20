@@ -76,7 +76,7 @@ func TestDashboardShowsStateVersionAndHistoryLine(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := d.page(t, "/")
-	for _, want := range []string{"Connected", "2.3000.1050849967", "history: in progress (40%)"} {
+	for _, want := range []string{"Connected", "2.3000.1050849967 (latest)", "history: in progress (40%)"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("dashboard lacks %q:\n%s", want, got)
 		}
@@ -105,7 +105,7 @@ func TestDashboardWarnsWhenPhoneQuiet(t *testing.T) {
 	if err := d.st.SetAlertThresholds(t.Context(), config.AlertConfig{PhoneQuietAfter: 48 * time.Hour}); err != nil {
 		t.Fatal(err)
 	}
-	if got := d.page(t, "/"); !strings.Contains(got, "Open WhatsApp on your phone soon") {
+	if got := d.page(t, "/"); !strings.Contains(got, "Open WhatsApp on your phone soon") || !strings.Contains(got, "not been active for 3 days") {
 		t.Fatalf("no warning at the 48 hour live threshold: %s", got)
 	}
 }
@@ -114,7 +114,7 @@ func TestDashboardPhoneQuietFallsBackToConfig(t *testing.T) {
 	d := newDash(t)
 	d.cfg.Alerts.PhoneQuietAfter = 24 * time.Hour
 	d.snap.PhoneLastActive = dashNow.Add(-30 * time.Hour)
-	if got := d.page(t, "/"); !strings.Contains(got, "Open WhatsApp on your phone soon") {
+	if got := d.page(t, "/"); !strings.Contains(got, "Open WhatsApp on your phone soon") || !strings.Contains(got, "not been active for 30 hours") {
 		t.Fatalf("no warning past the config threshold: %s", got)
 	}
 }

@@ -1,0 +1,162 @@
+[
+ {
+  "name": "t6-threshold-ignores-live-setting",
+  "file": "internal/web/dashboard.go",
+  "old": "if a, ok, err := s.d.Store.AlertThresholds(ctx); err == nil && ok {",
+  "new": "if a, ok, err := s.d.Store.AlertThresholds(ctx); err == nil && ok && false {",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t6-threshold-ignores-config",
+  "file": "internal/web/dashboard.go",
+  "old": "return s.config().Alerts.PhoneQuietAfter",
+  "new": "return 0",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t6-quiet-comparison-reversed",
+  "file": "internal/web/dashboard.go",
+  "old": "quiet > limit",
+  "new": "quiet < limit",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t6-unknown-phone-warns",
+  "file": "internal/web/dashboard.go",
+  "old": " && !snap.PhoneLastActive.IsZero()",
+  "new": "",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t6-recent-21",
+  "file": "internal/web/dashboard.go",
+  "old": "const recentEvents = 20",
+  "new": "const recentEvents = 21",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t6-recent-oldest-first",
+  "file": "internal/web/dashboard.go",
+  "old": "for i := len(all) - 1; i >= 0; i-- {",
+  "new": "for i := 0; i < len(all); i++ {",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t6-recent-keeps-oldest",
+  "file": "internal/web/dashboard.go",
+  "old": "all = all[len(all)-recentEvents:]",
+  "new": "all = all[:recentEvents]",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t6-excluded-counted-as-logging",
+  "file": "internal/web/dashboard.go",
+  "old": "if off {\n\t\t\t\tdata.NotLogging++",
+  "new": "if !off {\n\t\t\t\tdata.NotLogging++",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t6-gaps-not-read",
+  "file": "internal/web/dashboard.go",
+  "old": "data.Gaps, err = s.d.Store.OpenGapCount(ctx); err != nil",
+  "new": "_, err = s.d.Store.OpenGapCount(ctx); err != nil",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t6-history-line-dropped",
+  "file": "internal/web/dashboard.go",
+  "old": "data.History = view.HistoryLine(loc, report.Coverage)",
+  "new": "data.History = \"\"",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t6-chat-name-dropped",
+  "file": "internal/web/dashboard.go",
+  "old": "Name: names[all[i].Chat]",
+  "new": "Name: \"\"",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t6-singular-noun",
+  "file": "internal/web/dashboard.go",
+  "old": "if n == 1 {",
+  "new": "if n == 2 {",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t6-connected-label",
+  "file": "internal/web/dashboard.go",
+  "old": "return \"Connected\", \"ok\"",
+  "new": "return \"Online\", \"ok\"",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t6-disconnected-label",
+  "file": "internal/web/dashboard.go",
+  "old": "return \"Disconnected\", \"bad\"",
+  "new": "return \"Offline\", \"bad\"",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t6-version-reason-dropped",
+  "file": "internal/web/dashboard.go",
+  "old": "v.Version += \" (\" + snap.VersionReason + \")\"",
+  "new": "_ = snap.VersionReason",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t6-detail-dropped",
+  "file": "internal/web/dashboard.go",
+  "old": "v := healthView{Detail: snap.Detail,",
+  "new": "v := healthView{",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t6-days-as-hours",
+  "file": "internal/web/dashboard.go",
+  "old": "if d >= 48*time.Hour {",
+  "new": "if d >= 480*time.Hour {",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t6-partial-not-swapped-on-health",
+  "file": "internal/web/templates/dashboard.html",
+  "old": "hx-trigger=\"sse:health\"",
+  "new": "hx-trigger=\"sse:state\"",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t6-warning-text",
+  "file": "internal/web/templates/dashboard.html",
+  "old": "Open WhatsApp on your phone soon",
+  "new": "Check WhatsApp soon",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ },
+ {
+  "name": "t6-feed-not-live",
+  "file": "internal/web/templates/dashboard.html",
+  "old": "sse-swap=\"activity\" hx-swap=\"afterbegin\">{{range",
+  "new": "sse-swap=\"x\" hx-swap=\"afterbegin\">{{range",
+  "pkgs": "./internal/web/",
+  "rf": 1
+ }
+]
