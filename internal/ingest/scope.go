@@ -16,18 +16,25 @@ func NewFilter(rules *RuleSet, aliases func(string) ([]string, error)) *Filter {
 // Keep reports whether an event of this chat and kind is archived. A failed alias lookup is an error and never an
 // answer: guessing "keep" would store an excluded chat seen under its other alias, so callers retry until it succeeds.
 func (f *Filter) Keep(chatJID string, kind Kind) (bool, error) {
+	keep, _, err := f.Decide(chatJID, kind)
+	return keep, err
+}
+
+// Decide is Keep that also says whether a refusal is because a rule excludes the chat (excluded) rather than
+// because the event is never archived (status posts, presence, typing, receipts, calls). One alias lookup at most.
+func (f *Filter) Decide(chatJID string, kind Kind) (keep, excluded bool, err error) {
 	if chatJID == "status@broadcast" {
-		return false, nil
+		return false, false, nil
 	}
 	switch kind {
 	case KindPresence, KindTyping, KindReceipt, KindCall:
-		return false, nil
+		return false, false, nil
 	}
-	excluded, err := f.Excluded(chatJID)
+	excluded, err = f.Excluded(chatJID)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
-	return !excluded, nil
+	return !excluded, excluded, nil
 }
 
 // Excluded reports whether logging is off for the chat, directly or through one of its aliases. It is the

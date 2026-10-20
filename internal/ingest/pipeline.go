@@ -150,11 +150,17 @@ var errStopped = errors.New("stopped before the write succeeded")
 // keep evaluates the exclusion filter under persist: a failed alias lookup is retried (and alerted once through
 // WriteFailed) until it answers, so an excluded chat is never stored and a kept one is never dropped.
 func (p *Pipeline) keep(ctx context.Context, chat string, kind Kind) (keep bool, err error) {
+	keep, _, err = p.decide(ctx, chat, kind)
+	return keep, err
+}
+
+// decide is keep that also reports whether a refusal is an exclusion rule (as opposed to a never-archived event).
+func (p *Pipeline) decide(ctx context.Context, chat string, kind Kind) (keep, excluded bool, err error) {
 	err = p.persist(ctx, "check exclusion of "+chat, func() (e error) {
-		keep, e = p.filter.Keep(chat, kind)
+		keep, excluded, e = p.filter.Decide(chat, kind)
 		return e
 	})
-	return keep && err == nil, err
+	return keep && err == nil, excluded && err == nil, err
 }
 
 // rejected logs and returns a write that can never succeed.
@@ -231,8 +237,8 @@ func (p *Pipeline) ingest(ctx context.Context, r Result, publish bool) error {
 			return err
 		}
 	}
-	if keep, err := p.keep(ctx, r.Chat.JID, r.Kind); err != nil || !keep {
-		if err == nil && publish {
+	if keep, excluded, err := p.decide(ctx, r.Chat.JID, r.Kind); err != nil || !keep {
+		if err == nil && excluded && publish { // status posts and never-stored kinds are refused silently
 			p.publish(r, false)
 		}
 		return err
