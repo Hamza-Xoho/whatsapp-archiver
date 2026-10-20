@@ -285,3 +285,43 @@ func TestChatsPageLinkedInNav(t *testing.T) {
 		t.Fatal("no Chats link in the navigation")
 	}
 }
+
+// A chat excluded under its phone form (config.yaml's exclude) is turned back on from its row, which uses the LID
+// form: the alias's rule changes too, so neither the list nor capture keeps the old exclusion.
+func TestStartLoggingClearsRuleOnAlias(t *testing.T) {
+	u := newChatsUI(t)
+	if _, err := u.st.InsertIDMapping(t.Context(), store.IDMapping{LID: "77@lid", PN: "9665@s.whatsapp.net", Source: "test", FirstSeen: time.Unix(1, 0)}); err != nil {
+		t.Fatal(err)
+	}
+	u.message(t, "77@lid", "a")
+	off := []store.ChatRule{{JID: "9665@s.whatsapp.net", Logging: false}}
+	if err := u.st.SetChatRules(t.Context(), off); err != nil {
+		t.Fatal(err)
+	}
+	u.rules.Replace(off)
+	body, code := postForm(t, u.handler(), "/chats/rules", url.Values{"jid[]": {"77@lid"}, "logging": {"on"}})
+	if code != http.StatusOK {
+		t.Fatalf("status %d: %s", code, body)
+	}
+	if u.rules.Excluded("9665@s.whatsapp.net") || u.rules.Excluded("77@lid") {
+		t.Fatal("the phone-form rule still excludes the chat")
+	}
+	if got := visibleText(body); strings.Contains(got, "Not logging") || !strings.Contains(got, "Logging") {
+		t.Fatalf("updated row: %s", got)
+	}
+}
+
+// Without JavaScript the forms still work: a plain POST is answered with a redirect back to the list.
+func TestPlainFormPostRedirectsToList(t *testing.T) {
+	u := newChatsUI(t)
+	u.message(t, "1@g.us", "a")
+	r := httptest.NewRequest(http.MethodPost, "/chats/rules", strings.NewReader("jid%5B%5D=1%40g.us&logging=off"))
+	r.Host = "localhost:8080"
+	r.Header.Set("Origin", "http://localhost:8080")
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	u.handler().ServeHTTP(w, r)
+	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != "/chats" || !u.rules.Excluded("1@g.us") {
+		t.Fatalf("status %d, Location %q, excluded %v", w.Code, w.Header().Get("Location"), u.rules.Excluded("1@g.us"))
+	}
+}
