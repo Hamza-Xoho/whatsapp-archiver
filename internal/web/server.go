@@ -196,6 +196,9 @@ func (s *Server) Run(ctx context.Context, listen string) error {
 	if err != nil {
 		return fmt.Errorf("web: listen on %s: %w", listen, err)
 	}
+	if s.d.Listening != nil {
+		s.d.Listening(l.Addr().String())
+	}
 	srv := &http.Server{
 		Handler:           s.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,

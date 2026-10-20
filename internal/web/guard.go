@@ -14,6 +14,9 @@ import (
 //     127.0.0.1 (DNS rebinding) still sends its own name as Host, and gets 403.
 //   - A request that changes something (any method but GET and HEAD) must carry Origin, or failing that Referer,
 //     equal to http://<Host>. A form on another site posting here gets 403.
+//   - A request the browser marks Sec-Fetch-Site: cross-site gets 403 on every method, GET included, so another site
+//     cannot make the browser load pages or open the event stream. Without the header (curl, old browsers) nothing
+//     changes.
 //
 // Every response also forbids framing, so a foreign page cannot overlay the UI to trick a click.
 func guard(next http.Handler) http.Handler {
@@ -25,6 +28,10 @@ func guard(next http.Handler) http.Handler {
 		h.Set("Referrer-Policy", "same-origin")
 		if !loopbackHost(r.Host) {
 			http.Error(w, "forbidden: open the dashboard as http://localhost:<port> through the SSH tunnel", http.StatusForbidden)
+			return
+		}
+		if r.Header.Get("Sec-Fetch-Site") == "cross-site" {
+			http.Error(w, "forbidden: this request came from another site", http.StatusForbidden)
 			return
 		}
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && !sameOrigin(r) {

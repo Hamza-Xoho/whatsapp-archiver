@@ -25,6 +25,9 @@ const pairUpdates = 16
 // errPairingStopped is StartPairing's answer once Run has returned.
 var errPairingStopped = errors.New("pairing is not available: the archiver is stopping")
 
+// errLoggedOut is StartPairing's answer after WhatsApp logged a paired device out.
+var errLoggedOut = errors.New("WhatsApp logged this archiver out. Restart it (sudo systemctl restart archiver) to pair again.") //nolint:staticcheck // shown to the user as a sentence
+
 // Pairer runs `archiver run`'s connection: capture at once when the device is paired, otherwise nothing until
 // StartPairing, then pairing in the same run, carrying on as capture after PairSuccess. Only one pairing runs at a
 // time; a failed one can be started again.
@@ -59,6 +62,10 @@ func (p *Pairer) StartPairing(context.Context) (<-chan PairUpdate, error) {
 		return nil, errPairingStopped
 	case p.c.Paired():
 		return nil, errors.New("already paired")
+	case p.isReady() && !p.c.Paired():
+		// Run is inside the capture loop, which nothing reads StartPairing's request from, so a pairing would never
+		// start: say so now instead of leaving the page waiting for a QR code.
+		return nil, errLoggedOut
 	case p.cur != nil:
 		return p.cur, nil
 	}

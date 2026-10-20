@@ -178,7 +178,8 @@ func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) er
 		close(now)
 		ready, browser = now, nil // the loops start at once, as before phase 2
 	}
-	ui := web.New(web.Deps{Store: st, Rules: rules, Health: mon.Status, Activity: bus, Config: cfg, Notifier: notifier, Pairer: browser})
+	ui := web.New(web.Deps{Store: st, Rules: rules, Health: mon.Status, Activity: bus, Config: cfg, Notifier: notifier, Pairer: browser,
+		Listening: func(addr string) { log.Info("dashboard listening", "listen", addr) }})
 	loops := []func(context.Context){
 		afterPaired(ready, queue.Run),
 		mon.Run,
@@ -187,7 +188,6 @@ func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) er
 		}),
 		// The dashboard stops with the other loops. If it cannot listen (the port is taken), capture carries on.
 		func(ctx context.Context) {
-			log.Info("dashboard listening", "listen", cfg.Web.Listen)
 			if err := ui.Run(ctx, cfg.Web.Listen); err != nil {
 				log.Error("dashboard stopped; capture continues", "err", err)
 			}
