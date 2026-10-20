@@ -6,7 +6,6 @@ import (
 
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types/events"
-	"google.golang.org/protobuf/proto"
 	"whatsapp-archiver/internal/activity"
 	"whatsapp-archiver/internal/ingest"
 	"whatsapp-archiver/internal/testkit"
