@@ -39,7 +39,9 @@ type Downloader interface {
 type Clock interface{ Now() time.Time }
 type Queue struct {
 	dir     string
-	rules   config.MediaRules
+	global  func() config.MediaRules                // the global media rules, read at each Enqueue
+	perChat func(chatJID string) *config.MediaRules // a chat's own rules or nil; may itself be nil
+	workers int
 	store   *store.Store
 	down    Downloader
 	clock   Clock
@@ -52,21 +54,23 @@ type Queue struct {
 	wg      sync.WaitGroup
 }
 
-// NewQueue builds the queue; onPanic (may be nil) is told "media" for every recovered worker panic.
-func NewQueue(dir string, r config.MediaRules, st *store.Store, d Downloader, c Clock, l *slog.Logger, onPanic func(string)) *Queue {
+// NewQueue builds the queue. global and perChat are read at each Enqueue, so a rule change applies to the next media
+// item; a chat's own rules (perChat non-nil) replace the global ones. The worker count and the re-request rate are
+// read from global once, here. onPanic (may be nil) is told "media" for every recovered worker panic.
+func NewQueue(dir string, global func() config.MediaRules, perChat func(chatJID string) *config.MediaRules, st *store.Store, d Downloader, c Clock, l *slog.Logger, onPanic func(string)) *Queue {
+	r := global()
 	workers := r.Workers
 	if workers < 1 {
 		workers = 1
 	}
-	r.Workers = workers
 	rpm := r.RetryRequestsPerMinute
 	if rpm < 1 {
 		rpm = 10
 	}
-	return &Queue{dir: dir, rules: r, store: st, down: d, clock: c, log: l, wake: make(chan struct{}, 1), limiter: rate.NewLimiter(rate.Every(time.Minute/time.Duration(rpm)), rpm), onPanic: onPanic}
+	return &Queue{dir: dir, global: global, perChat: perChat, workers: workers, store: st, down: d, clock: c, log: l, wake: make(chan struct{}, 1), limiter: rate.NewLimiter(rate.Every(time.Minute/time.Duration(rpm)), rpm), onPanic: onPanic}
 }
 func (q *Queue) Enqueue(ctx context.Context, m store.Media) error {
-	m.State, m.Reason = decide(m, q.rules)
+	m.State, m.Reason = decide(m, q.rules(m.ChatJID))
 	m.UpdatedAt = q.clock.Now().Unix()
 	if err := q.store.InsertMedia(ctx, m); err != nil {
 		return err
@@ -81,7 +85,7 @@ func (q *Queue) Run(ctx context.Context) {
 	if err := q.store.ResetMediaOnStart(ctx, q.clock.Now()); err != nil {
 		q.log.Error("stuck media rows not reset at start", "err", err)
 	}
-	for i := 0; i < q.rules.Workers; i++ {
+	for i := 0; i < q.workers; i++ {
 		q.wg.Add(1)
 		go func() {
 			defer q.wg.Done()

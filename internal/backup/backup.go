@@ -115,10 +115,19 @@ func retain(dest string, keep int) error {
 func openSource(path string) (*sql.DB, error) {
 	return sql.Open("sqlite", "file:"+filepath.ToSlash(path)+"?mode=ro&_pragma=busy_timeout(5000)")
 }
-func Schedule(ctx context.Context, cfg *config.Config, clock Clock, onResult func(Report, error)) {
+
+// Schedule runs a backup every day at the backup time until ctx ends. sched (nil: cfg.Backup) supplies the time and the
+// number of snapshots kept at each scheduling decision, so a change applies after the current wait; the destination
+// always comes from cfg.
+func Schedule(ctx context.Context, cfg *config.Config, clock Clock, onResult func(Report, error), sched func() config.BackupConfig) {
 	for {
+		run := *cfg
+		if sched != nil {
+			live := sched()
+			run.Backup.Time, run.Backup.Keep = live.Time, live.Keep
+		}
 		now := clock.Now()
-		target, err := time.ParseInLocation("15:04", cfg.Backup.Time, now.Location())
+		target, err := time.ParseInLocation("15:04", run.Backup.Time, now.Location())
 		if err != nil {
 			onResult(Report{}, err)
 			return
@@ -131,7 +140,10 @@ func Schedule(ctx context.Context, cfg *config.Config, clock Clock, onResult fun
 		case <-ctx.Done():
 			return
 		case <-clock.After(next.Sub(now)):
-			report, runErr := Run(ctx, cfg)
+			if sched != nil { // the keep may have changed during the wait
+				run.Backup.Keep = sched().Keep
+			}
+			report, runErr := Run(ctx, &run)
 			onResult(report, runErr)
 		}
 	}

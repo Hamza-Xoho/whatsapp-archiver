@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"regexp"
 	"time"
@@ -21,6 +22,16 @@ type Config struct {
 	Backup   BackupConfig `yaml:"backup"`
 	Alerts   AlertConfig  `yaml:"alerts"`
 	WA       WAConfig     `yaml:"wa"`
+	Web      Web          `yaml:"web"`
+}
+
+// ImportMarker is the settings key that records that config.yaml's runtime settings were imported into the archive.
+// The import runs once: after it, the UI owns exclusions, media rules, alert thresholds and the backup schedule.
+const ImportMarker = "import.config.v1"
+
+// Web is the control UI. It has no login in phase 2, so it listens on loopback only.
+type Web struct {
+	Listen string `yaml:"listen"`
 }
 
 type HistoryRules struct {
@@ -28,11 +39,11 @@ type HistoryRules struct {
 	SizeMBLimit int `yaml:"size_mb_limit"`
 }
 type MediaRules struct {
-	Download               []string `yaml:"download"`
-	VideoMaxMB             int      `yaml:"video_max_mb"`
-	Skip                   []string `yaml:"skip"`
-	Workers                int      `yaml:"workers"`
-	RetryRequestsPerMinute int      `yaml:"retry_requests_per_minute"`
+	Download               []string `yaml:"download" json:"download"`
+	VideoMaxMB             int      `yaml:"video_max_mb" json:"video_max_mb"`
+	Skip                   []string `yaml:"skip" json:"skip"`
+	Workers                int      `yaml:"workers" json:"workers"`
+	RetryRequestsPerMinute int      `yaml:"retry_requests_per_minute" json:"retry_requests_per_minute"`
 }
 type BackupConfig struct {
 	Destination string `yaml:"destination"`
@@ -69,6 +80,7 @@ func defaults() Config {
 		Backup:  BackupConfig{Time: "03:30", Keep: 7},
 		Alerts:  AlertConfig{NoEventsAfter: 6 * time.Hour, DisconnectedAfter: 15 * time.Minute, PhoneQuietAfter: 240 * time.Hour, DiskFreeMinGB: 5},
 		WA:      WAConfig{CheckLatestVersion: true},
+		Web:     Web{Listen: "127.0.0.1:8080"},
 	}
 }
 
@@ -94,5 +106,21 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("exclude entry %q is not a chat address; write <digits>@s.whatsapp.net (phone number, digits only), <digits>@lid or <id>@g.us (group, from `archiver chats`)", entry)
 		}
 	}
+	if err := checkLoopback(cfg.Web.Listen); err != nil {
+		return nil, err
+	}
 	return &cfg, nil
+}
+
+// checkLoopback accepts a listen address only on 127.0.0.1, ::1 or localhost, with a port.
+func checkLoopback(listen string) error {
+	host, port, err := net.SplitHostPort(listen)
+	if err != nil || port == "" {
+		return fmt.Errorf("web.listen %q must be host:port on 127.0.0.1, [::1] or localhost", listen)
+	}
+	switch host {
+	case "127.0.0.1", "::1", "localhost":
+		return nil
+	}
+	return fmt.Errorf("web.listen %q is not loopback: the UI has no login, so it listens on 127.0.0.1, [::1] or localhost only; reach it over ssh -L", listen)
 }

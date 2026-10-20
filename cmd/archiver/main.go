@@ -108,6 +108,27 @@ func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) er
 	if err != nil {
 		return err
 	}
+	// The first start of this build imports config.yaml's exclusions, media rules, alert thresholds and backup
+	// schedule into the archive; from then on the archive's copy is the live one.
+	if imported, err := st.ImportConfigOnce(ctx, cfg); err != nil {
+		_ = st.Close()
+		return err
+	} else if imported {
+		log.Info("config.yaml settings imported into the archive", "exclusions", len(cfg.Exclude))
+	}
+	chatRules, err := st.ChatRules(ctx)
+	if err != nil {
+		_ = st.Close()
+		return err
+	}
+	rules := ingest.NewRuleSet(chatRules)
+	seen, err := ingest.NewSeenTracker(ctx, st)
+	if err != nil {
+		_ = st.Close()
+		return err
+	}
+	aliases := storeAliases(st)
+	live := liveSettings{st: st, cfg: cfg, log: log, rules: rules, aliases: aliases}
 	client, err := wa.Open(ctx, cfg, log)
 	if err != nil {
 		_ = st.Close()
@@ -117,11 +138,10 @@ func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) er
 	if cfg.Alerts.Ntfy != nil {
 		notifier = health.NewNtfy(cfg.Alerts.Ntfy)
 	}
-	mon := health.NewMonitor(cfg, notifier, systemClock{}, health.DiskFree, client.VersionInUse).WithVersionReason(client.VersionReason).WithLogger(log)
-	aliases := storeAliases(st)
-	queue := media.NewQueue(cfg.DataDir, cfg.Media, st, client, systemClock{}, log, mon.Panic)
-	filter := ingest.NewFilter(cfg.Exclude, aliases)
-	pipeline := ingest.NewPipeline(st, filter, queue, mon, log).WithHistoryParser(client.HistoryParser()).WithContext(ctx)
+	mon := health.NewMonitor(cfg, notifier, systemClock{}, health.DiskFree, client.VersionInUse).WithVersionReason(client.VersionReason).WithLogger(log).WithThresholds(live.alerts)
+	queue := media.NewQueue(cfg.DataDir, live.media, live.chatMedia, st, client, systemClock{}, log, mon.Panic)
+	filter := ingest.NewFilter(rules, aliases)
+	pipeline := ingest.NewPipeline(st, filter, queue, mon, log).WithHistoryParser(client.HistoryParser()).WithContext(ctx).WithSeen(seen)
 	handler := pipeline.Handle
 	if recordDir != "" {
 		handler = ingest.NewRecorder(recordDir).WithFilter(filter).Wrap(handler)
@@ -134,7 +154,7 @@ func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) er
 	loops := []func(context.Context){
 		queue.Run,
 		mon.Run,
-		func(ctx context.Context) { backup.Schedule(ctx, cfg, systemClock{}, mon.BackupResult) },
+		func(ctx context.Context) { backup.Schedule(ctx, cfg, systemClock{}, mon.BackupResult, live.backup) },
 	}
 	// Shutdown order: cancel ctx, client.Run returns, the loops are joined, the event handler in flight is waited for
 	// (at most handlerDrainBound), then the client and the store are closed.

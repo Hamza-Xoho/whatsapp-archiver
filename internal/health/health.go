@@ -28,6 +28,7 @@ type Snapshot struct {
 type Monitor struct {
 	mu        sync.Mutex
 	cfg       *config.Config
+	limits    func() config.AlertConfig // live thresholds; nil: cfg.Alerts
 	n         Notifier
 	clock     Clock
 	diskFree  func(string) (uint64, error)
@@ -75,6 +76,13 @@ func (m *Monitor) learnActiveAlerts() {
 	if _, ok := stateTitles[prev.State]; ok {
 		m.gate.fired[prev.State] = prev.UpdatedAt
 	}
+}
+
+// WithThresholds makes each check read its thresholds from f (the UI's alerts.thresholds setting). Ntfy always comes
+// from the config file. Call it before Run.
+func (m *Monitor) WithThresholds(f func() config.AlertConfig) *Monitor {
+	m.limits = f
+	return m
 }
 
 // WithVersionReason sets where the reason for the version in use comes from; health.json records it with the version.
@@ -204,6 +212,10 @@ func (m *Monitor) check() {
 	m.writeLocked()
 	m.mu.Unlock()
 	a := m.cfg.Alerts
+	if m.limits != nil {
+		a = m.limits()
+		a.Ntfy = m.cfg.Alerts.Ntfy
+	}
 	if d := now.Sub(down); a.DisconnectedAfter > 0 && (s.State == "disconnected" || s.State == "") && d > a.DisconnectedAfter { // "" = never connected yet
 		m.gate.fire("disconnected", stateTitles["disconnected"], fmt.Sprintf("Disconnected for %s %s", d.Round(time.Minute), s.Detail))
 	}
