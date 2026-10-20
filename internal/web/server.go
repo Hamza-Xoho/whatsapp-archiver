@@ -99,8 +99,11 @@ func New(d Deps) *Server {
 	if err != nil {
 		panic(err) // the embed directive guarantees the directory
 	}
-	base := template.Must(template.New("layout.html").Funcs(templateFuncs).ParseFS(templateFiles, "templates/layout.html"))
-	return &Server{
+	s := &Server{d: d}
+	// notPaired shows the layout's banner; pages are rendered after New returns, so s is complete by then.
+	funcs := template.FuncMap{"notPaired": func() bool { return s.d.Pairer != nil && !s.d.Pairer.Paired() }}
+	base := template.Must(template.New("layout.html").Funcs(templateFuncs).Funcs(funcs).ParseFS(templateFiles, "templates/layout.html"))
+	*s = Server{
 		d:    d,
 		tmpl: base,
 		pages: map[string]*template.Template{
@@ -117,6 +120,7 @@ func New(d Deps) *Server {
 		static:      http.StripPrefix("/static/", fileOnly(http.FileServerFS(sub), sub)),
 		healthEvery: 15 * time.Second,
 	}
+	return s
 }
 
 // pageTemplate is the layout with one page's templates/<name>.html on top. Pages cannot share a template set: each

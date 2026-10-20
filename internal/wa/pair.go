@@ -45,7 +45,7 @@ func pairLine(v any) string {
 	case whatsmeow.QRChannelItem:
 		switch {
 		case e.Event == whatsmeow.QRChannelTimeout.Event:
-			return "QR code timed out; run `archiver pair` again."
+			return QRTimedOut
 		case e.Event == whatsmeow.QRChannelEventError:
 			return fmt.Sprintf("Pairing failed: %v", e.Error)
 		case strings.HasPrefix(e.Event, "err-"):
@@ -54,3 +54,6 @@ func pairLine(v any) string {
 	}
 	return ""
 }
+
+// QRTimedOut is pairLine's text for a QR timeout, the terminal's instruction. The browser shows its own.
+const QRTimedOut = "QR code timed out; run `archiver pair` again."

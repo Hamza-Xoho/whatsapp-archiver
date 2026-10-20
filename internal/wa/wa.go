@@ -36,6 +36,8 @@ type Client struct {
 	// download fetches a history chunk; historyTimeout bounds it. Tests replace both.
 	download       historyDownloader
 	historyTimeout time.Duration
+	paired         atomic.Bool
+	pairedOnce     sync.Once
 	// qrChannel is GetQRChannel; tests replace it with a fake channel.
 	qrChannel func(context.Context) (<-chan whatsmeow.QRChannelItem, error)
 }
@@ -106,7 +108,20 @@ func chooseVersion(ctx context.Context, cfg *config.Config) (string, string, err
 	use, reason := decideVersion(built, latest, cfg.WA.VersionOverride, latestErr, cfg.WA.CheckLatestVersion)
 	return use, reason, nil
 }
-func (c *Client) Paired() bool { return c.client.Store.ID != nil }
+
+// Paired reports whether the device holds a login. The web server asks from its own goroutines while whatsmeow
+// writes Store.ID in handlePair, so the device is read once, on the first call (Run and the Pairer make it before
+// any connect), and the answer is then kept in an atomic, set on PairSuccess and cleared on LoggedOut.
+func (c *Client) Paired() bool {
+	c.pairedOnce.Do(func() { c.paired.Store(c.client.Store.ID != nil) })
+	return c.paired.Load()
+}
+
+// setPaired records a pairing or a logout.
+func (c *Client) setPaired(v bool) {
+	c.pairedOnce.Do(func() {})
+	c.paired.Store(v)
+}
 func (c *Client) VersionInUse() string {
 	if v := c.ver.Load(); v != nil {
 		return v.version
@@ -149,7 +164,7 @@ func (c *Client) run(ctx context.Context, h func(any) bool, pairing bool, show f
 		go show(ctx, qr)
 	}
 	ctl := make(chan any, 8)
-	id := c.client.AddEventHandlerWithSuccessStatus(eventHandler(c.historyHandler(ctx, h), pairing, os.Stdout, ctl))
+	id := c.client.AddEventHandlerWithSuccessStatus(c.trackPairing(eventHandler(c.historyHandler(ctx, h), pairing, os.Stdout, ctl)))
 	err := c.reconnect(ctx, ctl)
 	if pairing && !c.Paired() {
 		c.client.RemoveEventHandler(id)
@@ -167,6 +182,19 @@ func eventHandler(h func(any) bool, pairing bool, out io.Writer, ctl chan<- any)
 		}
 		forwardControl(ctl, evt)
 		return ok
+	}
+}
+
+// trackPairing keeps Paired current: true after PairSuccess, false after LoggedOut (whatsmeow deletes the device).
+func (c *Client) trackPairing(next whatsmeow.EventHandlerWithSuccessStatus) whatsmeow.EventHandlerWithSuccessStatus {
+	return func(evt any) bool {
+		switch evt.(type) {
+		case *events.PairSuccess:
+			c.setPaired(true)
+		case *events.LoggedOut:
+			c.setPaired(false)
+		}
+		return next(evt)
 	}
 }
 

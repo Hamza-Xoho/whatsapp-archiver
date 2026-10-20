@@ -41,10 +41,17 @@ func (b *browserPairer) StartPairing(ctx context.Context) (<-chan web.PairUpdate
 	return out, nil
 }
 
-// forwardPair copies each update and closes out after src.
+// browserQRTimedOut replaces the terminal's timeout line in the browser. The terminal line says to run
+// `archiver pair`, which next to a running service would be a second process on the same archive and session.
+const browserQRTimedOut = "QR code timed out. Press Pair WhatsApp to try again."
+
+// forwardPair copies each update, with the browser's own timeout text, and closes out after src.
 func forwardPair(src <-chan wa.PairUpdate, out chan<- web.PairUpdate) {
 	defer close(out)
 	for u := range src {
+		if u.Err == wa.QRTimedOut {
+			u.Err = browserQRTimedOut
+		}
 		out <- web.PairUpdate(u)
 	}
 }

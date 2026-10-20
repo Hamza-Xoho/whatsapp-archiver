@@ -17,9 +17,11 @@
     <a href="/storage">Storage</a>
     <a href="/backups">Backups</a>
     <a href="/settings">Settings</a>
+    <a href="/pair">Pairing</a>
   </nav>
 </header>
 <main>
+{{if notPaired}}<p class="warn banner" role="alert">WhatsApp is not paired yet. <a href="/pair">Pair it now</a></p>{{end}}
 {{block "content" .}}
   <h1>{{.Title}}</h1>
   <section class="panel">

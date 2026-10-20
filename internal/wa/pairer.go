@@ -128,6 +128,7 @@ func (p *Pairer) forward(ctx context.Context, cancel context.CancelFunc, qr <-ch
 			case whatsmeow.QRChannelEventCode:
 				p.send(out, PairUpdate{QR: item.Code})
 			case whatsmeow.QRChannelSuccess.Event:
+				p.c.setPaired(true) // the QR channel hears PairSuccess before run's handler does
 				p.markReady()
 				p.end(out, &PairUpdate{Done: true})
 			default:
