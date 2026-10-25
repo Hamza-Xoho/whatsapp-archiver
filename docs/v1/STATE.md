@@ -10,6 +10,8 @@ Single status record for V1 (max 150 lines, update in place; history lives in gi
 - W0 step 2 done: ryzen evidence, Appendix A of the week review (ce81d4d). Findings: ntfy configured, only alert attempt failed on DNS; 403 = 24,536 of 25,358 failed media (no 404/410); practice CPU ~15% not explained by media backlog; `attempts` up to 20 vs text "after 5 attempts" (check in W4).
 - W1 done and signed 26 Oct: charter v1.3 (V1 re-scope, ADR-34 to ADR-39); `docs/phase2-acceptance.md` practice path fixed.
 
+- W2 schema design signed off 26 Oct (`docs/v1/schema.md`, e1611f1 + decisions): spool blobs cleared 7 days after import; deleted = placeholder + toggle; not_running counts as outage minutes.
+
 ## In flight
 
 - W0 step 3 (Hamza): done 26 Oct: practice instance unlinked on the phone and its process stopped (PID 288900); only the `SaudiSpyWithMyWifi` Wi-Fi profile left; stale DNS 192.168.68.1 gone. Reboot test still open (optional).

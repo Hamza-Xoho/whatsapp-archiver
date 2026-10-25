@@ -1,6 +1,6 @@
 # V1 schema design (W2)
 
-Status: draft for Hamza's sign-off. No code until signed (plan W2). Sources: `docs/plans/2026-10-26-v1-plan.md`
+Status: signed off by Hamza, 26 Oct 2026, with the recommended answers to section 7. Code may start (plan W2). Sources: `docs/plans/2026-10-26-v1-plan.md`
 (W2, root causes 2, 3 and 5, invariants), `AGENTS.md`, charter CON-2, CON-7, FR-10, ADR-24 and ADR-35, the
 current `internal/store/migrations/0001_raw.sql` and `0002_settings.sql`, `internal/store` and `internal/ingest`.
 
@@ -406,18 +406,13 @@ Callers today (for the split): `StatusReport` (cmd, web), `ChatList`/`ChatPage`/
 `InsertHistoryChunk`/`MarkChatSeen` (ingest), `InsertMedia`/`ClaimMedia`/`UpdateMedia`/`NextExpiredMedia`/
 `FailStaleRetries`/`ResetMediaOnStart`/`MediaByID` (media), `DumpRaw` (cmd, ingest tests).
 
-## 7. Questions for Hamza
+## 7. Decisions (Hamza, 26 Oct 2026)
 
-1. **History blob retention.** After a chunk is imported, keep its decrypted blob in `history_spool` (re-import
-   possible after a normaliser fix; costs roughly the size of the whole history in the archive and in every
-   backup) or clear it? *Recommendation:* clear the blob 7 days after a successful import and keep the row's
-   metadata.
-2. **Deleted messages in the viewer and search.** A revoked message keeps its text in the archive. Show it, or
-   show only a "deleted" placeholder? *Recommendation:* placeholder by default with a "show deleted text" toggle;
-   search results include it, marked deleted.
-3. **Process-down time in outage minutes.** Count `not_running` periods (the service or ryzen itself down) in
-   the ADR-36 "outage minutes per day" figure, or show them separately? *Recommendation:* count them, shown as
-   their own cause, since the metric means minutes not logging.
+1. **History blob retention:** clear the blob 7 days after a successful import; keep the row's metadata.
+2. **Deleted messages:** the viewer shows a placeholder by default with a "show deleted text" toggle; search
+   results include them, marked deleted.
+3. **Process-down time:** `not_running` periods count in the ADR-36 "outage minutes per day" figure, shown as their
+   own cause.
 
 ## 8. Concerns for the implementers
 
