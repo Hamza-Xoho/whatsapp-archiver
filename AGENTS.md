@@ -33,11 +33,11 @@ Review work list: `docs/reviews/2026-10-14-phase0-review.md`. Prompts: `docs/pro
 - Strict red → green → refactor. Commit failing tests separately as `test: ...`.
 - During green create `.claude/green.lock`; do not edit tests; delete the lock after `make check`.
 - Never delete, weaken, or skip a test. Add a failing regression test before fixing a bug.
-- Golden files may be created once with `-update` only after every line is reviewed and the review is logged in `PROGRESS.md`.
+- Golden files may be created once with `-update` only after every line is reviewed and the review is logged in `docs/v1/STATE.md`.
 - Use fakes only at external boundaries. Every goroutine has an owner and stops on context cancellation.
 - Prefer existing helpers: one retry helper, panic guard, and testkit package.
 - Look up every whatsmeow identifier in `docs/prior-art.md`; never guess an API.
-- Record task status, commits, coverage, deviations, and questions in `PROGRESS.md`.
+- Record task status, commits, coverage, deviations, and questions in `docs/v1/STATE.md`.
 
 ## Package boundaries
 
