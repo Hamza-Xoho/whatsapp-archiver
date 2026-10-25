@@ -77,16 +77,18 @@ Before deploying, note the state of the live archive so that the comparison belo
 
 Pairing the live archiver again would unlink it, so time pairing on a practice data folder with its own login. It is a second linked device on the phone, removed again at the end. This is the one place a second `run` is allowed: it uses a different data folder, a different login and another port.
 
+Note (26 Oct 2026): the practice instance is already stopped and unlinked, so this step is not to be repeated; the folder is `/var/lib/whatsapp-archiver-practice` (permission-restricted).
+
 - [ ] Prepare the practice folder (this is not part of the timing):
 
   ```sh
-  sudo -u whatsapp-archiver sh -c 'mkdir -p -m 700 /var/tmp/practice && printf "web: {listen: \"127.0.0.1:8081\"}\n" > /var/tmp/practice/config.yaml'
+  sudo -u whatsapp-archiver sh -c 'mkdir -p -m 700 /var/lib/whatsapp-archiver-practice && printf "web: {listen: \"127.0.0.1:8081\"}\n" > /var/lib/whatsapp-archiver-practice/config.yaml'
   ```
 
   On the Mac open a second tunnel: `ssh -L 8081:localhost:8081 hamza@192.168.0.105`.
-- [ ] Start it in the foreground: `sudo -u whatsapp-archiver /opt/whatsapp-archiver/archiver run --data /var/tmp/practice`. Expected: `not paired: open the dashboard through the SSH tunnel and pair …`.
+- [ ] Start it in the foreground: `sudo -u whatsapp-archiver /opt/whatsapp-archiver/archiver run --data /var/lib/whatsapp-archiver-practice`. Expected: `not paired: open the dashboard through the SSH tunnel and pair …`.
 - [ ] Start the stopwatch. In the browser open <http://localhost:8081/pair>, press **Pair WhatsApp**, scan the QR code on the iPhone (WhatsApp, Settings, Linked Devices, Link a Device). Stop the stopwatch when the page says `Paired. Capture is running.` No file was edited and no command was typed after the start. Pairing time: ____ s (limit 60). Result: ____
-- [ ] Press Ctrl-C in the terminal. Unlink the practice device on the phone (Settings, Linked Devices, the new device, Log out), then `sudo rm -r /var/tmp/practice`. The live archiver stays linked: `status --data /var/lib/whatsapp-archiver | head -2` still says `connected`. Result: ____
+- [ ] Press Ctrl-C in the terminal. Unlink the practice device on the phone (Settings, Linked Devices, the new device, Log out), then `sudo rm -r /var/lib/whatsapp-archiver-practice`. The live archiver stays linked: `status --data /var/lib/whatsapp-archiver | head -2` still says `connected`. Result: ____
 - [ ] Turning logging on for a chat. On the live dashboard, Chats, pick a chat that shows **Not logging** (or press **Stop logging** on a test chat first). Start the stopwatch, press **Start logging**, and stop it when the row shows **Logging**. No file was edited and nothing was restarted. Seconds: ____ (limit 60). Then send a message to that chat from another phone: it appears in the Dashboard feed, and in sqlite3 `SELECT COUNT(*) FROM messages WHERE chat_jid = '<its address>' AND received_at > <the time of the click>;` is at least 1 (use `archiver chats` for the address). Result: ____
 
 ### 4. SC-2: an excluded chat stores nothing

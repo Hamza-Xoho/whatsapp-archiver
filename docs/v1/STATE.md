@@ -8,6 +8,7 @@ Single status record for V1 (max 150 lines, update in place; history lives in gi
 - W0 step 1 done: 7041f7c, pushed.
 - W0 step 4 done: check-fast / test-quiet / Stop hook (6278eff); PROGRESS moved + this file (2b88677); skills `ryzen-evidence`, `deploy-ryzen` (f713d23).
 - W0 step 2 done: ryzen evidence, Appendix A of the week review (ce81d4d). Findings: ntfy configured, only alert attempt failed on DNS; 403 = 24,536 of 25,358 failed media (no 404/410); practice CPU ~15% not explained by media backlog; `attempts` up to 20 vs text "after 5 attempts" (check in W4).
+- W1 done: charter v1.3 (V1 re-scope, ADR-34 to ADR-39); `docs/phase2-acceptance.md` practice path fixed.
 
 ## In flight
 
@@ -23,5 +24,5 @@ Single status record for V1 (max 150 lines, update in place; history lives in gi
 
 ## Open questions
 
-- ADR-39 (community expand under CON-1) to be decided in W1.
+- ADR-39 (community expand under CON-1): proposed in charter v1.3, Hamza signs.
 - W3 and W4 run in parallel after W2 merges.
