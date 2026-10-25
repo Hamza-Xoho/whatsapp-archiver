@@ -1,6 +1,6 @@
 # Phase 2 manual acceptance: the control dashboard
 
-Run by Hamza on the server (ryzen, `192.168.0.104`) after the phase 2 build is deployed. It is not run by agent sessions: it uses the live WhatsApp login. Fill every `Result` line. Phase 2 is finished when every step below passes. Deploying needs Hamza's yes; the steps are in `README.md` section 10 (Updating). The dashboard and its screens are described in the README's Dashboard section.
+Run by Hamza on the server (ryzen, `192.168.0.105`) after the phase 2 build is deployed. It is not run by agent sessions: it uses the live WhatsApp login. Fill every `Result` line. Phase 2 is finished when every step below passes. Deploying needs Hamza's yes; the steps are in `README.md` section 10 (Updating). The dashboard and its screens are described in the README's Dashboard section.
 
 Commands that only read (`status`, `chats`, the SQL queries, `journalctl`) never connect to WhatsApp. Never run `archiver run` or `archiver pair` in a terminal against `/var/lib/whatsapp-archiver` while the service is running.
 
@@ -69,7 +69,7 @@ Before deploying, note the state of the live archive so that the comparison belo
 
 ### 2. SC-5: a new message appears in the feed within 2 seconds
 
-- [ ] On the Mac, open the tunnel and keep it open: `ssh -L 8080:localhost:8080 hamza@192.168.0.104`. Open <http://localhost:8080>. The Dashboard shows `Connected`, and the Activity box lists recent events.
+- [ ] On the Mac, open the tunnel and keep it open: `ssh -L 8080:localhost:8080 hamza@192.168.0.105`. Open <http://localhost:8080>. The Dashboard shows `Connected`, and the Activity box lists recent events.
 - [ ] Leave the Dashboard open in the foreground. From a second phone (or have someone) send a message to a chat that is **logging**, and time it with the stopwatch from sending to the line appearing in the Activity box. Expected: a new line for that chat within 2 seconds, without pressing reload. The line names the kind and the chat but never the message text. Seconds: ____. Result: ____
 - [ ] Close the laptop lid or drop the tunnel for a minute, then bring it back. Expected: capture is not affected (`journalctl -u archiver -n 5 --no-pager` shows no error and `status` stays `connected`) and the page's feed resumes after it reconnects. Result: ____
 
@@ -83,7 +83,7 @@ Pairing the live archiver again would unlink it, so time pairing on a practice d
   sudo -u whatsapp-archiver sh -c 'mkdir -p -m 700 /var/tmp/practice && printf "web: {listen: \"127.0.0.1:8081\"}\n" > /var/tmp/practice/config.yaml'
   ```
 
-  On the Mac open a second tunnel: `ssh -L 8081:localhost:8081 hamza@192.168.0.104`.
+  On the Mac open a second tunnel: `ssh -L 8081:localhost:8081 hamza@192.168.0.105`.
 - [ ] Start it in the foreground: `sudo -u whatsapp-archiver /opt/whatsapp-archiver/archiver run --data /var/tmp/practice`. Expected: `not paired: open the dashboard through the SSH tunnel and pair …`.
 - [ ] Start the stopwatch. In the browser open <http://localhost:8081/pair>, press **Pair WhatsApp**, scan the QR code on the iPhone (WhatsApp, Settings, Linked Devices, Link a Device). Stop the stopwatch when the page says `Paired. Capture is running.` No file was edited and no command was typed after the start. Pairing time: ____ s (limit 60). Result: ____
 - [ ] Press Ctrl-C in the terminal. Unlink the practice device on the phone (Settings, Linked Devices, the new device, Log out), then `sudo rm -r /var/tmp/practice`. The live archiver stays linked: `status --data /var/lib/whatsapp-archiver | head -2` still says `connected`. Result: ____
@@ -130,7 +130,7 @@ Needs a week; start it right after step 3 and write the switch time down.
 
 - [ ] On the server: `ss -ltn | grep 8080`. Expected: the local address is `127.0.0.1:8080` (not `0.0.0.0:8080` or `*:8080`). Result: ____
 - [ ] On the server: `curl -s -o /dev/null -w '%{http_code}\n' -H 'Host: example.com' http://127.0.0.1:8080/` prints `403`, and `curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8080/` prints `200`. Result: ____
-- [ ] From the Mac, without the tunnel, `curl -m 5 http://192.168.0.104:8080/` fails to connect. Result: ____
+- [ ] From the Mac, without the tunnel, `curl -m 5 http://192.168.0.105:8080/` fails to connect. Result: ____
 
 ## Sign-off
 

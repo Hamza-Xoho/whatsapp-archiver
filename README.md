@@ -318,7 +318,7 @@ then lines of JSON (the log), and on the phone a notification titled **WhatsApp 
 **In the browser (phase 2, recommended).** Start the service (section 8); unpaired, it waits for you and connects to nothing. On your Mac open a tunnel to the server and keep that window open:
 
 ```sh
-ssh -L 8080:localhost:8080 hamza@192.168.0.104
+ssh -L 8080:localhost:8080 hamza@192.168.0.105
 ```
 
 Then open <http://localhost:8080/pair> in the Mac's browser and press **Pair WhatsApp**. A QR code appears (a new one every 20 seconds). On the iPhone open WhatsApp → Settings → Linked Devices → Link a Device and scan it. The page then says `Paired. Capture is running.` with a link to the dashboard; history arrives in the background while the service runs, so nothing has to stay open. If the codes run out, the page says "QR code timed out" and shows the button again. Later visits to `/pair` show "Paired" and the history line.
@@ -523,10 +523,10 @@ The archive carries the chat rules and settings you had set in the dashboard, so
 Since phase 2 the service also serves a control dashboard, in the same process as the capture. It is read-only for your messages: you can look at chats, messages, edits, deletions, reactions and media, and change what is logged, but nothing in it deletes data or sends anything to WhatsApp. It has no login, so it listens on this computer only (`web.listen`, default `127.0.0.1:8080`; any other host is refused at start). You reach it over an SSH tunnel from your Mac. Keep this window open while you use it:
 
 ```sh
-ssh -L 8080:localhost:8080 hamza@192.168.0.104
+ssh -L 8080:localhost:8080 hamza@192.168.0.105
 ```
 
-Then open <http://localhost:8080> in the Mac's browser. (`192.168.0.104` is this server; use your own address and user.) Requests whose `Host` is not `localhost`, `127.0.0.1` or `[::1]` with the port, and posts from another site, are answered with 403.
+Then open <http://localhost:8080> in the Mac's browser. (`192.168.0.105` is this server; use your own address and user.) Requests whose `Host` is not `localhost`, `127.0.0.1` or `[::1]` with the port, and posts from another site, are answered with 403.
 
 | Screen | What it shows or does |
 | --- | --- |
