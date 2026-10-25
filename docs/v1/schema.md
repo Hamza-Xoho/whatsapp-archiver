@@ -73,10 +73,12 @@ current `internal/store/migrations/0001_raw.sql` and `0002_settings.sql`, `inter
 - **R17. Process-down periods are recorded.** A `last_alive_at` setting is written every 60 s; at start-up the
   writer inserts a closed `connection_periods` row (`state='not_running'`) from it to now. Whether it counts as
   outage minutes is Q3.
-- **R18. FTS tokenizer gated on spike 8.** The FTS body is folded in Go (FR-10: diacritics, tatweel,
-  أ/إ/آ → ا, ة → ه, ى → ي, lower-case), so tokenizer folding is not relied on. Default: `unicode61
-  remove_diacritics 0`. If spike 8 shows short Arabic stems or substrings need it, a second contentless table
-  `search_tri` (`trigram`) with the same rowids is added; nothing else changes.
+- **R18. FTS tokenizers (spike 8, `docs/v1/spike8.md`).** The body is folded in Go (FR-10), then indexed in two
+  contentless tables with the same rowids: `search_fts` (`unicode61 remove_diacritics 0`, word search, terms of 1-2
+  characters) and `search_tri` (`trigram`, substrings and attached prefixes such as ال/و/ب, terms of 3+ characters).
+  Both use `contentless_delete=1`. Trigram costs about 2.9x index size and 2x insert time; queries stay under 2 ms
+  at 100k rows. `highlight()`/`snippet()` return NULL on contentless tables, so in-chat highlighting is done in Go.
+  Emoji are not searchable (accepted).
 - **R19. Kept:** `media.thumb` stays as the plan says (the proto's JPEG thumbnail, about 2 to 6 KB per media
   message, duplicated from `raw_proto`) so the viewer never parses protos per bubble.
 - **R20. Chat list rows** exist for every canonical seen in `messages`, `chats`, `chat_rules` or `chat_seen`
@@ -217,7 +219,8 @@ CREATE TABLE chat_stats (
   gaps_open INTEGER NOT NULL DEFAULT 0) WITHOUT ROWID;
 CREATE INDEX chat_stats_recent ON chat_stats(last_ts DESC, canonical);
 -- rowid = messages.seq (text + caption + kind strings) or -message_events.seq (edit text). R13, R18.
-CREATE VIRTUAL TABLE search_fts USING fts5(body, content='', tokenize='unicode61 remove_diacritics 0');
+CREATE VIRTUAL TABLE search_fts USING fts5(body, content='', contentless_delete=1, tokenize='unicode61 remove_diacritics 0');
+CREATE VIRTUAL TABLE search_tri USING fts5(body, content='', contentless_delete=1, tokenize='trigram');  -- spike 8
 
 CREATE VIEW open_gaps AS
 SELECT e.*, c.canonical AS canonical_jid
@@ -419,5 +422,4 @@ Callers today (for the split): `StatusReport` (cmd, web), `ChatList`/`ChatPage`/
 - Every `ON CONFLICT DO NOTHING` insert must report "new" correctly (`RowsAffected`) so derived updates run once.
 - The R16 guard must be tested against a copy of an old-schema file, so a V1 binary never runs on the old
   archive on ryzen.
-- Spike 8 may add `search_tri`; budget it in (d) and keep `search_fts` contentless so the rowid scheme (R13)
-  holds for both.
+- `search_tri` is part of V1 (spike 8); `RebuildDerived()` drops and recreates both FTS tables.
