@@ -122,3 +122,79 @@ Only step 1 passed. Open: step 2 (SC-5, feed within 2 seconds), step 3 (SC-4, pa
 3. Item 2 (new gaps), record the cause.
 4. Item 5 (practice CPU), then decide what happens to the practice instance.
 5. Items 6 and 9 (docs path fix, acceptance steps), then item 10.
+
+## Appendix A: ryzen evidence (read-only, 26 Oct 2026)
+
+Gathered over SSH (`BatchMode=yes`) on 26 Oct 2026, after the snapshot above (state at about 01:43 +03). Counts and states only. No message text, names, JIDs, ntfy URL or topic were read or printed. Nothing on the server was changed. `perf` was not run because it needs sudo and Hamza has to approve it. Numbers in items 3 and 5 moved after the snapshot; see the notes.
+
+### A1. Status head (main)
+
+Command: `sudo -n -u whatsapp-archiver /opt/whatsapp-archiver/archiver status --data /var/lib/whatsapp-archiver | head -20`. Per-chat rows were not copied.
+
+- state: connected; client `2.3000.1050977907` (latest)
+- last event 2026-10-26 01:43 +03; phone last active 01:31 +03
+- history: in progress (99%), 57 chunks, last chunk 2026-10-16 19:12 +03
+
+### A2. ntfy configured, and alert log lines per day
+
+- ntfy configured: yes. Check: `awk` on line 17 of `config.yaml`, with the value tested for emptiness and never printed (the shape was checked with `sed` after masking every letter and digit). `alerts.ntfy` is a flow map with a non-empty `url` and an empty `token`. Values not printed.
+- Command: `journalctl -u archiver --since "2026-10-25 00:00" --until "2026-10-27 00:00" -o short-iso | awk` counting lines containing `alert not sent` and `alert dropped`.
+
+| Day | `alert not sent` | `alert dropped` | any `alert` line |
+|---|---|---|---|
+| 2026-10-25 | 0 | 0 | 0 |
+| 2026-10-26 | 1 | 0 | 1 |
+
+The one line (26 Oct 00:13:49, ERROR) has title `No WhatsApp events`. Its error is `after 5 attempts: Post ...: dial tcp: lookup ntfy.sh on 127.0.0.53:53: server misbehaving`. That is the DNS failure from item 1. No `alert sent` line exists on either day. No disconnected alert was attempted on 25 Oct.
+
+### A3. Live alert thresholds
+
+Command: `sqlite3 -readonly archive.db "SELECT key, value, updated_at FROM settings WHERE key='alerts.thresholds'"`. Output contains only numbers and durations, so nothing was redacted:
+
+`{"no_events_after":"6h0m0s","disconnected_after":"15m0s","phone_quiet_after":"240h0m0s","disk_free_min_gb":5}`, `updated_at` 1792507120 (about 20 Oct).
+
+### A4. Media state counts (main)
+
+Command: `SELECT state, COUNT(*) FROM media GROUP BY state`.
+
+- failed 25,358; skipped 5,346; done 1,985; expired 250; retry_requested 66; downloading 2; pending 1 (total 33,008)
+
+### A5. Failed-reason distribution (main, state = failed)
+
+Command: `SELECT reason, COUNT(*) FROM media WHERE state='failed' GROUP BY reason`, with `sed` redaction of URLs and identifiers. No reason text contained a URL, so nothing was replaced. There are 4 distinct reasons:
+
+| Reason (prefix `after 5 attempts: download media:` omitted) | Rows |
+|---|---|
+| `download failed with status code 403` | 24,536 |
+| `failed to refresh media connections: failed to query media connections: websocket not connected` | 803 |
+| `no url present` | 18 |
+| `re-uploaded media expired` (no prefix) | 1 |
+
+Explicit status counts among failed rows: 403 = 24,536; 404 = 0; 410 = 0. 403 is 96.8% of failed rows. The `attempts` column for failed rows has min 2, max 20, avg 20.0, while the reason text says "after 5 attempts". Not explained yet.
+
+### A6. Practice instance (`/var/lib/whatsapp-archiver-practice`)
+
+- media states: skipped 6,193 only. No done, failed, pending or expired rows. Expired = 0.
+- process: PID 288900 (`archiver run --data /var/lib/whatsapp-archiver-practice`, not under systemd) is running. Two `sudo` wrapper PIDs (288897, 288899) are also present. Command: `ps -o pid,etime,time,pcpu -p 288900`.
+  - PID 288900: elapsed 5-08:09:59, CPU time 23:32:13, %CPU 18.3 (lifetime average)
+  - main PID 288302, for comparison: elapsed 5-08:15:34, CPU time 00:40:27, %CPU 0.5
+
+### A7. Practice CPU sample in place of perf (item f fallback)
+
+Command: `/proc/288900/task` count, plus `/proc/288900/stat` fields 14 and 15 (utime + stime, clock 100 Hz), sampled 3 times 10 s apart over ssh.
+
+- threads: 16
+- `ps` %CPU at all three samples: 18.3 (lifetime average, not instantaneous)
+- utime+stime ticks: 8,473,539 → 8,473,689 → 8,473,847. Deltas are 150 and 158 ticks over about 10 s each, so about 15% to 16% of one core sustained over the 20 s window.
+
+### What this confirms or contradicts
+
+- Item 1 (ntfy and thresholds): ntfy is configured and `disconnected_after` is 15m. The only alert attempt in the window was a `No WhatsApp events` alert on 26 Oct 00:13, which failed on DNS lookup for ntfy.sh. No `disconnected` alert was attempted on 25 Oct, which fits the autoreconnect loop never moving the monitor to `disconnected`.
+- Item 3 (403 dominant?): confirmed. 24,536 of 25,358 failed rows (96.8%) are 403. There are zero 404 or 410 rows, so the "likely 404 or 410" guess in the review is wrong.
+- Item 5 (media poll hot path?): not confirmed. The practice media table has no pending or failed rows, so there is no media backlog to explain the CPU. A busy idle poll would still fit, but nothing here shows one.
+
+### Notes and open points
+
+- Item 3 counts moved since the 01:40 snapshot: failed 25,268 → 25,358, expired 405 → 250, pending 90 → 1, retry_requested 5 → 66. The expired drop is not explained.
+- `attempts` values (up to 20) do not match the "after 5 attempts" text. Worth a check in the code session.
+- perf was not run. A proper CPU profile of PID 288900 needs Hamza to approve `sudo perf`.
