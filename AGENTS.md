@@ -10,7 +10,9 @@ Review work list: `docs/reviews/2026-10-14-phase0-review.md`. Prompts: `docs/pro
 - `make test`: race-enabled tests.
 - `make lint`: pinned golangci-lint.
 - `make build-all`: Linux, macOS, and Windows builds.
-- `make check`: all gates; run before every implementation commit.
+- `make check-fast`: Stop hook; race tests on changed packages plus lint.
+- `make test-quiet`: for agents; race tests showing only failures and the summary.
+- `make check`: all gates; still required in full before every commit/merge.
 - Run Go commands through this Makefile so toolchains, modules and caches stay inside the repo.
 
 ## Invariants

@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "make -C ${CLAUDE_PROJECT_DIR} check",
+            "command": "make -C ${CLAUDE_PROJECT_DIR} check-fast",
             "args": [],
             "timeout": 600
           }

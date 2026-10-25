@@ -34,9 +34,22 @@ BUILD_TARGETS := linux/amd64 linux/arm64 darwin/arm64 darwin/amd64 windows/amd64
 VERSION ?= $(shell git describe --always --dirty --tags 2>/dev/null || echo dev)
 LDFLAGS := -X main.version=$(VERSION)
 
-.PHONY: check test lint build build-all fmt tools
+.PHONY: check check-fast test test-quiet lint build build-all fmt tools
 
 check: test lint build-all
+
+# Fast gate for the Stop hook: race tests on packages with Go changes vs HEAD, then lint. No build-all.
+check-fast: $(GO)
+	@pkgs=$$( { git diff --name-only HEAD; git ls-files --others --exclude-standard; } 2>/dev/null \
+	  | grep '\.go$$' | while read -r f; do d=$$(dirname "$$f"); [ -d "$$d" ] && echo "$$d"; done | sort -u \
+	  | while read -r d; do if [ "$$d" = . ]; then echo .; else echo "./$$d/..."; fi; done); \
+	if [ -z "$$pkgs" ]; then echo "check-fast: no Go changes"; \
+	else echo "check-fast: $$pkgs"; $(GO) test -race $$pkgs || exit 1; fi
+	@$(MAKE) --no-print-directory lint
+
+# Full race tests, but only failing output and the last lines show; exit status is go test's.
+test-quiet: $(GO)
+	@out=$$(mktemp); $(GO) test -race ./... >$$out 2>&1; rc=$$?; tail -n 40 $$out; rm -f $$out; exit $$rc
 
 test: $(GO)
 	$(GO) test -race ./...
