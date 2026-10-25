@@ -11,14 +11,15 @@ Single status record for V1 (max 150 lines, update in place; history lives in gi
 
 ## In flight
 
-- W0 step 3: Hamza only: stop and unlink the practice instance on the phone; router reservation for MAC 2c:f0:5d:3b:67:65 or a static IP in netplan; delete `stc_wifi_*` profiles and stale DNS 192.168.68.1; reboot test.
-- `sudo perf` on the practice PID needs Hamza's approval (perf not in sudoers); skip if the instance is stopped first.
+- W0 step 3 (Hamza): done 26 Oct: practice instance unlinked on the phone and its process stopped (PID 288900); only the `SaudiSpyWithMyWifi` Wi-Fi profile left; stale DNS 192.168.68.1 gone. Reboot test still open (optional).
+- `sudo perf` on the practice PID is moot: the instance is stopped.
 
 ## Rulings
 
 - (a) The `add-message-kind` skill is deferred to W2, after `docs/v1/schema.md` exists.
 - (b) W0 is done on main without a worktree.
 - (c) No Co-Authored-By trailer on commits.
+- (d) Router reservation / static IP for ryzen skipped by Hamza (26 Oct): the connection is only needed for coding, so the address may change; `deploy-ryzen` and docs use 192.168.0.105 and must be rechecked if it does.
 
 ## Open questions
 
