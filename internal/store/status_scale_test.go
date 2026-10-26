@@ -80,7 +80,7 @@ FROM messages WHERE seq%20=0`, nil},
 // number. The chat list is a whole screen: its 95th percentile over 20 calls must stay under 150 ms.
 func TestStatusReportAndChatListAtScale(t *testing.T) {
 	if testing.Short() {
-		t.Skip("seeds 300k messages; make check runs it, make check-fast does not")
+		t.Skip("-short: make check-fast skips this test; make test (so make check) runs it twice: 50k messages under -race, and 300k messages without -race")
 	}
 	s := seedScaleArchive(t, scaleMessages)
 	ctx := context.Background()
