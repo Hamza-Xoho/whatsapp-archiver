@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -54,7 +55,7 @@ func (s *Store) ChatList(ctx context.Context, filter string) ([]ChatRow, error) 
 	if err != nil {
 		return nil, fmt.Errorf("chat list: %w", err)
 	}
-	people, err := s.stringsByCanonical(ctx, `SELECT `+canonicalOf("p.jid")+`,MAX(p.display_name) FROM participants p WHERE p.display_name<>'' GROUP BY 1`)
+	people, err := s.stringsByCanonical(ctx, `SELECT `+canonicalOf("p.jid")+`,MAX(p.push_name) FROM participants p WHERE p.push_name<>'' GROUP BY 1`)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +132,7 @@ func (s *Store) ChatList(ctx context.Context, filter string) ([]ChatRow, error) 
 func (s *Store) ChatName(ctx context.Context, jid string) (string, error) {
 	var name string
 	err := s.read.QueryRowContext(ctx, `SELECT COALESCE((SELECT name FROM chats WHERE jid IN (`+aliasSet+`) AND name<>'' ORDER BY jid LIMIT 1),
- (SELECT display_name FROM participants WHERE jid IN (`+aliasSet+`) AND display_name<>'' ORDER BY jid LIMIT 1),'')`, jid).Scan(&name)
+ (SELECT push_name FROM participants WHERE jid IN (`+aliasSet+`) AND push_name<>'' ORDER BY jid LIMIT 1),'')`, jid).Scan(&name)
 	if err != nil {
 		return "", fmt.Errorf("chat name of %s: %w", jid, err)
 	}
@@ -144,11 +145,11 @@ func (s *Store) ChatName(ctx context.Context, jid string) (string, error) {
 // filter. Restricting to the chat's forms before the window function keeps the cost to the chat's own rows instead of
 // the whole archive.
 const chatPageQuery = `WITH m AS (
- SELECT chat_jid,id,sender_jid,ts,text,quoted_id,media_type,
+ SELECT chat_jid,id,sender_jid,ts,CASE WHEN text<>'' THEN text ELSE caption END AS body,quoted_id,CASE kind WHEN 'text' THEN '' ELSE kind END AS media_type,
   ROW_NUMBER() OVER (PARTITION BY id ORDER BY received_at,chat_jid) AS rk
  FROM messages WHERE chat_jid IN (` + aliasSet + `)
 )
-SELECT m.id,m.sender_jid,COALESCE(p.display_name,''),m.text,m.media_type,m.ts,m.quoted_id
+SELECT m.id,m.sender_jid,COALESCE(p.push_name,''),m.body,m.media_type,m.ts,m.quoted_id
 FROM m LEFT JOIN participants p ON p.jid=m.sender_jid
 WHERE m.rk=1 AND (?2<=0 OR m.ts<?2 OR (m.ts=?2 AND m.id<?4))
 ORDER BY m.ts DESC,m.id DESC LIMIT ?3`
@@ -233,14 +234,20 @@ func (s *Store) ChatPage(ctx context.Context, canonicalJID string, beforeTS int6
 func (s *Store) Trace(ctx context.Context, chatJID, id string) (Trace, error) {
 	var t Trace
 	m := &t.Message
-	err := s.read.QueryRowContext(ctx, `SELECT chat_jid,id,sender_jid,ts,received_at,source,text,quoted_id,forwarded,media_type,raw_proto FROM messages WHERE id=?2 AND chat_jid IN (`+aliasSet+`) ORDER BY received_at,chat_jid LIMIT 1`, chatJID, id).
-		Scan(&m.ChatJID, &m.ID, &m.SenderJID, &m.Timestamp, &m.ReceivedAt, &m.Source, &m.Text, &m.QuotedID, &m.Forwarded, &m.MediaType, &m.RawProto)
+	var mentions string
+	err := s.read.QueryRowContext(ctx, `SELECT chat_jid,id,sender_jid,from_me,push_name,kind,text,caption,quoted_id,quoted_sender,mentions,forwarded,forward_score,view_once,ephemeral_secs,details,source,ts,received_at,raw_proto FROM messages WHERE id=?2 AND chat_jid IN (`+aliasSet+`) ORDER BY received_at,chat_jid LIMIT 1`, chatJID, id).
+		Scan(&m.ChatJID, &m.ID, &m.SenderJID, &m.FromMe, &m.PushName, &m.Kind, &m.Text, &m.Caption, &m.QuotedID, &m.QuotedSender, &mentions, &m.Forwarded, &m.ForwardScore, &m.ViewOnce, &m.EphemeralSecs, &m.Details, &m.Source, &m.Timestamp, &m.ReceivedAt, &m.RawProto)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return t, fmt.Errorf("trace message %s: %w", id, err)
 	}
-	err = s.scanRows(ctx, `SELECT chat_jid,target_id,kind,event_id,sender_jid,new_text,value,ts,received_at FROM message_events WHERE target_id=?2 AND chat_jid IN (`+aliasSet+`) ORDER BY ts,received_at,event_id`, []any{chatJID, id}, func(rows *sql.Rows) error {
+	if err == nil {
+		if err = json.Unmarshal([]byte(mentions), &m.Mentions); err != nil {
+			return t, fmt.Errorf("trace message %s: mentions: %w", id, err)
+		}
+	}
+	err = s.scanRows(ctx, `SELECT chat_jid,target_id,kind,event_id,source_id,cause,sender_jid,source,new_text,value,ts,received_at FROM message_events WHERE target_id=?2 AND chat_jid IN (`+aliasSet+`) ORDER BY ts,received_at,event_id`, []any{chatJID, id}, func(rows *sql.Rows) error {
 		var e MessageEvent
-		if err := rows.Scan(&e.ChatJID, &e.TargetID, &e.Kind, &e.EventID, &e.SenderJID, &e.NewText, &e.Value, &e.Timestamp, &e.ReceivedAt); err != nil {
+		if err := rows.Scan(&e.ChatJID, &e.TargetID, &e.Kind, &e.EventID, &e.SourceID, &e.Cause, &e.SenderJID, &e.Source, &e.NewText, &e.Value, &e.Timestamp, &e.ReceivedAt); err != nil {
 			return err
 		}
 		t.Events = append(t.Events, e)

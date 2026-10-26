@@ -10,8 +10,10 @@ import (
 // rawTables are the tables ingest writes, in dump order; media belongs to the media queue and is not dumped.
 var rawTables = []string{"chats", "participants", "id_mappings", "messages", "message_events", "chat_events", "history_sync_chunks"}
 
-// receiveTimes are columns set from the local clock when a row is written (id_mappings.first_seen is one too).
-var receiveTimes = map[string]bool{"received_at": true, "first_seen": true}
+// receiveTimes are the columns a dump leaves out: those set from the local clock when a row is written
+// (id_mappings.first_seen and participants.updated_at too) and the insert-order row id seq (R1), which depends on the
+// order the events arrived in, not on what they are.
+var receiveTimes = map[string]bool{"received_at": true, "first_seen": true, "updated_at": true, "seq": true}
 
 // DumpRaw returns every row of the raw tables as one INSERT line, sorted by every column, without receive times,
 // so two archives built from the same events dump identically.

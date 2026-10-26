@@ -15,8 +15,12 @@ import (
 	sqlite3 "modernc.org/sqlite/lib"
 )
 
-// ErrConstraint marks a write rejected by a SQLite constraint; retrying the same write can never succeed.
+// ErrConstraint marks a write that can never succeed: rejected by a SQLite constraint, or by the Go validation of a
+// batch (an unknown kind, bad details). Retrying the same write is pointless, so callers treat it as permanent.
 var ErrConstraint = errors.New("constraint violation")
+
+// ErrOldArchive is returned by Open and OpenReadOnly for an archive written before the V1 schema (R16, ADR-35).
+var ErrOldArchive = errors.New("archive predates the V1 schema (ADR-35): use a fresh data folder")
 
 func classify(err error) error {
 	var se *sqlite.Error
@@ -26,54 +30,73 @@ func classify(err error) error {
 	return err
 }
 
+// invalid reports a batch or argument that fails the Go validation; like a constraint error it is permanent.
+func invalid(format string, args ...any) error {
+	return fmt.Errorf("%w: %s", ErrConstraint, fmt.Sprintf(format, args...))
+}
+
 //go:embed migrations/*.sql
 var migrations embed.FS
 
+// Store is the archive: one writer connection and a pool of readers (CON: exactly one connection writes archive.db).
 type Store struct {
 	write *sql.DB
 	read  *sql.DB
 	path  string
 }
+
 type Chat struct{ JID, Name, Type, ParentJID string }
-type Participant struct{ JID, DisplayName string }
+
+// Participant is the directory row of a JID: the latest push name seen on a message. UpdatedAt is the receive time of
+// the message that carried the name (unix seconds; 0 means now).
+type Participant struct {
+	JID, PushName string
+	UpdatedAt     int64
+}
 type IDMapping struct {
 	LID, PN, Source string
 	FirstSeen       time.Time
 }
+
+// Message is a row of messages. Kind is one of MessageKinds ("" means text). Details is JSON validated per kind
+// (ValidateDetails; "" means {}). Mentions are JIDs as received.
 type Message struct {
-	ChatJID, ID, SenderJID, Source, Text, QuotedID, MediaType string
-	Timestamp, ReceivedAt                                     int64
-	Forwarded                                                 bool
-	RawProto                                                  []byte
+	ChatJID, ID, SenderJID, PushName, Kind, Text, Caption, QuotedID, QuotedSender, Source, Details string
+	Mentions                                                                                       []string
+	Timestamp, ReceivedAt                                                                          int64
+	FromMe, Forwarded, ViewOnce                                                                    bool
+	ForwardScore, EphemeralSecs                                                                    int
+	RawProto                                                                                       []byte
 }
+
+// MessageEvent is a row of message_events. SourceID is the event's own message ID (R11), "" for undecryptable. Cause
+// is one of EventCauses. Source "" means live.
 type MessageEvent struct {
-	ChatJID, TargetID, Kind, EventID, SenderJID, NewText, Value string
-	Timestamp, ReceivedAt                                       int64
-	RawProto                                                    []byte
+	ChatJID, TargetID, Kind, EventID, SourceID, Cause, SenderJID, Source, NewText, Value string
+	Timestamp, ReceivedAt                                                                int64
+	RawProto                                                                             []byte
 }
 type ChatEvent struct {
 	ChatJID, Kind, EventID, SenderJID, Value string
 	Timestamp, ReceivedAt                    int64
 	RawProto                                 []byte
 }
+
+// Media is a row of the media queue. RawProto is not a column: ClaimMedia, NextExpiredMedia and MediaByID fill it from
+// messages.raw_proto (R4) and Apply ignores it. SourceRank 0 on insert means "by source": 1 for live, 2 otherwise.
+// Thumb is the last column (R5) and is read only by MediaThumb.
 type Media struct {
-	ChatJID, MessageID, SenderJID, Source, Type, MIME, Path, SHA256, State, Reason, RetryDirectPath string
-	DeclaredSize, UpdatedAt, MessageTimestamp                                                       int64
-	Attempts                                                                                        int
-	FromMe                                                                                          bool
-	NextAttemptAt                                                                                   int64 // a pending row is not claimed before this unix time
-	RawProto                                                                                        []byte
+	ChatJID, MessageID, SenderJID, Source, Type, MIME, Filename, Path, SHA256, State, Reason, ErrorClass, RetryDirectPath string
+	DeclaredSize, UpdatedAt, MessageTimestamp, EnqueuedAt, NextAttemptAt, DoneAt                                          int64
+	SourceRank, DurationS, Width, Height, Pages, HTTPStatus, Attempts                                                     int
+	FromMe                                                                                                                bool
+	Thumb, RawProto                                                                                                       []byte
 }
 type ChatStat struct {
 	CanonicalJID, Name                                string
 	MessageCount                                      int
 	Oldest, Newest                                    int64
 	MediaFailed, MediaExpired, MediaPending, OpenGaps int
-}
-type HistoryChunk struct {
-	ID, SyncType                                          string
-	ChunkOrder, Progress, ConversationCount, MessageCount int
-	Oldest, Newest, ReceivedAt                            int64
 }
 type Coverage struct {
 	Chunks, LastProgress int
@@ -92,6 +115,10 @@ func Open(path string) (*Store, error) {
 		return nil, fmt.Errorf("open archive writer: %w", err)
 	}
 	write.SetMaxOpenConns(1)
+	if err = checkSchema(write); err != nil { // before anything changes the file
+		_ = write.Close()
+		return nil, err
+	}
 	if _, err = write.Exec("PRAGMA journal_mode=WAL"); err != nil {
 		_ = write.Close()
 		return nil, fmt.Errorf("enable WAL: %w", err)
@@ -107,6 +134,49 @@ func Open(path string) (*Store, error) {
 	}
 	return &Store{write: write, read: read, path: path}, nil
 }
+
+// checkSchema refuses an archive from before V1 (R16). Such an archive lists version 1 in schema_version, so the new
+// 0001 would be skipped silently; it has no archive_meta, which every V1 archive has. An empty schema_version (a
+// crash between creating the table and applying 0001) is a fresh archive.
+func checkSchema(db *sql.DB) error {
+	has := func(table string) (bool, error) {
+		var n int
+		err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?`, table).Scan(&n)
+		if err != nil {
+			return false, fmt.Errorf("read archive schema: %w", err)
+		}
+		return n > 0, nil
+	}
+	hasVersion, err := has("schema_version")
+	if err != nil || !hasVersion {
+		return err
+	}
+	var versions int
+	if err = db.QueryRow(`SELECT COUNT(*) FROM schema_version`).Scan(&versions); err != nil {
+		return fmt.Errorf("read archive schema: %w", err)
+	}
+	if versions == 0 {
+		return nil
+	}
+	hasMeta, err := has("archive_meta")
+	if err != nil {
+		return err
+	}
+	if !hasMeta {
+		return ErrOldArchive
+	}
+	var schema string
+	if err = db.QueryRow(`SELECT COALESCE((SELECT value FROM archive_meta WHERE key='schema'),'')`).Scan(&schema); err != nil {
+		return fmt.Errorf("read archive schema: %w", err)
+	}
+	if schema != schemaV1 {
+		return fmt.Errorf("archive schema is %q, this build reads %q", schema, schemaV1)
+	}
+	return nil
+}
+
+// schemaV1 is the value of archive_meta('schema') that 0001_v1.sql writes.
+const schemaV1 = "v1"
 
 // OpenReadOnly opens an existing archive for reading only: no migration, no pragma that writes, no directory
 // created, and every write method fails. While the service has the archive open (its -wal exists) the reader joins
@@ -126,6 +196,10 @@ func OpenReadOnly(path string) (*Store, error) {
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open archive reader: %w", err)
+	}
+	if err = checkSchema(db); err != nil {
+		_ = db.Close()
+		return nil, err
 	}
 	return &Store{write: db, read: db, path: path}, nil
 }
@@ -147,6 +221,7 @@ func (s *Store) Close() error {
 }
 func (s *Store) Path() string { return s.path }
 
+// insert runs one write that may be a no-op (ON CONFLICT DO NOTHING) and reports whether it inserted a row.
 func (s *Store) insert(ctx context.Context, query string, args ...any) (bool, error) {
 	result, err := s.write.ExecContext(ctx, query, args...)
 	if err != nil {
@@ -156,151 +231,22 @@ func (s *Store) insert(ctx context.Context, query string, args ...any) (bool, er
 	return n > 0, err
 }
 
-func (s *Store) UpsertChat(ctx context.Context, c Chat) error {
-	_, err := s.write.ExecContext(ctx, `INSERT INTO chats(jid,name,type,parent_jid) VALUES(?,?,?,?) ON CONFLICT(jid) DO UPDATE SET name=COALESCE(NULLIF(excluded.name,''),name),type=excluded.type,parent_jid=excluded.parent_jid`, c.JID, c.Name, c.Type, c.ParentJID)
-	return classify(err)
-}
-func (s *Store) UpsertParticipant(ctx context.Context, p Participant) error {
-	_, err := s.write.ExecContext(ctx, `INSERT INTO participants(jid,display_name) VALUES(?,?) ON CONFLICT(jid) DO UPDATE SET display_name=COALESCE(NULLIF(excluded.display_name,''),display_name)`, p.JID, p.DisplayName)
-	return classify(err)
-}
-func (s *Store) InsertIDMapping(ctx context.Context, m IDMapping) (bool, error) {
-	return s.insert(ctx, `INSERT INTO id_mappings(lid,pn,source,first_seen) VALUES(?,?,?,?) ON CONFLICT DO NOTHING`, m.LID, m.PN, m.Source, m.FirstSeen.Unix())
-}
-
 // aliasSet selects the aliases of chat ?1: the chat itself, the lids of a phone number, the phone numbers of a lid and
 // the other phone numbers of those lids. It uses only id_mappings primary-key and (pn, lid) index lookups, so its cost
-// does not depend on the size of messages or chats. The chat_aliases view stays for report paths; it must not be used
-// per message or per event because building it scans the archive.
+// does not depend on the size of messages or chats.
 const aliasSet = `SELECT ?1
  UNION SELECT lid FROM id_mappings WHERE pn=?1
  UNION SELECT pn FROM id_mappings WHERE lid=?1
  UNION SELECT pn FROM id_mappings WHERE lid IN (SELECT lid FROM id_mappings WHERE pn=?1)`
 
-// dedupeQuery reports whether message ?2 already exists under any alias of chat ?1, probing messages by its
-// (chat_jid, id) primary key.
-const dedupeQuery = `SELECT EXISTS(SELECT 1 FROM messages WHERE id=?2 AND chat_jid IN (` + aliasSet + `))`
+// dedupeQuery reports whether message ?2 already exists under any alias of chat ?1: it asks chat_canonical for the
+// chat's canonical JID, then its aliases, and probes messages by its (chat_jid, id) unique index. A chat with no
+// canonical row yet (its first message) is its own canonical.
+const dedupeQuery = `SELECT EXISTS(SELECT 1 FROM chat_canonical a JOIN messages m ON m.chat_jid=a.alias
+ WHERE a.canonical=COALESCE((SELECT canonical FROM chat_canonical WHERE alias=?1),?1) AND m.id=?2)`
 
 // aliasesQuery lists the aliases of chat ?1 other than itself.
 const aliasesQuery = aliasSet + ` EXCEPT SELECT ?1 ORDER BY 1`
-
-func (s *Store) InsertMessage(ctx context.Context, m Message) (bool, error) {
-	tx, err := s.write.BeginTx(ctx, nil)
-	if err != nil {
-		return false, fmt.Errorf("begin insert message: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	var exists int
-	err = tx.QueryRowContext(ctx, dedupeQuery, m.ChatJID, m.ID).Scan(&exists)
-	if err != nil {
-		return false, fmt.Errorf("check message alias: %w", classify(err))
-	}
-	if exists != 0 {
-		return false, nil
-	}
-	result, err := tx.ExecContext(ctx, `INSERT INTO messages(chat_jid,id,sender_jid,ts,received_at,source,text,quoted_id,forwarded,media_type,raw_proto) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING`, m.ChatJID, m.ID, m.SenderJID, m.Timestamp, m.ReceivedAt, m.Source, m.Text, m.QuotedID, m.Forwarded, m.MediaType, m.RawProto)
-	if err != nil {
-		return false, fmt.Errorf("insert message %s: %w", m.ID, classify(err))
-	}
-	if err = tx.Commit(); err != nil {
-		return false, fmt.Errorf("commit message %s: %w", m.ID, classify(err))
-	}
-	n, err := result.RowsAffected()
-	return n > 0, err
-}
-
-func (s *Store) InsertEvent(ctx context.Context, e MessageEvent) (bool, error) {
-	if e.RawProto == nil {
-		e.RawProto = []byte{}
-	}
-	return s.insert(ctx, `INSERT INTO message_events(chat_jid,target_id,kind,event_id,sender_jid,ts,received_at,new_text,value,raw_proto) VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING`, e.ChatJID, e.TargetID, e.Kind, e.EventID, e.SenderJID, e.Timestamp, e.ReceivedAt, e.NewText, e.Value, e.RawProto)
-}
-func (s *Store) InsertChatEvent(ctx context.Context, e ChatEvent) (bool, error) {
-	if e.RawProto == nil {
-		e.RawProto = []byte{}
-	}
-	return s.insert(ctx, `INSERT INTO chat_events(chat_jid,kind,event_id,sender_jid,ts,received_at,value,raw_proto) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING`, e.ChatJID, e.Kind, e.EventID, e.SenderJID, e.Timestamp, e.ReceivedAt, e.Value, e.RawProto)
-}
-func (s *Store) InsertMedia(ctx context.Context, m Media) error {
-	if m.RawProto == nil {
-		m.RawProto = []byte{}
-	}
-	_, err := s.write.ExecContext(ctx, `INSERT INTO media(chat_jid,message_id,sender_jid,source,type,mime,declared_size,raw_proto,path,sha256,state,reason,attempts,retry_direct_path,updated_at,message_ts,from_me) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(chat_jid,message_id) DO NOTHING`, m.ChatJID, m.MessageID, m.SenderJID, m.Source, m.Type, m.MIME, m.DeclaredSize, m.RawProto, m.Path, m.SHA256, m.State, m.Reason, m.Attempts, m.RetryDirectPath, m.UpdatedAt, m.MessageTimestamp, m.FromMe)
-	return classify(err)
-}
-func (s *Store) SetMediaState(ctx context.Context, chat, id, state, reason string) error {
-	_, err := s.write.ExecContext(ctx, `UPDATE media SET state=?,reason=?,updated_at=? WHERE chat_jid=? AND message_id=?`, state, reason, time.Now().Unix(), chat, id)
-	return err
-}
-
-const mediaColumns = `chat_jid,message_id,sender_jid,source,type,mime,declared_size,raw_proto,path,sha256,state,reason,attempts,retry_direct_path,updated_at,message_ts,from_me,next_attempt_at`
-
-// mediaOrder is the queue order: live before history, newest first.
-const mediaOrder = `CASE source WHEN 'live' THEN 0 ELSE 1 END,message_ts DESC`
-
-func (m *Media) fields() []any {
-	return []any{&m.ChatJID, &m.MessageID, &m.SenderJID, &m.Source, &m.Type, &m.MIME, &m.DeclaredSize, &m.RawProto, &m.Path, &m.SHA256, &m.State, &m.Reason, &m.Attempts, &m.RetryDirectPath, &m.UpdatedAt, &m.MessageTimestamp, &m.FromMe, &m.NextAttemptAt}
-}
-
-func (s *Store) MediaByID(ctx context.Context, chat, id string) (Media, error) {
-	var m Media
-	err := s.read.QueryRowContext(ctx, `SELECT `+mediaColumns+` FROM media WHERE chat_jid=? AND message_id=?`, chat, id).Scan(m.fields()...)
-	return m, err
-}
-
-// ClaimMedia marks the next pending row that is due at now as downloading and returns it, or nil.
-func (s *Store) ClaimMedia(ctx context.Context, now time.Time) (*Media, error) {
-	tx, err := s.write.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tx.Rollback() }()
-	var m Media
-	err = tx.QueryRowContext(ctx, `SELECT `+mediaColumns+` FROM media WHERE state='pending' AND next_attempt_at<=? ORDER BY `+mediaOrder+` LIMIT 1`, now.Unix()).Scan(m.fields()...)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	if _, err = tx.ExecContext(ctx, `UPDATE media SET state='downloading' WHERE chat_jid=? AND message_id=? AND state='pending'`, m.ChatJID, m.MessageID); err != nil {
-		return nil, err
-	}
-	if err = tx.Commit(); err != nil {
-		return nil, err
-	}
-	m.State = "downloading"
-	return &m, nil
-}
-func (s *Store) UpdateMedia(ctx context.Context, m Media) error {
-	_, err := s.write.ExecContext(ctx, `UPDATE media SET path=?,sha256=?,state=?,reason=?,attempts=?,retry_direct_path=?,updated_at=?,next_attempt_at=? WHERE chat_jid=? AND message_id=?`, m.Path, m.SHA256, m.State, m.Reason, m.Attempts, m.RetryDirectPath, m.UpdatedAt, m.NextAttemptAt, m.ChatJID, m.MessageID)
-	return err
-}
-func (s *Store) ResetMediaOnStart(ctx context.Context, now time.Time) error {
-	if _, err := s.write.ExecContext(ctx, `UPDATE media SET state='pending',reason='' WHERE state='downloading';`); err != nil {
-		return err
-	}
-	return s.FailStaleRetries(ctx, now)
-}
-
-// FailStaleRetries fails re-upload requests that have had no answer for 24 hours.
-func (s *Store) FailStaleRetries(ctx context.Context, now time.Time) error {
-	_, err := s.write.ExecContext(ctx, `UPDATE media SET state='failed',reason='no re-upload' WHERE state='retry_requested' AND updated_at<?`, now.Add(-24*time.Hour).Unix())
-	return err
-}
-
-// NextExpiredMedia returns the expired row to request a re-upload for next (live first, newest first), or nil.
-func (s *Store) NextExpiredMedia(ctx context.Context) (*Media, error) {
-	var m Media
-	err := s.read.QueryRowContext(ctx, `SELECT `+mediaColumns+` FROM media WHERE state='expired' ORDER BY `+mediaOrder+` LIMIT 1`).Scan(m.fields()...)
-	if err == sql.ErrNoRows {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &m, nil
-}
 
 func (s *Store) Aliases(ctx context.Context, jid string) ([]string, error) {
 	rows, err := s.read.QueryContext(ctx, aliasesQuery, jid)
@@ -321,6 +267,18 @@ func (s *Store) Aliases(ctx context.Context, jid string) ([]string, error) {
 	}
 	return out, nil
 }
+
+// Canonical is the canonical JID of jid (R8): the smallest LID of its id_mappings component, or jid itself when it has
+// no mapping or the archive has not stored it yet.
+func (s *Store) Canonical(ctx context.Context, jid string) (string, error) {
+	var canonical string
+	err := s.read.QueryRowContext(ctx, `SELECT COALESCE((SELECT canonical FROM chat_canonical WHERE alias=?1),?1)`, jid).Scan(&canonical)
+	if err != nil {
+		return "", fmt.Errorf("canonical of %s: %w", jid, err)
+	}
+	return canonical, nil
+}
+
 func (s *Store) OpenGapCount(ctx context.Context) (int, error) {
 	var n int
 	err := s.read.QueryRowContext(ctx, `SELECT COUNT(*) FROM open_gaps`).Scan(&n)
@@ -330,25 +288,4 @@ func (s *Store) SchemaVersionCount(ctx context.Context) (int, error) {
 	var n int
 	err := s.read.QueryRowContext(ctx, `SELECT COUNT(*) FROM schema_version`).Scan(&n)
 	return n, err
-}
-
-func (s *Store) InsertHistoryChunk(ctx context.Context, h HistoryChunk) error {
-	_, err := s.insert(ctx, `INSERT INTO history_sync_chunks(id,sync_type,chunk_order,progress,conversation_count,message_count,oldest_ts,newest_ts,received_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING`, h.ID, h.SyncType, h.ChunkOrder, h.Progress, h.ConversationCount, h.MessageCount, h.Oldest, h.Newest, h.ReceivedAt)
-	return err
-}
-
-// historyChunksQuery summarizes the history ledger: chunk count, progress of the newest T chunk (by received_at, then
-// chunk_order; any type when there is none), time of the last chunk, and whether history is complete. Let T be FULL if any FULL chunk exists, else INITIAL_BOOTSTRAP; the
-// newest sync of T starts at start, the latest received_at among the T chunks with the lowest chunk_order (a restarted
-// sync sends its first chunk again). History is complete when some T chunk received at or after start has progress
-// 100. The ledger has no sync id, so a sync is found this way; with no T chunk history is not complete. A sync whose
-// first chunk arrives after a later chunk reads "in progress" until a newer chunk arrives. Limitation: if the newest
-// sync's lowest-order chunk never reaches the ledger (acked as gone, or never importable), start stays at the old sync
-// and an old 100 can complete the newer one.
-const historyChunksQuery = `SELECT COUNT(*),COALESCE((SELECT progress FROM history_sync_chunks WHERE sync_type=COALESCE((SELECT sync_type FROM history_sync_chunks WHERE sync_type='FULL' LIMIT 1),'INITIAL_BOOTSTRAP') ORDER BY received_at DESC,chunk_order DESC LIMIT 1),(SELECT progress FROM history_sync_chunks ORDER BY received_at DESC,rowid DESC LIMIT 1),0),COALESCE(MAX(received_at),0),COALESCE((SELECT MAX(h.progress)>=100 FROM history_sync_chunks h,(SELECT t.sync_type,MAX(t.received_at) AS start FROM history_sync_chunks t WHERE t.sync_type=COALESCE((SELECT sync_type FROM history_sync_chunks WHERE sync_type='FULL' LIMIT 1),'INITIAL_BOOTSTRAP') AND t.chunk_order=(SELECT MIN(chunk_order) FROM history_sync_chunks WHERE sync_type=t.sync_type)) s WHERE h.sync_type=s.sync_type AND h.received_at>=s.start),0) FROM history_sync_chunks`
-
-// HistoryCoverage is the coverage half of StatusReport.
-func (s *Store) HistoryCoverage(ctx context.Context) (Coverage, error) {
-	r, err := s.StatusReport(ctx)
-	return r.Coverage, err
 }
