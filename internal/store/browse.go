@@ -145,7 +145,7 @@ func (s *Store) ChatName(ctx context.Context, jid string) (string, error) {
 // filter. Restricting to the chat's forms before the window function keeps the cost to the chat's own rows instead of
 // the whole archive.
 const chatPageQuery = `WITH m AS (
- SELECT chat_jid,id,sender_jid,ts,CASE WHEN text<>'' THEN text ELSE caption END AS body,quoted_id,CASE kind WHEN 'text' THEN '' ELSE kind END AS media_type,
+ SELECT chat_jid,id,sender_jid,ts,CASE WHEN text<>'' THEN text ELSE caption END AS body,quoted_id,CASE WHEN kind IN ('image','video','gif','audio','voice','document','sticker') THEN kind ELSE '' END AS media_type,
   ROW_NUMBER() OVER (PARTITION BY id ORDER BY received_at,chat_jid) AS rk
  FROM messages WHERE chat_jid IN (` + aliasSet + `)
 )

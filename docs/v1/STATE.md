@@ -26,6 +26,13 @@ Single status record for V1 (max 150 lines, update in place; history lives in gi
 - (c) No Co-Authored-By trailer on commits.
 - (d) Router reservation / static IP for ryzen skipped by Hamza (26 Oct): the connection is only needed for coding, so the address may change; `deploy-ryzen` and docs use 192.168.0.105 and must be rechecked if it does.
 
+## Known divergences (W2(b), accepted)
+
+- ChatList takes rules/seen/people from `canonicalOf` (smallest LID mapped directly) but aggregates from `chat_canonical`; `Aliases` still reads `id_mappings` (H1 test). Task (f) must switch all of these to `chat_canonical` together.
+- Decide-before-Apply: a media-rules read failure now holds the message (accepted; same DB, so Apply would fail too).
+- Read changes accepted: storage "by type" shows a separate `voice` row; activity detail says `voice`; replay stores media rows as `skipped`.
+- R8 tie-break: "smallest LID" is by string order ("10@lid" < "9@lid"), same as the old `canonicalOf`; task (d) `RebuildDerived` must use the same comparison.
+
 ## Open questions
 
 - (none open from W1; ADR-39 and charter v1.3 signed by Hamza 26 Oct.)
