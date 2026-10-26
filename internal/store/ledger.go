@@ -47,34 +47,43 @@ const (
 	BlobRaw  = "raw"
 )
 
-// spoolMetaDenylist is the set of JSON key names SpoolReceive refuses in Meta (I3, Hamza, option b, 26 Oct 2026): key
-// material must never reach the backed-up archive.db. Names are normalised (lower case, without "_" and "-") and
-// matched whole, at any depth, in objects and arrays; values are never inspected. directPath, sizes and the sync type are
-// not key material and pass. TestSpoolMetaDenylistIsPinned pins the list, so changing it is deliberate.
+// The spool Meta denylist (I3, Hamza, option b, 26 Oct 2026): key material must never reach the backed-up archive.db.
+// This is only the backstop; the history handler builds Meta from an explicit allowlist of non-key fields (W5).
+// Key names are normalised (lower case, without "_" and "-"), at any depth, in objects and arrays; values are never
+// inspected. A name is refused when it
+//   - contains one of spoolMetaWords (mediaKey, tcToken, messageSecretProof, pollEncKey, accessTokens ...), unless it
+//     ends in "timestamp" (tcTokenTimestamp is a time, not a token), or
+//   - is exactly one of spoolMetaNames. A bare "key" is refused too, so a stored MessageKey must not be named "key".
 //
-//	mediakey, fileencsha256, filesha256, enckey, enchandle  the notification's download credentials (R9)
-//	messagesecret, botmessagesecret, secret, tctoken, token  secrets and tokens by their usual names
-//	key, keydata, privatekey, password, passphrase           generic key and credential names
-var spoolMetaDenylist = map[string]bool{
-	"botmessagesecret": true, "enchandle": true, "enckey": true, "fileencsha256": true, "filesha256": true, "key": true,
-	"keydata": true, "mediakey": true, "messagesecret": true, "passphrase": true, "password": true, "privatekey": true,
-	"secret": true, "tctoken": true, "token": true,
-}
+// directPath, sizes and the sync type pass. TestSpoolMetaDenylistIsPinned pins both lists, so a change is deliberate.
+var (
+	spoolMetaWords = []string{"enckey", "mediakey", "password", "privatekey", "secret", "token"}
+	spoolMetaNames = []string{"enchandle", "fileencsha256", "filesha256", "initialhistbootstrapinlinepayload", "key", "keydata", "passphrase"}
+)
 
-// SpoolMetaDenyNames returns the exact normalised key names SpoolReceive refuses in Meta, sorted (RED STUB).
-func SpoolMetaDenyNames() []string { return nil }
+// SpoolMetaDenylist returns the words SpoolReceive refuses inside a Meta key name, sorted.
+func SpoolMetaDenylist() []string { return slices.Clone(spoolMetaWords) }
 
-// SpoolMetaDenylist returns the normalised key names SpoolReceive refuses in Meta, sorted.
-func SpoolMetaDenylist() []string {
-	out := make([]string, 0, len(spoolMetaDenylist))
-	for k := range spoolMetaDenylist {
-		out = append(out, k)
-	}
-	slices.Sort(out)
-	return out
-}
+// SpoolMetaDenyNames returns the exact Meta key names SpoolReceive refuses, sorted.
+func SpoolMetaDenyNames() []string { return slices.Clone(spoolMetaNames) }
 
 var metaKeyNormaliser = strings.NewReplacer("_", "", "-", "")
+
+func refusedMetaKey(key string) bool {
+	name := strings.ToLower(metaKeyNormaliser.Replace(key))
+	if slices.Contains(spoolMetaNames, name) {
+		return true
+	}
+	if strings.HasSuffix(name, "timestamp") {
+		return false
+	}
+	for _, word := range spoolMetaWords {
+		if strings.Contains(name, word) {
+			return true
+		}
+	}
+	return false
+}
 
 // checkSpoolMeta reports a Meta that is not a JSON object or holds a denylisted key at any depth. The error wraps
 // ErrConstraint: such a row can never be stored, however often it is retried.
@@ -100,7 +109,7 @@ func denylistedKey(v any) (string, bool) {
 	switch x := v.(type) {
 	case map[string]any:
 		for k, val := range x {
-			if spoolMetaDenylist[strings.ToLower(metaKeyNormaliser.Replace(k))] {
+			if refusedMetaKey(k) {
 				return k, true
 			}
 			if key, bad := denylistedKey(val); bad {

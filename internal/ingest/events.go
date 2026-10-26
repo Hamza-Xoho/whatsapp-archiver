@@ -130,13 +130,13 @@ func FromUndecryptable(evt *events.UndecryptableMessage, received time.Time) Res
 }
 
 // FromStub normalises a history message with no body (a revoke, a group change, a ciphertext marker). It is a stub
-// event under its key ID, never a message row. Its raw proto is the WebMessageInfo without the message secret, which
-// is key material and is never stored (archive.db is backed up).
+// event under its key ID, never a message row. Its raw proto is the WebMessageInfo without key material (stripMessage), which
+// is never stored (archive.db is backed up).
 func FromStub(evt *events.Message, web *waWeb.WebMessageInfo, received time.Time) Result {
 	info := evt.Info
 	chat, sender, id := info.Chat.String(), info.Sender.String(), string(info.ID)
 	clean := proto.Clone(web).(*waWeb.WebMessageInfo)
-	clean.MessageSecret = nil
+	stripMessage(clean.ProtoReflect())
 	raw, _ := proto.MarshalOptions{Deterministic: true, AllowPartial: true}.Marshal(clean)
 	e := store.MessageEvent{ChatJID: chat, TargetID: id, Kind: string(KindStub), EventID: id, SourceID: id, SenderJID: sender, Source: "history", Timestamp: info.Timestamp.Unix(),
 		ReceivedAt: received.Unix(), Value: web.GetMessageStubType().String(), RawProto: raw}

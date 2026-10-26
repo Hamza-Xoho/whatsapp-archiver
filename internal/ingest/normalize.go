@@ -51,34 +51,17 @@ func keyOnly(msg *waE2E.Message) bool {
 	return proto.Size(rest) == 0
 }
 
-// withoutMessageSecrets returns a copy of msg without the message secrets in its context, the one on the message and
-// the ones on the messages it wraps (ephemeral, view-once, edited, document with caption). The secrets are key
-// material, and the raw proto is stored in the backed-up archive.
+// withoutMessageSecrets returns a copy of msg without key material at any depth: the message secrets in every context
+// (including quoted, device-sent, wrapped and edited messages), a poll's encKey, sender keys and the payloads of the
+// keyMaterial protocol messages (stripMessage, the one rule of secrets.go). The raw proto is stored in the backed-up,
+// insert-only archive, and an event's identity hashes it, so live and stripped history copies must clear the same way.
 func withoutMessageSecrets(msg *waE2E.Message) *waE2E.Message {
 	if msg == nil {
 		return nil
 	}
 	clean := proto.Clone(msg).(*waE2E.Message)
-	clearMessageSecrets(clean)
+	stripMessage(clean.ProtoReflect())
 	return clean
-}
-
-func clearMessageSecrets(msg *waE2E.Message) {
-	if msg == nil {
-		return
-	}
-	if ci := msg.GetMessageContextInfo(); ci != nil {
-		ci.MessageSecret = nil
-		ci.BotMessageSecret = nil
-	}
-	for _, wrapper := range []*waE2E.FutureProofMessage{
-		msg.GetEphemeralMessage(), msg.GetViewOnceMessage(), msg.GetViewOnceMessageV2(),
-		msg.GetViewOnceMessageV2Extension(), msg.GetDocumentWithCaptionMessage(), msg.GetEditedMessage(),
-	} {
-		clearMessageSecrets(wrapper.GetMessage())
-	}
-	// An edit holds the new content in ProtocolMessage.EditedMessage, with a context info of its own.
-	clearMessageSecrets(msg.GetProtocolMessage().GetEditedMessage())
 }
 
 // keyMaterial lists the protocol message types whose payload holds keys: app-state sync keys, contact hash keys,
