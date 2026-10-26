@@ -1,0 +1,4 @@
+INSERT INTO chats(jid,name,type,parent_jid) VALUES('10000000100@g.us','','','');
+INSERT INTO participants(jid,push_name,contact_name) VALUES('20000000001@lid','Alice','');
+INSERT INTO id_mappings(lid,pn,source) VALUES('20000000001@lid','10000000001@s.whatsapp.net','message_alt');
+INSERT INTO messages(chat_jid,id,sender_jid,from_me,push_name,kind,text,caption,quoted_id,quoted_sender,mentions,forwarded,forward_score,view_once,ephemeral_secs,details,source,ts,raw_proto) VALUES('10000000100@g.us','K-CONTACT-1','20000000001@lid',0,'Alice','contact','Omar Test','','','','[]',0,0,0,0,'{"display_name":"Omar Test","vcard":"BEGIN:VCARD\nVERSION:3.0\nFN:Omar Test\nTEL;type=CELL;waid=10000000009:+10000000009\nEND:VCARD"}','live',1760000060,X'22680A094F6D6172205465737482015A424547494E3A56434152440A56455253494F4E3A332E300A464E3A4F6D617220546573740A54454C3B747970653D43454C4C3B776169643D31303030303030303030393A2B31303030303030303030390A454E443A5643415244');
