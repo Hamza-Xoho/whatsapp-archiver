@@ -50,6 +50,9 @@ func normalizeEvent(msg *waE2E.Message, r *Result) bool {
 		case x.Type == nil: // the proto2 default is REVOKE; an untyped protocol message deletes nothing
 			r.Kind = KindProtocol
 			r.Event = event(r, target, string(KindProtocol), "")
+			if target == "" {
+				identifiedByOwnID(r)
+			}
 		case x.GetType() == waE2E.ProtocolMessage_MESSAGE_EDIT:
 			r.Kind = KindEdit
 			r.Event = event(r, target, "edit", messageText(x.GetEditedMessage()))
@@ -62,6 +65,9 @@ func normalizeEvent(msg *waE2E.Message, r *Result) bool {
 			r.Event.NewText = ""
 			if keyMaterial[x.GetType()] {
 				r.Event.RawProto = nil
+			}
+			if target == "" || keyMaterial[x.GetType()] {
+				identifiedByOwnID(r)
 			}
 		}
 	}
@@ -82,6 +88,16 @@ func event(r *Result, target, kind, value string) *store.MessageEvent {
 	}
 	return &store.MessageEvent{ChatJID: r.Chat.JID, TargetID: target, Kind: kind, EventID: id, SourceID: own, SenderJID: r.Sender.JID, Source: r.Message.Source,
 		Timestamp: r.Message.Timestamp, ReceivedAt: r.Received.Unix(), NewText: value, Value: value, RawProto: r.Message.RawProto}
+}
+
+// identifiedByOwnID gives a protocol event with no target the identity of its own message ID, as a reaction or a vote has.
+// Its raw proto cannot tell two of them apart: a key-material payload (history notification, key share) is stripped from
+// it, so a burst in the self chat would collapse to one event_id, drop all but the first on UNIQUE and lose the later
+// source_ids that close gaps (R11). The message ID is the same on the live and the history path.
+func identifiedByOwnID(r *Result) {
+	if own := r.Message.ID; own != "" {
+		r.Event.EventID = stableID(r.Chat.JID, r.Event.TargetID, r.Event.Kind, own)
+	}
 }
 
 func messageText(m *waE2E.Message) string {
