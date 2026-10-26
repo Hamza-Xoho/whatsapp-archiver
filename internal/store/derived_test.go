@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -10,13 +11,12 @@ import (
 )
 
 const (
-	grp   = "120363111@g.us"
-	pn1   = "966550100123@s.whatsapp.net"
-	lid1  = "204871@lid"
-	pn2   = "966550100456@s.whatsapp.net"
-	pn3   = "966550100789@s.whatsapp.net"
-	lid3  = "30@lid"
-	other = "777@g.us"
+	grp  = "120363111@g.us"
+	pn1  = "966550100123@s.whatsapp.net"
+	lid1 = "204871@lid"
+	pn2  = "966550100456@s.whatsapp.net"
+	pn3  = "966550100789@s.whatsapp.net"
+	lid3 = "30@lid"
 )
 
 func must(t *testing.T, err error) {
@@ -143,8 +143,19 @@ func workload(t *testing.T, s *store.Store) {
 	apply(t, s, mb(grp, "G-18", "document", "", 160))
 	apply(t, s, store.Batch{Media: &store.Media{ChatJID: grp, MessageID: "G-18", Source: "live", Type: "document", State: "pending", Filename: "invoice_late.pdf", MessageTimestamp: 160}})
 
-	// A media row with no message and no other trace of its chat.
-	apply(t, s, store.Batch{Media: &store.Media{ChatJID: other, MessageID: "X-1", Source: "history", Type: "image", State: "pending", DeclaredSize: 5, MessageTimestamp: 7}})
+	// Media rows with no message and no other trace of their chat, one per state: they make no chat_stats row (R20 has
+	// four sources), whatever their state, in the incremental path and in the rebuild alike.
+	for i, state := range []string{"skipped", "pending", "done", "failed", "expired"} {
+		chat := fmt.Sprintf("%d%s", 770+i, "@g.us")
+		apply(t, s, store.Batch{Media: &store.Media{ChatJID: chat, MessageID: "X-1", Source: "history", Type: "image", State: state, DeclaredSize: 5, MessageTimestamp: 7}})
+	}
+
+	// A mapping that arrives after the data and absorbs no stats row: the number was never a listed chat but carries a
+	// push name and an undecryptable event.
+	apply(t, s, mb("55@lid", "N-1", "text", "x", 600))
+	apply(t, s, store.Batch{Sender: &store.Participant{JID: "55@s.whatsapp.net", PushName: "Layla", UpdatedAt: 1}})
+	apply(t, s, ev("55@s.whatsapp.net", "NG1", "undecryptable", "U-NG1", 601, func(e *store.MessageEvent) { e.Cause = "other"; e.SenderJID = "" }))
+	mapping(t, s, "55@lid", "55@s.whatsapp.net")
 
 	// Chats that only have a rule or a sighting (R20), then a rename and a rule on a known chat.
 	must(t, s.SetChatRules(ctx, []store.ChatRule{{JID: "999@g.us", Logging: true}, {JID: grp, Logging: true}}))

@@ -262,3 +262,24 @@ func TestMappingRefreshesNameAndGapsFromAnAliasWithoutARow(t *testing.T) {
 	mapping(t, s, "5@lid", "5@s.whatsapp.net")
 	wantStat(t, s, "5@lid", "Layla||1|10|10|NULL|0|0|0|0|0|1")
 }
+
+// R20 lists four sources of a chat_stats row: messages, chats, chat_rules and chat_seen. A media row alone, in any
+// state, makes none; the chat gets its row, with the media counts, once it is seen.
+func TestMediaOnlyChatHasNoRowUntilItIsSeen(t *testing.T) {
+	s := open(t)
+	for i, state := range []string{"skipped", "pending", "done", "failed", "expired"} {
+		chat := fmt.Sprintf("m%d@g.us", i)
+		apply(t, s, store.Batch{Media: &store.Media{ChatJID: chat, MessageID: "X", Source: "history", Type: "image", State: state, DeclaredSize: 9, MessageTimestamp: 1}})
+		wantStat(t, s, chat, "no row")
+	}
+	must(t, s.SetChatRules(context.Background(), []store.ChatRule{{JID: "m2@g.us", Logging: true}, {JID: "m1@g.us", Logging: true}}))
+	wantStat(t, s, "m2@g.us", "||0|0|0|NULL|1|0|0|0|9|0") // done
+	wantStat(t, s, "m1@g.us", "||0|0|0|NULL|0|0|0|1|0|0") // pending
+	wantStat(t, s, "m0@g.us", "no row")
+	// A state change of a media-only chat keeps it row-less.
+	m, err := s.MediaByID(context.Background(), "m3@g.us", "X")
+	must(t, err)
+	m.State = "done"
+	must(t, s.UpdateMedia(context.Background(), m))
+	wantStat(t, s, "m3@g.us", "no row")
+}
