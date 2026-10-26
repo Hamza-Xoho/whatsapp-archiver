@@ -30,9 +30,12 @@ func FromMessage(evt *events.Message, source string, received time.Time) Result 
 	info := evt.Info
 	chat := info.Chat.String()
 	sender := info.Sender.String()
-	m := store.Message{ChatJID: chat, ID: string(info.ID), SenderJID: sender, Timestamp: info.Timestamp.Unix(), ReceivedAt: received.Unix(), Source: source, RawProto: raw}
-	r := Result{Kind: KindMessage, Chat: store.Chat{JID: chat}, Sender: store.Participant{JID: sender, DisplayName: info.PushName}, Message: &m, FromMe: info.IsFromMe, Received: received}
+	m := store.Message{ChatJID: chat, ID: string(info.ID), SenderJID: sender, FromMe: info.IsFromMe, PushName: info.PushName, Timestamp: info.Timestamp.Unix(), ReceivedAt: received.Unix(), Source: source, RawProto: raw}
+	r := Result{Kind: KindMessage, Chat: store.Chat{JID: chat}, Sender: store.Participant{JID: sender, PushName: info.PushName}, Message: &m, FromMe: info.IsFromMe, Received: received}
 	normalizeContent(evt.Message, &r)
+	if r.Message != nil && r.Message.Kind == "" {
+		r.Message.Kind = "unknown" // a message with no body this build knows; task (c) classifies the rest
+	}
 	if keyOnly(rawMsg) {
 		r.Kind = KindKeyOnly
 	}
@@ -88,27 +91,27 @@ func normalizeContent(msg *waE2E.Message, r *Result) {
 	if inner := msg.GetEditedMessage().GetMessage(); inner != nil {
 		msg = inner // the EditedMessage wrapper (whatsmeow's BuildEdit) holds the MESSAGE_EDIT protocol message
 	}
-	if text := msg.GetConversation(); text != "" {
-		r.Message.Text = text
+	if msg.Conversation != nil {
+		r.Message.Kind, r.Message.Text = "text", msg.GetConversation()
 	}
 	if x := msg.GetExtendedTextMessage(); x != nil {
-		r.Message.Text = x.GetText()
+		r.Message.Kind, r.Message.Text = "text", x.GetText()
 		contextFields(r.Message, x.GetContextInfo())
 	}
 	if x := msg.GetImageMessage(); x != nil {
-		r.Message.Text = x.GetCaption()
+		r.Message.Caption = x.GetCaption()
 		contextFields(r.Message, x.GetContextInfo())
 		setMedia(r, "image", x.GetMimetype(), x.GetFileLength())
 	}
 	if x := msg.GetDocumentMessage(); x != nil {
-		r.Message.Text = x.GetCaption()
+		r.Message.Caption = x.GetCaption()
 		contextFields(r.Message, x.GetContextInfo())
 		setMedia(r, "document", x.GetMimetype(), x.GetFileLength())
 	}
 	if x := msg.GetAudioMessage(); x != nil {
 		kind := "audio"
 		if x.GetPTT() {
-			kind = "audio"
+			kind = "voice"
 		}
 		setMedia(r, kind, x.GetMimetype(), x.GetFileLength())
 	}
@@ -117,7 +120,7 @@ func normalizeContent(msg *waE2E.Message, r *Result) {
 		if x.GetGifPlayback() {
 			kind = "gif"
 		}
-		r.Message.Text = x.GetCaption()
+		r.Message.Caption = x.GetCaption()
 		contextFields(r.Message, x.GetContextInfo())
 		setMedia(r, kind, x.GetMimetype(), x.GetFileLength())
 	}
@@ -189,12 +192,15 @@ func contextFields(m *store.Message, c *waE2E.ContextInfo) {
 	m.QuotedID = c.GetStanzaID()
 	m.Forwarded = c.GetForwardingScore() > 0
 }
+
+// setMedia makes the message a media message of the kind and describes its queue row; the raw proto is not copied into
+// the row (R4), the downloader reads messages.raw_proto. The store ranks the row by source.
 func setMedia(r *Result, kind, mime string, size uint64) {
-	r.Message.MediaType = kind
-	r.Media = &store.Media{ChatJID: r.Message.ChatJID, MessageID: r.Message.ID, SenderJID: r.Message.SenderJID, Source: r.Message.Source, Type: kind, MIME: mime, DeclaredSize: int64(size), RawProto: r.Message.RawProto, State: "pending", MessageTimestamp: r.Message.Timestamp, FromMe: r.FromMe}
+	r.Message.Kind = kind
+	r.Media = &store.Media{ChatJID: r.Message.ChatJID, MessageID: r.Message.ID, SenderJID: r.Message.SenderJID, Source: r.Message.Source, Type: kind, MIME: mime, DeclaredSize: int64(size), State: "pending", MessageTimestamp: r.Message.Timestamp, FromMe: r.FromMe}
 }
 func event(r *Result, target, kind, value string) *store.MessageEvent {
-	return &store.MessageEvent{ChatJID: r.Chat.JID, TargetID: target, Kind: kind, EventID: stableID(r.Chat.JID, target, kind, string(r.Message.RawProto)), SenderJID: r.Sender.JID, Timestamp: r.Message.Timestamp, ReceivedAt: r.Received.Unix(), NewText: value, Value: value, RawProto: r.Message.RawProto}
+	return &store.MessageEvent{ChatJID: r.Chat.JID, TargetID: target, Kind: kind, EventID: stableID(r.Chat.JID, target, kind, string(r.Message.RawProto)), SenderJID: r.Sender.JID, Source: r.Message.Source, Timestamp: r.Message.Timestamp, ReceivedAt: r.Received.Unix(), NewText: value, Value: value, RawProto: r.Message.RawProto}
 }
 func messageText(m *waE2E.Message) string {
 	if m == nil {
@@ -231,7 +237,7 @@ func FromUndecryptable(evt *events.UndecryptableMessage, received time.Time) Res
 	}
 	chat := evt.Info.Chat.String()
 	id := string(evt.Info.ID)
-	e := store.MessageEvent{ChatJID: chat, TargetID: id, Kind: string(KindUndecryptable), EventID: stableID(chat, id, string(KindUndecryptable)), SenderJID: evt.Info.Sender.String(), Timestamp: evt.Info.Timestamp.Unix(), ReceivedAt: received.Unix(), Value: string(evt.DecryptFailMode)}
+	e := store.MessageEvent{ChatJID: chat, TargetID: id, Kind: string(KindUndecryptable), EventID: stableID(chat, id, string(KindUndecryptable)), SenderJID: evt.Info.Sender.String(), Source: "live", Timestamp: evt.Info.Timestamp.Unix(), ReceivedAt: received.Unix(), Value: string(evt.DecryptFailMode)}
 	return Result{Kind: KindUndecryptable, Chat: store.Chat{JID: chat}, Sender: store.Participant{JID: evt.Info.Sender.String()}, Event: &e, FromMe: evt.Info.IsFromMe, Received: received}
 }
 
@@ -244,8 +250,8 @@ func FromStub(evt *events.Message, web *waWeb.WebMessageInfo, received time.Time
 	clean := proto.Clone(web).(*waWeb.WebMessageInfo)
 	clean.MessageSecret = nil
 	raw, _ := proto.MarshalOptions{Deterministic: true, AllowPartial: true}.Marshal(clean)
-	e := store.MessageEvent{ChatJID: chat, TargetID: id, Kind: string(KindStub), EventID: id, SenderJID: sender, Timestamp: info.Timestamp.Unix(), ReceivedAt: received.Unix(), Value: web.GetMessageStubType().String(), RawProto: raw}
-	return Result{Kind: KindStub, Chat: store.Chat{JID: chat}, Sender: store.Participant{JID: sender, DisplayName: info.PushName}, Event: &e, Mappings: messageMappings(info, received), FromMe: info.IsFromMe, Received: received}
+	e := store.MessageEvent{ChatJID: chat, TargetID: id, Kind: string(KindStub), EventID: id, SenderJID: sender, Source: "history", Timestamp: info.Timestamp.Unix(), ReceivedAt: received.Unix(), Value: web.GetMessageStubType().String(), RawProto: raw}
+	return Result{Kind: KindStub, Chat: store.Chat{JID: chat}, Sender: store.Participant{JID: sender, PushName: info.PushName}, Event: &e, Mappings: messageMappings(info, received), FromMe: info.IsFromMe, Received: received}
 }
 
 func messageMappings(info types.MessageInfo, seen time.Time) []store.IDMapping {

@@ -40,7 +40,7 @@ type Downloader interface {
 type Clock interface{ Now() time.Time }
 type Queue struct {
 	dir     string
-	global  func() (config.MediaRules, error)                // the global media rules, read at each Enqueue
+	global  func() (config.MediaRules, error)                // the global media rules, read at each Decide
 	perChat func(chatJID string) (*config.MediaRules, error) // a chat's own rules or nil; may itself be nil
 	workers int
 	store   *store.Store
@@ -56,8 +56,8 @@ type Queue struct {
 	wg      sync.WaitGroup
 }
 
-// NewQueue builds the queue. global and perChat are read at each Enqueue, so a rule change applies to the next media
-// item; a chat's own rules (perChat non-nil) replace the global ones. A failed rule read makes Enqueue return the error
+// NewQueue builds the queue. global and perChat are read at each Decide, so a rule change applies to the next media
+// item; a chat's own rules (perChat non-nil) replace the global ones. A failed rule read makes Decide return the error
 // without deciding, so the pipeline retries it. The worker count and the re-request rate are read from global once,
 // here; if that read fails they take their defaults (1 worker, 10 requests a minute). onPanic (may be nil) is told "media" for every recovered worker panic.
 func NewQueue(dir string, global func() (config.MediaRules, error), perChat func(chatJID string) (*config.MediaRules, error), st *store.Store, d Downloader, c Clock, l *slog.Logger, onPanic func(string)) *Queue {
@@ -82,21 +82,28 @@ func (q *Queue) WithActivity(b *activity.Bus) *Queue {
 	q.bus = b
 	return q
 }
-func (q *Queue) Enqueue(ctx context.Context, m store.Media) error {
+
+// Decide applies the media rules to a row about to be stored: it sets the state ("pending" or "skipped"), the reason and
+// the time the item was queued (SC-3 starts there). It writes nothing; the row is stored by store.Apply in the same
+// transaction as its message (R2), and Wake tells the workers afterwards. A failed rule read is an error and decides
+// nothing (guessing the global rules would download media of a chat set to download nothing), so the pipeline retries.
+func (q *Queue) Decide(_ context.Context, m *store.Media) error {
 	rules, err := q.rules(m.ChatJID)
 	if err != nil {
 		return fmt.Errorf("media rules of %s: %w", m.ChatJID, err)
 	}
-	m.State, m.Reason = decide(m, rules)
-	m.UpdatedAt = q.clock.Now().Unix()
-	if err := q.store.InsertMedia(ctx, m); err != nil {
-		return err
-	}
+	m.State, m.Reason = decide(*m, rules)
+	now := q.clock.Now().Unix()
+	m.UpdatedAt, m.EnqueuedAt = now, now
+	return nil
+}
+
+// Wake tells the workers a media row exists. It never blocks.
+func (q *Queue) Wake() {
 	select {
 	case q.wake <- struct{}{}:
 	default:
 	}
-	return nil
 }
 func (q *Queue) Run(ctx context.Context) {
 	if err := q.store.ResetMediaOnStart(ctx, q.clock.Now()); err != nil {
@@ -267,6 +274,7 @@ func (q *Queue) download(ctx context.Context, m *store.Media) {
 	} else {
 		sum := sha256.Sum256(data)
 		m.State = "done"
+		m.DoneAt = now.Unix()
 		m.Path = path
 		m.SHA256 = hex.EncodeToString(sum[:])
 		m.Reason = ""
@@ -287,10 +295,7 @@ func (q *Queue) OnRetry(ctx context.Context, e *events.MediaRetry) {
 	m.State = "pending"
 	m.UpdatedAt = q.clock.Now().Unix()
 	q.save(ctx, m)
-	select {
-	case q.wake <- struct{}{}:
-	default:
-	}
+	q.Wake()
 }
 
 var unsafe = regexp.MustCompile(`[<>:"/\\|?*]+`)

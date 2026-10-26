@@ -22,14 +22,20 @@ func (q *Queue) rules(chatJID string) (config.MediaRules, error) {
 	return q.global()
 }
 
+// decide is the download decision of a media row. The rules speak of the types config.MediaTypes lists; a voice note
+// (kind voice since V1) follows the audio rules, so nothing a user configured changes.
 func decide(m store.Media, r config.MediaRules) (string, string) {
-	if slices.Contains(r.Skip, m.Type) {
+	typ := m.Type
+	if typ == "voice" {
+		typ = "audio"
+	}
+	if slices.Contains(r.Skip, typ) {
 		return "skipped", "type skipped"
 	}
-	if m.Type == "video" && r.VideoMaxMB > 0 && m.DeclaredSize > int64(r.VideoMaxMB)<<20 {
+	if typ == "video" && r.VideoMaxMB > 0 && m.DeclaredSize > int64(r.VideoMaxMB)<<20 {
 		return "skipped", fmt.Sprintf("over %d MB cap", r.VideoMaxMB)
 	}
-	if !slices.Contains(r.Download, m.Type) {
+	if !slices.Contains(r.Download, typ) {
 		return "skipped", "type not enabled"
 	}
 	return "pending", ""

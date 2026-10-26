@@ -14,16 +14,19 @@ import (
 	"whatsapp-archiver/internal/store"
 )
 
+// Writer is what ingest writes to. Apply stores everything one event writes in one transaction (R2); an id mapping is a
+// separate, earlier transaction because the exclusion filter must see it before it decides.
 type Writer interface {
-	InsertMessage(context.Context, store.Message) (bool, error)
-	InsertEvent(context.Context, store.MessageEvent) (bool, error)
-	InsertChatEvent(context.Context, store.ChatEvent) (bool, error)
+	Apply(context.Context, store.Batch) (store.Applied, error)
 	InsertIDMapping(context.Context, store.IDMapping) (bool, error)
-	UpsertChat(context.Context, store.Chat) error
-	UpsertParticipant(context.Context, store.Participant) error
 }
+
+// MediaQueue is the media workers as ingest sees them. Decide applies the media rules to a row about to be stored
+// (state, reason, queue time); a failed rule read is an error and decides nothing. The row is then stored by Apply in
+// the same transaction as its message, and Wake tells the workers it exists.
 type MediaQueue interface {
-	Enqueue(context.Context, store.Media) error
+	Decide(context.Context, *store.Media) error
+	Wake()
 	OnRetry(context.Context, *events.MediaRetry)
 }
 type HealthSink interface {
@@ -91,8 +94,8 @@ func (p *Pipeline) publish(r Result, stored bool) {
 		e.Kind, e.Detail = "gap", "undecryptable"
 	case r.Message != nil:
 		e.Kind, e.Detail = "message", "text"
-		if r.Message.MediaType != "" {
-			e.Detail = r.Message.MediaType
+		if r.Media != nil {
+			e.Detail = r.Message.Kind
 		}
 	case r.Event != nil:
 		e.Kind, e.Detail = "event", r.Event.Kind
@@ -243,38 +246,20 @@ func (p *Pipeline) ingest(ctx context.Context, r Result, publish bool) error {
 		}
 		return err
 	}
-	write := func() error {
-		if r.Chat.JID != "" {
-			if err := p.writer.UpsertChat(ctx, r.Chat); err != nil {
-				return err
-			}
-		}
-		if r.Sender.JID != "" {
-			if err := p.writer.UpsertParticipant(ctx, r.Sender); err != nil {
-				return err
-			}
-		}
-		if r.Message != nil {
-			_, err := p.writer.InsertMessage(ctx, *r.Message)
+	if r.Media != nil { // the rules are decided before the write, so the media row is stored with its decision
+		if err := p.persist(ctx, fmt.Sprintf("decide media in %s", r.Chat.JID), func() error { return p.queue.Decide(ctx, r.Media) }); err != nil {
 			return err
 		}
-		if r.Event != nil {
-			_, err := p.writer.InsertEvent(ctx, *r.Event)
-			return err
-		}
-		if r.ChatEvent != nil {
-			_, err := p.writer.InsertChatEvent(ctx, *r.ChatEvent)
-			return err
-		}
-		return nil
 	}
-	if err := p.persist(ctx, fmt.Sprintf("write %s in %s", r.Kind, r.Chat.JID), write); err != nil {
+	batch := batchOf(r)
+	if err := p.persist(ctx, fmt.Sprintf("write %s in %s", r.Kind, r.Chat.JID), func() error {
+		_, err := p.writer.Apply(ctx, batch)
+		return err
+	}); err != nil {
 		return err
 	}
 	if r.Media != nil {
-		if err := p.persist(ctx, fmt.Sprintf("enqueue media in %s", r.Chat.JID), func() error { return p.queue.Enqueue(ctx, *r.Media) }); err != nil {
-			return err
-		}
+		p.queue.Wake()
 	}
 	p.health.Seen(r.Received, r.FromMe)
 	if p.seen != nil && r.Chat.JID != "" {
@@ -288,4 +273,19 @@ func (p *Pipeline) ingest(ctx context.Context, r Result, publish bool) error {
 		p.publish(r, true)
 	}
 	return nil
+}
+
+// batchOf is the one transaction an event is written in: its chat and sender directory rows, the message, event or chat
+// event, and the media row of a message. The sender's name is stamped with the time the event was received.
+func batchOf(r Result) store.Batch {
+	b := store.Batch{Message: r.Message, Event: r.Event, ChatEvent: r.ChatEvent, Media: r.Media}
+	if r.Chat.JID != "" {
+		b.Chat = &r.Chat
+	}
+	if r.Sender.JID != "" {
+		sender := r.Sender
+		sender.UpdatedAt = r.Received.Unix()
+		b.Sender = &sender
+	}
+	return b
 }

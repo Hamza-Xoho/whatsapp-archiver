@@ -43,7 +43,7 @@ func (p *Pipeline) ImportHistory(ctx context.Context, evt *events.HistorySync) (
 	if err != nil {
 		return 0, 0, fmt.Errorf("encode history chunk: %w", err)
 	}
-	chunk := store.HistoryChunk{ID: stableID(string(raw)), SyncType: hs.GetSyncType().String(), ChunkOrder: int(hs.GetChunkOrder()), Progress: int(hs.GetProgress()), ConversationCount: len(hs.GetConversations()), ReceivedAt: now.Unix()}
+	chunk := store.HistoryChunk{ID: stableID(string(raw)), Stage: store.StageImported, SyncType: hs.GetSyncType().String(), ChunkOrder: int(hs.GetChunkOrder()), Progress: int(hs.GetProgress()), ConversationCount: len(hs.GetConversations()), ReceivedAt: now.Unix()}
 	for _, conv := range hs.GetConversations() {
 		if conv == nil {
 			continue
@@ -88,7 +88,8 @@ func (p *Pipeline) ImportHistory(ctx context.Context, evt *events.HistorySync) (
 		}
 		if keepChat {
 			if upErr := p.persist(ctx, "upsert history chat", func() error {
-				return p.writer.UpsertChat(ctx, store.Chat{JID: chat, Name: conv.GetName()})
+				_, upErr := p.writer.Apply(ctx, store.Batch{Chat: &store.Chat{JID: chat, Name: conv.GetName()}})
+				return upErr
 			}); upErr != nil {
 				return stored, skipped, upErr
 			}

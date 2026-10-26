@@ -139,10 +139,14 @@ func replay(dir, data, own, ownLID string, errOut io.Writer) (int, string, error
 // replayWriter is what the replay pipeline writes to; tests replace it with a failing store.
 var replayWriter = func(st *store.Store) ingest.Writer { return st }
 
-// noMedia drops media jobs: a replay downloads nothing.
+// noMedia skips media jobs: a replay downloads nothing, so its media rows are stored as skipped.
 type noMedia struct{}
 
-func (noMedia) Enqueue(context.Context, store.Media) error  { return nil }
+func (noMedia) Decide(_ context.Context, m *store.Media) error {
+	m.State, m.Reason = "skipped", "replay downloads nothing"
+	return nil
+}
+func (noMedia) Wake()                                       {}
 func (noMedia) OnRetry(context.Context, *events.MediaRetry) {}
 
 // replayHealth ignores connection reports (a replay has no connection) and counts failures, which make the replay

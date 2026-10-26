@@ -85,11 +85,15 @@ func (s *Server) viewer(w http.ResponseWriter, r *http.Request) {
 	s.render(w, s.pages["viewer"], "layout", data)
 }
 
+// mediaKinds are the message kinds that carry a file.
+var mediaKinds = []string{"image", "video", "audio", "voice", "document", "sticker", "gif"}
+
 type traceData struct {
 	page
 	JID, ID                string
 	Trace                  store.Trace
 	Time, Received, Raw    string
+	MediaKind              string // the message's kind when it is a media kind, else ""
 	Events                 []traceEvent
 	HasMessage, MediaReady bool
 }
@@ -123,6 +127,9 @@ func (s *Server) trace(w http.ResponseWriter, r *http.Request) {
 	data := traceData{page: page{Title: "Message details"}, JID: jid, ID: id, Trace: t, HasMessage: t.Message.ID != "",
 		Time: view.FormatUnix(loc, t.Message.Timestamp), Received: view.FormatUnix(loc, t.Message.ReceivedAt),
 		Raw: view.HumanSize(int64(len(t.Message.RawProto))), MediaReady: t.Media != nil && t.Media.State == "done"}
+	if slices.Contains(mediaKinds, t.Message.Kind) {
+		data.MediaKind = t.Message.Kind
+	}
 	for _, e := range t.Events {
 		data.Events = append(data.Events, traceEvent{MessageEvent: e, Time: view.FormatUnix(loc, e.Timestamp)})
 	}
