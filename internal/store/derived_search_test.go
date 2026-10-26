@@ -6,7 +6,7 @@ import (
 	"whatsapp-archiver/internal/store"
 )
 
-// searchArchive holds one message per case of the spike 8 table; seq is the order below (1 to 9), the edit is event 1.
+// searchArchive holds one message per case of the spike 8 table; seq is the order below (1 to 10), the edit is event 1.
 func searchArchive(t *testing.T) *store.Store {
 	t.Helper()
 	s := open(t)
@@ -22,6 +22,7 @@ func searchArchive(t *testing.T) *store.Store {
 	})) // 7
 	apply(t, s, withMedia(mb(c, "M8", "document", "", 17, func(m *store.Message) { m.Caption = "see attached" }), "pending", 9, "Quarterly Report.pdf")) // 8
 	apply(t, s, mb(c, "M9", "unknown", "", 18, func(m *store.Message) { m.Details = `{"fields":["x"]}` }))                                               // 9: no body
+	apply(t, s, mb(c, "M10", "contact", "", 19, func(m *store.Message) { m.Details = `{"display_name":"Yusuf"}` }))                                      // 10
 	apply(t, s, ev(c, "M2", "edit", "E1", 20, func(e *store.MessageEvent) { e.NewText = "المدرسة القديمة" }))                                            // -1
 	apply(t, s, ev(c, "M1", "reaction", "E2", 21, func(e *store.MessageEvent) { e.NewText = "thumbsup" }))                                               // not indexed
 	apply(t, s, ev(c, "M1", "pin", "E3", 22, func(e *store.MessageEvent) { e.NewText = "pinnedforever" }))                                               // not indexed
@@ -53,6 +54,7 @@ func TestSearchFollowsTheSpike8Table(t *testing.T) {
 		{"location address", "search_tri", "fahd", "6"},
 		{"contact name from the details", "search_fts", "smith", "7"},
 		{"second contact", "search_fts", "zainab", "7"},
+		{"single contact name from the details", "search_fts", "yusuf", "10"},
 		{"document filename from the media row", "search_fts", "report", "8"},
 		{"document caption", "search_fts", "attached", "8"},
 		{"the edit text is indexed under the negative seq", "search_fts", "القديمه", "-1"},
@@ -70,9 +72,9 @@ func TestSearchFollowsTheSpike8Table(t *testing.T) {
 	}
 	db := rawDB(t, s)
 	for _, fts := range []string{"search_fts", "search_tri"} {
-		// Indexed: seq 1 to 8 and the edit; not the bodyless unknown message (9), nor the reaction, pin or revoke.
-		if got := docs(t, db, fts); got != "-1,1,2,3,4,5,6,7,8" {
-			t.Errorf("%s holds docs %q, want -1,1,2,3,4,5,6,7,8", fts, got)
+		// Indexed: seq 1 to 8, 10 and the edit; not the bodyless unknown message (9), nor the reaction, pin or revoke.
+		if got := docs(t, db, fts); got != "-1,1,2,3,4,5,6,7,8,10" {
+			t.Errorf("%s holds docs %q, want -1,1,2,3,4,5,6,7,8,10", fts, got)
 		}
 	}
 }

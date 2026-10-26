@@ -247,3 +247,18 @@ func TestMappingMergeRecomputesTheMergedChat(t *testing.T) {
 		t.Error("exactly one chat_stats row must remain")
 	}
 }
+
+// A mapping that absorbs no chat_stats row (the new alias was never a listed chat) still changes the merged chat: the
+// alias may carry the push name of the contact and the undecryptable events of the chat.
+func TestMappingRefreshesNameAndGapsFromAnAliasWithoutARow(t *testing.T) {
+	s := open(t)
+	apply(t, s, mb("5@lid", "A", "text", "x", 10))
+	apply(t, s, store.Batch{Sender: &store.Participant{JID: "5@s.whatsapp.net", PushName: "Layla", UpdatedAt: 1}})
+	apply(t, s, ev("5@s.whatsapp.net", "G1", "undecryptable", "U1", 20, func(e *store.MessageEvent) { e.Cause = "other"; e.SenderJID = "" }))
+	wantStat(t, s, "5@lid", "||1|10|10|NULL|0|0|0|0|0|0")
+	if got := stat(t, s, "5@s.whatsapp.net"); got != "no row" {
+		t.Fatalf("the number alone has a row: %q", got)
+	}
+	mapping(t, s, "5@lid", "5@s.whatsapp.net")
+	wantStat(t, s, "5@lid", "Layla||1|10|10|NULL|0|0|0|0|0|1")
+}
