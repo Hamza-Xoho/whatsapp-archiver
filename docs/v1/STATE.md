@@ -12,6 +12,8 @@ Single status record for V1 (max 150 lines, update in place; history lives in gi
 
 - W2 schema design signed off 26 Oct (`docs/v1/schema.md`, e1611f1 + decisions): spool blobs cleared 7 days after import; deleted = placeholder + toggle; not_running counts as outage minutes.
 
+- W2(b) migration and store rewrite (branch main, base eb9d4d4): `0001_v1.sql`, `Apply(Batch)`, kinds, ledger/spool, control tables, ports of ingest/media/web/cmd. Golden review, 26 Oct: `internal/ingest/testdata/golden/synthetic.sql` regenerated with `-update` after reading all 13 changed lines against the old file: raw_proto hex, ts, ids and values are byte-identical; the only differences are the new columns (participants push_name/contact_name; messages from_me, push_name, kind, text/caption split, quoted_sender, mentions `[]`, forward_score, view_once, ephemeral_secs, details `{}`; events source_id/cause/source; ledger stage `imported`, spool_id 0). `cmd/archiver/testdata/status.golden` differs in one line: data folder 109.8 KB to 249.8 KB (the V1 schema has about 35 more b-trees, one page each).
+
 ## In flight
 
 - W0 step 3 (Hamza): done 26 Oct: practice instance unlinked on the phone and its process stopped (PID 288900); only the `SaudiSpyWithMyWifi` Wi-Fi profile left; stale DNS 192.168.68.1 gone. Reboot test still open (optional).
