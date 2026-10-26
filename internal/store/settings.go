@@ -102,8 +102,12 @@ func (s *Store) SetChatRules(ctx context.Context, rules []ChatRule) error {
 		if _, err = tx.ExecContext(ctx, `INSERT INTO chat_rules(jid,logging,media,updated_at) VALUES(?,?,?,?) ON CONFLICT(jid) DO UPDATE SET logging=excluded.logging,media=excluded.media,updated_at=excluded.updated_at`, r.JID, r.Logging, media, at); err != nil {
 			return fmt.Errorf("write chat rule %s: %w", r.JID, classify(err))
 		}
-		// A rule may name a chat the archive has not stored yet; reads join on chat_canonical (schema 4.1).
+		// A rule may name a chat the archive has not stored yet; reads join on chat_canonical (schema 4.1), and the
+		// chat is listed with zero counts (R20).
 		if err = ensureCanonical(ctx, tx, r.JID); err != nil {
+			return err
+		}
+		if err = ensureStats(ctx, tx, r.JID); err != nil {
 			return err
 		}
 	}
@@ -151,15 +155,18 @@ func (s *Store) MarkChatSeen(ctx context.Context, jid string, at int64) (bool, e
 		return false, fmt.Errorf("begin chat seen: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err = ensureCanonical(ctx, tx, jid); err != nil {
-		return false, err
-	}
 	result, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO chat_seen(jid,first_seen) VALUES(?,?)`, jid, at)
 	if err != nil {
 		return false, fmt.Errorf("mark chat %s seen: %w", jid, classify(err))
 	}
 	isNew, _, err := inserted(result)
 	if err != nil {
+		return false, err
+	}
+	if err = ensureCanonical(ctx, tx, jid); err != nil {
+		return false, err
+	}
+	if err = ensureStats(ctx, tx, jid); err != nil { // a sighting lists the chat (R20)
 		return false, err
 	}
 	return isNew, tx.Commit()
@@ -224,6 +231,9 @@ func (s *Store) ImportConfigOnce(ctx context.Context, cfg *config.Config) (bool,
 			return false, fmt.Errorf("import exclusion %s: %w", jid, err)
 		}
 		if err = ensureCanonical(ctx, tx, jid); err != nil {
+			return false, err
+		}
+		if err = ensureStats(ctx, tx, jid); err != nil {
 			return false, err
 		}
 	}

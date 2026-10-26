@@ -165,13 +165,25 @@ func (w batch) run(ctx context.Context, tx *sql.Tx) (Applied, error) {
 		return res, err
 	}
 	if w.chat != nil {
-		if err := upsertChat(ctx, tx, *w.chat); err != nil {
+		changed, err := upsertChat(ctx, tx, *w.chat)
+		if err != nil {
 			return res, err
+		}
+		if changed { // the chat is seen (R20) and its name or type may have moved
+			if err = chatChanged(ctx, tx, w.chat.JID); err != nil {
+				return res, err
+			}
 		}
 	}
 	if w.sender != nil {
-		if err := upsertParticipant(ctx, tx, *w.sender); err != nil {
+		changed, err := upsertParticipant(ctx, tx, *w.sender)
+		if err != nil {
 			return res, err
+		}
+		if changed { // a push name can be the display name of the sender's own chat
+			if _, err = refreshIdentity(ctx, tx, w.sender.JID); err != nil {
+				return res, err
+			}
 		}
 	}
 	insertMedia := w.media != nil
@@ -182,10 +194,26 @@ func (w batch) run(ctx context.Context, tx *sql.Tx) (Applied, error) {
 			return res, err
 		}
 		insertMedia = insertMedia && res.New
+		if res.New { // derived tables, same transaction (schema 4.3 step 3)
+			if err = w.messageAdded(ctx, tx); err != nil {
+				return res, err
+			}
+			if err = w.indexMessage(ctx, tx, res.Seq); err != nil {
+				return res, err
+			}
+		}
 	case w.event != nil:
 		var err error
 		if res.New, res.Seq, err = w.insertEvent(ctx, tx); err != nil {
 			return res, err
+		}
+		if res.New { // schema 4.3 step 4
+			if err = w.eventAdded(ctx, tx); err != nil {
+				return res, err
+			}
+			if err = w.indexEdit(ctx, tx, res.Seq); err != nil {
+				return res, err
+			}
 		}
 	case w.chatEvent != nil:
 		var err error
@@ -197,6 +225,16 @@ func (w batch) run(ctx context.Context, tx *sql.Tx) (Applied, error) {
 		var err error
 		if res.MediaNew, err = w.insertMedia(ctx, tx); err != nil {
 			return res, err
+		}
+		if res.MediaNew {
+			if err = mediaMoved(ctx, tx, w.media.ChatJID, "", w.media.State, w.media.DeclaredSize, 1); err != nil {
+				return res, err
+			}
+			if w.msg == nil { // a row that arrives after its message: the file name joins the message's searchable text
+				if err = w.reindexForMedia(ctx, tx); err != nil {
+					return res, err
+				}
+			}
 		}
 	}
 	return res, nil
@@ -234,31 +272,35 @@ func (w batch) jids() []string {
 	return out
 }
 
-func upsertChat(ctx context.Context, tx *sql.Tx, c Chat) error {
+// upsertChat reports whether the row was inserted or changed.
+func upsertChat(ctx context.Context, tx *sql.Tx, c Chat) (bool, error) {
 	// A write that changes nothing is skipped: the row is touched only when the name (an empty one never erases a
 	// known one), the type or the parent differs.
-	_, err := tx.ExecContext(ctx, `INSERT INTO chats(jid,name,type,parent_jid) VALUES(?1,?2,?3,?4)
+	res, err := tx.ExecContext(ctx, `INSERT INTO chats(jid,name,type,parent_jid) VALUES(?1,?2,?3,?4)
  ON CONFLICT(jid) DO UPDATE SET name=COALESCE(NULLIF(excluded.name,''),chats.name),type=excluded.type,parent_jid=excluded.parent_jid
  WHERE COALESCE(NULLIF(excluded.name,''),chats.name) IS NOT chats.name OR excluded.type IS NOT chats.type OR excluded.parent_jid IS NOT chats.parent_jid`,
 		c.JID, c.Name, c.Type, c.ParentJID)
 	if err != nil {
-		return fmt.Errorf("upsert chat %s: %w", c.JID, classify(err))
+		return false, fmt.Errorf("upsert chat %s: %w", c.JID, classify(err))
 	}
-	return nil
+	n, err := res.RowsAffected()
+	return n > 0, err
 }
 
-func upsertParticipant(ctx context.Context, tx *sql.Tx, p Participant) error {
+// upsertParticipant reports whether the row was inserted or changed.
+func upsertParticipant(ctx context.Context, tx *sql.Tx, p Participant) (bool, error) {
 	at := p.UpdatedAt
 	if at == 0 {
 		at = nowUnix()
 	}
-	_, err := tx.ExecContext(ctx, `INSERT INTO participants(jid,push_name,updated_at) VALUES(?1,?2,?3)
+	res, err := tx.ExecContext(ctx, `INSERT INTO participants(jid,push_name,updated_at) VALUES(?1,?2,?3)
  ON CONFLICT(jid) DO UPDATE SET push_name=excluded.push_name,updated_at=excluded.updated_at
  WHERE excluded.push_name<>'' AND excluded.push_name<>participants.push_name`, p.JID, p.PushName, at)
 	if err != nil {
-		return fmt.Errorf("upsert participant %s: %w", p.JID, classify(err))
+		return false, fmt.Errorf("upsert participant %s: %w", p.JID, classify(err))
 	}
-	return nil
+	n, err := res.RowsAffected()
+	return n > 0, err
 }
 
 func (w batch) insertMessage(ctx context.Context, tx *sql.Tx) (isNew bool, seq int64, err error) {

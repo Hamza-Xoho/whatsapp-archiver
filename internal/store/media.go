@@ -66,6 +66,9 @@ func (s *Store) ClaimMedia(ctx context.Context, now time.Time) (*Media, error) {
 	if _, err = tx.ExecContext(ctx, `UPDATE media SET state='downloading' WHERE chat_jid=? AND message_id=? AND state='pending'`, m.ChatJID, m.MessageID); err != nil {
 		return nil, err
 	}
+	if err = mediaMoved(ctx, tx, m.ChatJID, "pending", "downloading", m.DeclaredSize, 1); err != nil { // same bucket: no change
+		return nil, err
+	}
 	if err = tx.Commit(); err != nil {
 		return nil, err
 	}
@@ -76,11 +79,33 @@ func (s *Store) ClaimMedia(ctx context.Context, now time.Time) (*Media, error) {
 // UpdateMedia writes the download outcome of a row: path, hash, state, reason, error class, HTTP status, attempts, the
 // re-upload path and the times.
 func (s *Store) UpdateMedia(ctx context.Context, m Media) error {
-	_, err := s.write.ExecContext(ctx, `UPDATE media SET path=?,sha256=?,state=?,reason=?,error_class=?,http_status=?,attempts=?,retry_direct_path=?,updated_at=?,next_attempt_at=?,done_at=? WHERE chat_jid=? AND message_id=?`,
-		m.Path, m.SHA256, m.State, m.Reason, m.ErrorClass, m.HTTPStatus, m.Attempts, m.RetryDirectPath, m.UpdatedAt, m.NextAttemptAt, m.DoneAt, m.ChatJID, m.MessageID)
-	return classify(err)
+	tx, err := s.write.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var old string
+	var size int64
+	err = tx.QueryRowContext(ctx, `SELECT state,declared_size FROM media WHERE chat_jid=? AND message_id=?`, m.ChatJID, m.MessageID).Scan(&old, &size)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil // nothing to update
+	}
+	if err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE media SET path=?,sha256=?,state=?,reason=?,error_class=?,http_status=?,attempts=?,retry_direct_path=?,updated_at=?,next_attempt_at=?,done_at=? WHERE chat_jid=? AND message_id=?`,
+		m.Path, m.SHA256, m.State, m.Reason, m.ErrorClass, m.HTTPStatus, m.Attempts, m.RetryDirectPath, m.UpdatedAt, m.NextAttemptAt, m.DoneAt, m.ChatJID, m.MessageID); err != nil {
+		return classify(err)
+	}
+	// The count of the old bucket moves to the new one in the same transaction (schema 4.3 step 6).
+	if err = mediaMoved(ctx, tx, m.ChatJID, old, m.State, size, 1); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
+// ResetMediaOnStart puts interrupted downloads back in the queue. downloading and pending share a chat_stats bucket, so
+// the counts do not move.
 func (s *Store) ResetMediaOnStart(ctx context.Context, now time.Time) error {
 	if _, err := s.write.ExecContext(ctx, `UPDATE media SET state='pending',reason='' WHERE state='downloading';`); err != nil {
 		return err
@@ -90,8 +115,40 @@ func (s *Store) ResetMediaOnStart(ctx context.Context, now time.Time) error {
 
 // FailStaleRetries fails re-upload requests that have had no answer for 24 hours.
 func (s *Store) FailStaleRetries(ctx context.Context, now time.Time) error {
-	_, err := s.write.ExecContext(ctx, `UPDATE media SET state='failed',reason='no re-upload' WHERE state='retry_requested' AND updated_at<?`, now.Add(-24*time.Hour).Unix())
-	return err
+	tx, err := s.write.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	cutoff := now.Add(-24 * time.Hour).Unix()
+	rows, err := tx.QueryContext(ctx, `SELECT chat_jid,COUNT(*) FROM media WHERE state='retry_requested' AND updated_at<? GROUP BY chat_jid`, cutoff)
+	if err != nil {
+		return err
+	}
+	moved := map[string]int{}
+	for rows.Next() {
+		var chat string
+		var n int
+		if err = rows.Scan(&chat, &n); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		moved[chat] = n
+	}
+	err = rows.Err()
+	_ = rows.Close()
+	if err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE media SET state='failed',reason='no re-upload' WHERE state='retry_requested' AND updated_at<?`, cutoff); err != nil {
+		return err
+	}
+	for chat, n := range moved {
+		if err = mediaMoved(ctx, tx, chat, "retry_requested", "failed", 0, n); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // NextExpiredMedia returns the expired row to request a re-upload for next (queue order), or nil.

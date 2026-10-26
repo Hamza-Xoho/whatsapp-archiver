@@ -45,7 +45,7 @@ var (
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 func run(args []string, out, errOut io.Writer) int {
 	if len(args) == 0 {
-		_, _ = fmt.Fprintln(errOut, "usage: archiver <pair|run|status|chats|backup|scrub|replay|version>")
+		_, _ = fmt.Fprintln(errOut, "usage: archiver <pair|run|status|chats|backup|rebuild-derived|scrub|replay|version>")
 		return 2
 	}
 	cmd := args[0]
@@ -90,6 +90,8 @@ func run(args []string, out, errOut io.Writer) int {
 		err = printStatus(cfg, out)
 	case "chats":
 		err = printChats(cfg, out)
+	case "rebuild-derived":
+		err = rebuildDerived(cfg, out)
 	case "backup":
 		var r backup.Report
 		if err = applyArchiveKeep(cfg); err == nil {

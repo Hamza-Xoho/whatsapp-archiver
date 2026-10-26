@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -14,6 +15,7 @@ func nowUnix() int64 { return time.Now().Unix() }
 type execer interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
 // ensureCanonical gives every JID a chat_canonical row if it has none: itself, until a mapping says otherwise. A JID
@@ -47,25 +49,63 @@ func (s *Store) InsertIDMapping(ctx context.Context, m IDMapping) (bool, error) 
 	if err != nil || !isNew {
 		return false, err
 	}
-	if err = rewriteComponent(ctx, tx, m.LID, m.PN); err != nil {
+	moved, err := rewriteComponent(ctx, tx, m.LID, m.PN)
+	if err != nil {
 		return false, err
 	}
-	// Task (d): when a canonical changes, recompute chat_stats of the merged canonical here and delete the stale row.
+	if err = mergeStats(ctx, tx, moved); err != nil {
+		return false, err
+	}
 	if err = tx.Commit(); err != nil {
 		return false, fmt.Errorf("commit id mapping: %w", classify(err))
 	}
 	return true, nil
 }
 
+// merge is what a new mapping did to chat_canonical: the component's canonical JID and the canonical JIDs its members
+// had before (a member without a row was its own canonical).
+type merge struct {
+	canonical string
+	before    []string
+}
+
+// mergeStats brings chat_stats in line with a merge (schema 4.3 step 5). The stale rows of the canonicals that were
+// absorbed are deleted; when one of them had a row, the merged chat is recomputed from the raw tables (O(rows of the
+// chat), once per merge). Otherwise only what a new alias can change is refreshed: the name and the gaps.
+func mergeStats(ctx context.Context, tx execer, mg merge) error {
+	absorbed := false
+	for _, old := range mg.before {
+		if old == mg.canonical {
+			continue
+		}
+		res, err := tx.ExecContext(ctx, `DELETE FROM chat_stats WHERE canonical=?`, old)
+		if err != nil {
+			return fmt.Errorf("delete stale stats of %s: %w", old, classify(err))
+		}
+		if n, err := res.RowsAffected(); err != nil {
+			return err
+		} else if n > 0 {
+			absorbed = true
+		}
+	}
+	if absorbed {
+		return recomputeStats(ctx, tx, mg.canonical)
+	}
+	if _, err := refreshIdentity(ctx, tx, mg.canonical); err != nil {
+		return err
+	}
+	return gapsOf(ctx, tx, mg.canonical, "", false)
+}
+
 // rewriteComponent walks the id_mappings component that contains lid and pn and points every member's chat_canonical
 // row at the component's canonical JID: its smallest LID (R8, LID preferred). Members without a row get one.
-func rewriteComponent(ctx context.Context, tx execer, lid, pn string) error {
+func rewriteComponent(ctx context.Context, tx execer, lid, pn string) (merge, error) {
 	members := []string{lid, pn}
 	lids := map[string]bool{lid: true}
 	for i := 0; i < len(members); i++ {
 		found, err := neighbours(ctx, tx, members[i])
 		if err != nil {
-			return err
+			return merge{}, err
 		}
 		for _, n := range found.lids {
 			lids[n] = true
@@ -88,14 +128,25 @@ func rewriteComponent(ctx context.Context, tx execer, lid, pn string) error {
 			canonical = l
 		}
 	}
+	mg := merge{canonical: canonical}
 	for _, member := range members {
+		var before string
+		switch err := tx.QueryRowContext(ctx, `SELECT canonical FROM chat_canonical WHERE alias=?`, member).Scan(&before); {
+		case errors.Is(err, sql.ErrNoRows):
+			before = member
+		case err != nil:
+			return merge{}, fmt.Errorf("canonical row of %s: %w", member, err)
+		}
+		if !slices.Contains(mg.before, before) {
+			mg.before = append(mg.before, before)
+		}
 		_, err := tx.ExecContext(ctx, `INSERT INTO chat_canonical(alias,canonical) VALUES(?1,?2)
  ON CONFLICT(alias) DO UPDATE SET canonical=excluded.canonical WHERE chat_canonical.canonical<>excluded.canonical`, member, canonical)
 		if err != nil {
-			return fmt.Errorf("canonical row of %s: %w", member, classify(err))
+			return merge{}, fmt.Errorf("canonical row of %s: %w", member, classify(err))
 		}
 	}
-	return nil
+	return mg, nil
 }
 
 type neighbourSet struct{ lids, pns []string }
