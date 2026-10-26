@@ -312,7 +312,7 @@ live in `media`, not here.
 | contact | display name / – | `{"display_name","vcard"}` |
 | contacts | display name / – | `{"display_name","contacts":[{"display_name","vcard"}]}` |
 | poll | question / – | `{"question","options":["…"],"max":n}` |
-| event | name / – | `{"name","description","start_ts","end_ts","location":{"name","lat","lon"}\|null,"canceled":bool}` |
+| event | name / – | `{"name","description","start_ts","end_ts","location":{"name","lat","lon"},"canceled":bool}`; the `location` key is omitted when the event has no place, and every other key when its proto field is absent |
 | system | notice text if any / – | `{"type":"<proto field name>"}` (call log, scheduled call, …) |
 | unknown | – / – | `{"fields":["<top-level proto field names>"]}`; listed on the Logging page via `messages_unknown` |
 
@@ -398,7 +398,7 @@ today, so `insert_cost_test.go` should improve; indexes on `messages` are 4 (+ t
 | (b) | `internal/ingest/pipeline.go`, `types.go` | `Writer` → `Apply(Batch)`; media enqueue inside the batch; `Result` carries the typed message |
 | (b) | `internal/media/queue.go` | `InsertMedia` gone (row comes from `Apply`), `Enqueue` = wake, `RawProto` read by join |
 | (c) normaliser | `ingest/normalize.go`, `history.go` | every typed column and kind, `details`, `source_id` on events, history reactions and poll updates (R14), golden fixture per kind; `add-message-kind` skill |
-| (c) | `internal/wa` | undecryptable `cause` mapping, poll vote decryption (R15); prior-art rows first |
+| (c) | `internal/ingest`, `internal/wa` | undecryptable `cause` mapping (in `ingest/events.go`: it reads only `types/events` fields), poll vote decryption (R15, in `internal/wa`); prior-art rows first |
 | (d) derived | `store/derived.go`, `store/fold.go`, `cmd/archiver` | maintenance in `Apply`, `RebuildDerived()`, `archiver rebuild-derived`, FR-10 folder (after spike 8 for the tokenizer) |
 | (e) contact names | `internal/wa` (contact store read), `store` participants upsert | `contact_name`; never copies `session.db` |
 | (f) status and stats | `store/views.go`, `browse.go`, `usage.go`, `cmd/archiver` status, `internal/web` (dashboard, chats), `internal/view` | `StatusReport`, `ChatList`, `ChatPage`, `ChatName`, `Trace`, `ChatMedia`, `Aliases`, `OpenGapCount`, `Usage` on the new tables; 300k scale test |

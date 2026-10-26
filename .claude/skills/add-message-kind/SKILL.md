@@ -25,5 +25,6 @@ Replaces `add-event-kind`. A message kind is a row of `messages` (`docs/v1/schem
 2. Add the name to `EventKinds` (and a cause to `EventCauses` for `undecryptable`) in `internal/store/kinds.go`; values are validated in Go, never by a CHECK (R6).
 3. Add the `Kind` constant in `internal/ingest/types.go`; decide in `scope.go` whether it is ever archived.
 4. Normalise it in `normalizeEvent` (`internal/ingest/events.go`) through `event()`: the event's own message ID is `source_id` (R11, empty only for `undecryptable`); give a reaction-like event an event ID derived from that ID so a live and a history copy are one row; use `value` for its payload and `new_text` only for edit text.
-5. An event embedded in a history message goes through `embeddedEvents` (R14); a payload that needs the session (like a poll vote) is decrypted in `internal/wa` and passed in as a function, never by importing the client in `ingest`.
-6. Add a scenario to `events-messages` (or its own) in `golden_kinds_test.go`, tests for `source_id` in `events_test.go`, then the golden steps 5 and 7 above.
+5. Dedupe by event ID only works when the chat JID has the same form (LID or phone number) in both copies; CON-7 keeps stored JIDs as received, so a live and a history copy under different forms are two rows (the read views resolve aliases).
+6. An event embedded in a history message goes through `embeddedEvents` (R14); a payload that needs the session (like a poll vote) is decrypted in `internal/wa` and passed in as a function, never by importing the client in `ingest`.
+7. Add a scenario to `events-messages` (or its own) in `golden_kinds_test.go`, tests for `source_id` in `events_test.go`, then the golden steps 5 and 7 above.

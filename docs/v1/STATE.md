@@ -16,6 +16,17 @@ Single status record for V1 (max 150 lines, update in place; history lives in gi
 
 - W2(c) normaliser fills every typed column (base 12ca198): all 16 kinds with `details`, context (quote, mentions, forwarding, expiry, view-once), media facts, `source_id` and `cause` on events, history reactions and poll updates (R14), live poll-vote naming (R15). Golden review, 26 Oct: created with `-update` after reading every line of the 19 new dumps (`kind-*`, `events-messages`, `events-undecryptable`, `events-history`; each INSERT checked column by column against its generator input in `internal/ingest/golden_kinds_test.go`, raw_proto checked by length and leading bytes, because the raw bytes are the unchanged marshalled input) and the 5 changed lines of `synthetic.sql` (read against the old file): the only differences are `quoted_sender` of SYN-REPLY-1, `cause='other'` on the undecryptable, `source_id` on revoke, edit and reaction, and the reaction's `event_id`, which now derives from its own message ID (so the live and the history copy of a reaction are one row).
 
+- W2(c) fix round 1 (review: approved with one Important), red `test:` then fb95bc7 (cause for other unavailable types, vote-less history update, absent place fields omitted), docs in the next commit. Golden review: `kind-location` and `kind-live-location` regenerated with `-update` after reading every changed line. The diff is 4 added INSERT lines and no changed line: K-LOC-3 (`{"name":"A place without coordinates"}`), K-LIVE-2 (`{"lat":24.6,"lon":46.6}`) and Bob's participant and mapping rows; K-LOC-1/2 and K-LIVE-1 are byte-identical.
+
+## Known divergences (W2(c), accepted; commits 9d4c85d and fb95bc7)
+
+- Undecryptable `cause` is mapped in `internal/ingest/events.go` (it reads only `types/events` fields), not in `internal/wa`. `untrusted_identity` is never produced: whatsmeow's event has no error value. `IsUnavailable` -> `no_sender_key` is an approximation (whatsmeow also sets it for "no ciphertext at all"); a non-view-once `UnavailableType` is `other`.
+- A poll vote on a poll that is not in the archive, a vote that cannot be decrypted, and every replayed vote keep `value=''`; a vote that selects nothing is `{"options":[]}`; a history poll update without a vote is `''`.
+- `new_text` on reaction and pin events still holds the emoji / pin type (pre-existing, pinned by `TestEventsForUnknownTargetAreStored`). Task (d) must index only `kind='edit'` text under R13.
+- The `system` kind covers `call`, `callLogMesssage`, `scheduledCallCreationMessage`, `scheduledCallEditMessage`, `bcallMessage`: a judgement call, everything else unrecognised is `unknown` with `fields`.
+- A reaction's or poll vote's `event_id` derives from its own message ID, so a live and a history copy are one row only when the chat JID has the same form in both; CON-7 (JIDs as received) otherwise keeps both.
+- Absent proto fields are absent keys in `details` (coordinates, accuracy, speed, sequence).
+
 ## In flight
 
 - W0 step 3 (Hamza): done 26 Oct: practice instance unlinked on the phone and its process stopped (PID 288900); only the `SaudiSpyWithMyWifi` Wi-Fi profile left; stale DNS 192.168.68.1 gone. Reboot test still open (optional).

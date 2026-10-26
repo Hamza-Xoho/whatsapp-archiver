@@ -192,7 +192,7 @@ whatsapp-archiver/
     translate/
   testdata/events/     # recorded, scrubbed WhatsApp events for replay tests (from a test group only)
   docs/                # this charter, MODULES.md, prior-art.md, guides
-  .claude/             # hooks and skills (bump-whatsmeow, add-event-kind, record-fixtures, add-module)
+  .claude/             # hooks and skills (bump-whatsmeow, add-message-kind, record-fixtures, add-module)
   .golangci.yml        # import and send bans
   data/                # session, database, media, keys (gitignored)
   CLAUDE.md            # under 150 lines: commands, invariants, package boundaries
