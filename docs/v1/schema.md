@@ -54,9 +54,14 @@ current `internal/store/migrations/0001_raw.sql` and `0002_settings.sql`, `inter
   `store.SpoolReceive`; it clears message secrets and other key material in every message at any depth (nested,
   quoted, edited, reactions, poll updates, status messages) and keeps the blob's format. A message's own media key
   stays (the media worker needs it, `messages.raw_proto` already holds it). As defence in depth `SpoolReceive` refuses
-  a `meta` that is not a JSON object or has a key from `store.SpoolMetaDenylist()` (pinned by a test) at any depth;
+  a `meta` that is not a JSON object or has a key refused by `store.SpoolMetaDenylist()`/`SpoolMetaDenyNames()` (pinned by a test) at any depth;
   it does not parse the blob. The chunk id must be computed on the stripped chunk (or from the notification id) so a
-  resent chunk stays a no-op.
+  resent chunk stays a no-op. The denylist is only the backstop: the handler builds `meta` from an explicit allowlist
+  struct. The strip is one rule (`stripMessage`, `ingest/secrets.go`) shared with the live path (`FromMessage`,
+  `FromStub`), so `raw_proto` and `event_id` (a hash of `raw_proto`) agree between a live message and its stripped
+  history copy (I4). **Residual risk:** the rule works by field name on the pinned protos. Unknown protobuf fields and
+  opaque bytes such as `WebMessageInfo.futureproofData` survive it, so a secret in a field newer than the pinned protos
+  would be stored; the `bump-whatsmeow` skill re-diffs the bytes fields against `secretFieldWords` on every bump.
 - **R10. History ledger stages.** `history_sync_chunks` gains `stage` (`received`, `imported`) and `spool_id`;
   the key becomes `(id, stage)`. W5 writes the `received` row with the spool row and the `imported` row after the
   import; both are inserts, so the table stays insert-only.
@@ -300,7 +305,7 @@ empty database.
 | `messages`, `message_events`, `chat_events`, `id_mappings`, `history_sync_chunks` | raw, insert-only | `store.Apply` via `ingest.Pipeline.Ingest` (live, history, replay) | `ON CONFLICT DO NOTHING`; guard test unchanged |
 | `chats`, `participants` | directory, upsert | `Apply`; `participants.contact_name` also from task (e) | write skipped when nothing changed (`… DO UPDATE … WHERE` differs) |
 | `media` | queue, mutable | row inserted by `Apply`; state by `internal/media` through store methods | every state change adjusts `chat_stats` in its transaction |
-| `chat_canonical`, `chat_stats`, `search_fts` | derived | the writer, same transaction as the raw change | `RebuildDerived()` |
+| `chat_canonical`, `chat_stats`, `search_fts` | derived | the writer, same transaction as the raw change | `RebuildDerived()` (one transaction). The exclusion decision reads `chat_canonical` (`Store.Aliases`), so it must stay maintained in the same transaction as `id_mappings` and be rebuilt in one transaction |
 | `connection_periods` | control | `internal/health` through store methods (W3) | one open row at most (partial unique index) |
 | `alerts` | control | health alert outbox (W3) | stored before it counts as fired |
 | `history_spool` | control | `wa` history handler writes (W5), importer marks `imported_at` | spool row + `received` ledger row in one transaction, then ack (ADR-37); blob stripped of secrets first, `meta` key-free (R9) |
