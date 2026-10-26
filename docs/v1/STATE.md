@@ -33,7 +33,6 @@ Single status record for V1 (max 150 lines, update in place; history lives in gi
 
 ## Known divergences (W2(f), accepted)
 
-- `Aliases` still reads `id_mappings` (not `chat_canonical`), deviating from the brief. Reason: the H1 test (`TestAliasesUnionForPhoneWithSeveralLIDs`) pins `Aliases("2@lid")` = only the phone number; `chat_canonical` would also return `1@lid` (the same chat), so the observable result is not identical and the test may not be weakened. Every other read uses `chat_canonical` (`chatForms`). Consequence to decide: `Aliases` is used by the ingest filter and the rule and acknowledge handlers (`web/chats.go`, `cmd`), so a rule set on one LID of a person with two LIDs does not reach the other LID's rule row; a one-line switch to `chat_canonical` plus changing that H1 assertion to `[1@lid, 9@s.whatsapp.net]` fixes it. Also: `ChatList` aggregates rules over the whole canonical group while `Aliases` (used by the ingest filter) does not reach a sibling-LID rule, so the list and the filter can disagree for a person with two LIDs sharing a phone. Controller ruling: parked for Hamza; switching `Aliases` to `chat_canonical` and changing the H1 assertion to `[1@lid, 9@s.whatsapp.net]` is the proposed fix.
 - `ChatList` had no N+1 `Aliases` calls (it used `canonicalOf`, now deleted); the `Aliases` calls in the POST handlers are per selected chat and stay.
 - `ChatStat.Name` (status, chat list, dashboard event names) is now `chat_stats.name`: chat name, else contact name, else push name, over all JID forms (it was the chat name of the form a message was stored under). `archiver status` shows a person's name for a direct chat with no chats row.
 - `chat_stats` times are min/max over all copies of a duplicated id (W2(d)); the oracle tests `TestChatStatsMatchesPreviousQuery` and `TestStatusReportEqualsSeparateQueries` were updated in a second `test:` commit (e9e145d): names from all forms, and 9001@lid oldest 4000 / oldest history 4000 (was 4500), each asserted explicitly. `TestStatusReportScansMessagesOnce` bound changed from `== 1` to `<= 1`; the new `TestStatusReportTouchesOnlyDerivedTablesAndLedger` pins zero (opcode check of the b-trees EXPLAIN opens, plus no SCAN of messages/media/message_events in the plan).
@@ -75,6 +74,8 @@ Single status record for V1 (max 150 lines, update in place; history lives in gi
 
 - W2 done 26 Oct (a-f + final review + fix wave, head b4bf00d): schema v1, typed normaliser, derived tables/FTS, contact names, status on chat_stats; StatusReport 0.7 ms and ChatList p95 1.3 ms at 300k (no race). Not pushed.
 
+- I2 and I3 done 26 Oct (f3e8484, 879da76, aefb18c + docs): `Aliases` reads `chat_canonical`; history blobs are stripped of secrets before they are spooled; see Rulings (e), (f). The `Aliases` divergence is gone.
+
 ## In flight
 
 - W0 step 3 (Hamza): done 26 Oct: practice instance unlinked on the phone and its process stopped (PID 288900); only the `SaudiSpyWithMyWifi` Wi-Fi profile left; stale DNS 192.168.68.1 gone. Reboot test still open (optional).
@@ -86,18 +87,19 @@ Single status record for V1 (max 150 lines, update in place; history lives in gi
 - (b) W0 is done on main without a worktree.
 - (c) No Co-Authored-By trailer on commits.
 - (d) Router reservation / static IP for ryzen skipped by Hamza (26 Oct): the connection is only needed for coding, so the address may change; `deploy-ryzen` and docs use 192.168.0.105 and must be rechecked if it does.
+- (e) I2, Hamza "Yes", 26 Oct 2026: "Hamza approved on 26 Oct 2026: switch Aliases to chat_canonical, H1 assertion becomes [1@lid, 9@s.whatsapp.net]". `Store.Aliases` is `chatForms` minus the JID, sorted (two index probes); a rule on 1@lid now excludes 2@lid in the ingest filter, matching ChatList (`TestRuleOnOneLIDExcludesTheSiblingLIDAndChatListAgrees`). The H1 assertion for `Aliases("2@lid")` is the only test assertion changed. Callers (cmd status/replay/serve, ingest filter, web rule and acknowledge handlers) unchanged; the rule handler now also updates an existing rule row on a sibling LID, so turning a chat back on is not undone by a stale sibling rule. Commits f3e8484 (red), aefb18c.
+- (f) I3, Hamza option (b), 26 Oct 2026: MessageSecret is stripped before spooling. `ingest.StripHistorySecrets(blob []byte, format string) ([]byte, error)` (format `store.BlobZlib` or `store.BlobRaw`, same format out, idempotent, input untouched, errors on anything unreadable) and `ingest.StripHistorySync(*waHistorySync.HistorySync) *waHistorySync.HistorySync` (clone). `store.SpoolReceive` rejects a non-object `meta` or a key from `store.SpoolMetaDenylist()` (case-insensitive, `_`/`-` ignored, any depth) with `ErrConstraint`; the list is pinned by `TestSpoolMetaDenylistIsPinned`. W5's handler must strip before `SpoolReceive` and compute the chunk id on the stripped chunk. Commits f3e8484, 879da76 (test amendment, reason in its message), aefb18c.
 
 ## Known divergences (W2(b), accepted)
 
-- ChatList takes rules/seen/people from `canonicalOf` (smallest LID mapped directly) but aggregates from `chat_canonical`; `Aliases` still reads `id_mappings` (H1 test). Done in W2(f) except `Aliases` (see the W2(f) divergences).
+- ChatList took rules/seen/people from `canonicalOf` (smallest LID mapped directly) but aggregated from `chat_canonical`: done in W2(f); `Aliases` followed in I2 (ruling (e)).
 - Decide-before-Apply: a media-rules read failure now holds the message (accepted; same DB, so Apply would fail too).
 - Read changes accepted: storage "by type" shows a separate `voice` row; activity detail says `voice`; replay stores media rows as `skipped`.
 - R8 tie-break: "smallest LID" is by string order ("10@lid" < "9@lid"), same as the old `canonicalOf`; task (d) `RebuildDerived` must use the same comparison.
 
 ## Open questions
 
-- I2 (Hamza): switch `Aliases` to `chat_canonical` and change the H1 assertion to `[1@lid, 9@s.whatsapp.net]` (sibling-LID rule under-exclusion). Recommended by the W2 final review.
-- I3 (Hamza, before W5/W7): history_spool keeps decrypted blobs whose messages carry `messageSecret`, contradicting "keys never stored" (backups keep it ~7 days). Options: (a) separate never-backed-up spool.db, (b) strip MessageSecret before spooling, (c) accept in the charter.
+- I4 (Hamza, found in I3): the live and history normaliser still store secrets in `messages.raw_proto`: a quoted message's `MessageContextInfo.MessageSecret`/`BotMessageSecret` (`withoutMessageSecrets` only clears the top message and its wrappers) and a poll's `PollCreationMessage.EncKey`. Proposed fix: let `withoutMessageSecrets` use the same walk as `StripHistorySync` (one rule for both). Not done: outside the I2/I3 brief and it may touch goldens.
 
 - (none open from W1; ADR-39 and charter v1.3 signed by Hamza 26 Oct.)
 - W3 and W4 run in parallel after W2 merges.

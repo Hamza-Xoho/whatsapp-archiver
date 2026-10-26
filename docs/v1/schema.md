@@ -16,7 +16,7 @@ current `internal/store/migrations/0001_raw.sql` and `0002_settings.sql`, `inter
 - **One writer.** Exactly one connection writes `archive.db`. All derived tables are maintained by that writer in
   the same transaction as the raw insert that changes them; `RebuildDerived()` recreates them from raw tables.
 - **Keys never stored.** `archive.db` is backed up, so no key material goes into it (existing rule in
-  `ingest/normalize.go`: message secrets stripped, `keyMaterial` protocol messages stored without `raw_proto`).
+  `ingest/normalize.go`: message secrets stripped, `keyMaterial` protocol messages stored without `raw_proto`). The history spool follows the same rule (R9, `ingest.StripHistorySecrets`).
 - **Performance targets the schema must allow** (plan, Verification): `StatusReport` under 100 ms at 300k
   messages, chat list p95 under 150 ms, search under 300 ms, an idle media queue with few store calls per minute.
 
@@ -47,7 +47,16 @@ current `internal/store/migrations/0001_raw.sql` and `0002_settings.sql`, `inter
 - **R9. History spool stores the decrypted blob, not the raw notification.** The plan's `notification_raw` holds
   the blob's media key, which is key material (`HISTORY_SYNC_NOTIFICATION` is in `keyMaterial`). The spool keeps
   the downloaded, decrypted, still zlib-compressed bytes (no new zstd dependency) plus the notification's
-  non-key fields as JSON.
+  non-key fields as JSON. **Secrets are stripped before the blob is spooled** (Hamza's decision, option (b), 26 Oct
+  2026, STATE I3): every WebMessageInfo in the blob carries `messageSecret`, and `archive.db` is backed up nightly with
+  the blob kept 7 days after import, which would contradict section 1 ("keys never stored"). W5's handler must call
+  `ingest.StripHistorySecrets(blob, format)` (or `ingest.StripHistorySync` on the parsed chunk) before
+  `store.SpoolReceive`; it clears message secrets and other key material in every message at any depth (nested,
+  quoted, edited, reactions, poll updates, status messages) and keeps the blob's format. A message's own media key
+  stays (the media worker needs it, `messages.raw_proto` already holds it). As defence in depth `SpoolReceive` refuses
+  a `meta` that is not a JSON object or has a key from `store.SpoolMetaDenylist()` (pinned by a test) at any depth;
+  it does not parse the blob. The chunk id must be computed on the stripped chunk (or from the notification id) so a
+  resent chunk stays a no-op.
 - **R10. History ledger stages.** `history_sync_chunks` gains `stage` (`received`, `imported`) and `spool_id`;
   the key becomes `(id, stage)`. W5 writes the `received` row with the spool row and the `imported` row after the
   import; both are inserts, so the table stays insert-only.
@@ -262,12 +271,12 @@ CREATE TABLE history_spool (
   chunk_id TEXT NOT NULL UNIQUE,              -- = history_sync_chunks.id; a resent chunk is a no-op
   sync_type TEXT NOT NULL DEFAULT '', chunk_order INTEGER NOT NULL DEFAULT 0,
   progress INTEGER NOT NULL DEFAULT 0,
-  meta TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(meta)),  -- notification fields without keys (R9)
+  meta TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(meta)),  -- notification fields without keys (R9); SpoolReceive denylist
   size INTEGER NOT NULL DEFAULT 0,
   received_at INTEGER NOT NULL, imported_at INTEGER,          -- NULL: not imported yet
   attempts INTEGER NOT NULL DEFAULT 0, error TEXT NOT NULL DEFAULT '',
   blob_format TEXT NOT NULL CHECK (blob_format IN ('zlib','raw')),
-  blob BLOB NOT NULL);                        -- decrypted bytes; last column (R5); retention: Q1
+  blob BLOB NOT NULL);                        -- decrypted bytes, secrets stripped first (R9); last column (R5); retention: Q1
 CREATE INDEX history_spool_todo ON history_spool(id) WHERE imported_at IS NULL;
 
 -- Kept unchanged from 0002_settings.sql.
@@ -294,7 +303,7 @@ empty database.
 | `chat_canonical`, `chat_stats`, `search_fts` | derived | the writer, same transaction as the raw change | `RebuildDerived()` |
 | `connection_periods` | control | `internal/health` through store methods (W3) | one open row at most (partial unique index) |
 | `alerts` | control | health alert outbox (W3) | stored before it counts as fired |
-| `history_spool` | control | `wa` history handler writes (W5), importer marks `imported_at` | spool row + `received` ledger row in one transaction, then ack (ADR-37) |
+| `history_spool` | control | `wa` history handler writes (W5), importer marks `imported_at` | spool row + `received` ledger row in one transaction, then ack (ADR-37); blob stripped of secrets first, `meta` key-free (R9) |
 | `settings`, `chat_rules`, `chat_seen` | UI state | web handlers through the writer | a `chat_rules` write ensures `chat_canonical` and `chat_stats` rows |
 
 ### 4.2 `messages.details` per kind
