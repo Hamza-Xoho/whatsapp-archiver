@@ -110,6 +110,8 @@ func undecryptableCause(evt *events.UndecryptableMessage) string {
 	switch {
 	case evt.UnavailableType == events.UnavailableTypeViewOnce:
 		return "view_once_unavailable"
+	case evt.UnavailableType != events.UnavailableTypeUnknown:
+		return "other" // an unavailable type this build does not know says nothing about a sender key
 	case evt.IsUnavailable:
 		return "no_sender_key"
 	}
@@ -161,7 +163,7 @@ func (p *Pipeline) embeddedEvents(chat types.JID, web *waWeb.WebMessageInfo, par
 		if !ok {
 			continue
 		}
-		if parent != nil {
+		if parent != nil && pu.GetVote() != nil { // no vote: nothing to name, unlike a vote that selects nothing
 			if poll := pollOf(parent.Message); poll != nil {
 				r.Event.Value = voteValue(pollOptions(poll), pu.GetVote().GetSelectedOptions())
 			}

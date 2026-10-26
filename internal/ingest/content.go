@@ -170,18 +170,33 @@ func setMedia(r *Result, kind string, f mediaFacts) {
 func placeContent(msg *waE2E.Message, r *Result) any {
 	m := r.Message
 	if x := msg.GetLocationMessage(); x != nil {
-		lat, lon := x.GetDegreesLatitude(), x.GetDegreesLongitude()
-		m.Kind = "location"
-		m.Details = jsonOf(store.LocationDetails{Lat: &lat, Lon: &lon, Name: x.GetName(), Address: x.GetAddress(), URL: x.GetURL()})
+		d := store.LocationDetails{Lat: optional(x.DegreesLatitude), Lon: optional(x.DegreesLongitude), Name: x.GetName(), Address: x.GetAddress(), URL: x.GetURL()}
+		m.Kind, m.Details = "location", jsonOf(d)
 		return x
 	}
 	if x := msg.GetLiveLocationMessage(); x != nil {
-		lat, lon, accuracy, speed, seq := x.GetDegreesLatitude(), x.GetDegreesLongitude(), float64(x.GetAccuracyInMeters()), float64(x.GetSpeedInMps()), x.GetSequenceNumber()
-		m.Kind, m.Caption = "live_location", x.GetCaption()
-		m.Details = jsonOf(store.LiveLocationDetails{Lat: &lat, Lon: &lon, AccuracyM: &accuracy, Speed: &speed, Sequence: &seq})
+		d := store.LiveLocationDetails{Lat: optional(x.DegreesLatitude), Lon: optional(x.DegreesLongitude), Sequence: optional(x.SequenceNumber)}
+		if x.AccuracyInMeters != nil {
+			accuracy := float64(x.GetAccuracyInMeters())
+			d.AccuracyM = &accuracy
+		}
+		if x.SpeedInMps != nil {
+			speed := float64(x.GetSpeedInMps())
+			d.Speed = &speed
+		}
+		m.Kind, m.Caption, m.Details = "live_location", x.GetCaption(), jsonOf(d)
 		return x
 	}
 	return nil
+}
+
+// optional copies a proto2 optional scalar: nil (absent) stays nil, so the details omit the key.
+func optional[T any](v *T) *T {
+	if v == nil {
+		return nil
+	}
+	c := *v
+	return &c
 }
 
 func contactContent(msg *waE2E.Message, r *Result) any {
@@ -248,8 +263,7 @@ func structuredContent(msg *waE2E.Message, r *Result) any {
 			d.EndTS = &end
 		}
 		if loc := x.GetLocation(); loc != nil {
-			lat, lon := loc.GetDegreesLatitude(), loc.GetDegreesLongitude()
-			d.Location = &store.EventPlace{Name: loc.GetName(), Lat: &lat, Lon: &lon}
+			d.Location = &store.EventPlace{Name: loc.GetName(), Lat: optional(loc.DegreesLatitude), Lon: optional(loc.DegreesLongitude)}
 		}
 		m.Kind, m.Text, m.Details = "event", x.GetName(), jsonOf(d)
 		return x
