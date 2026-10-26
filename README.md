@@ -790,7 +790,10 @@ archiver <command> [--data DIR]        DIR defaults to ./data
 | `backup` | Take a snapshot of `archive.db` now. |
 | `scrub IN OUT` | Replace the phone numbers and WhatsApp addresses in recorded fixtures with stable fakes. Message text and names are kept, so read the output before committing it. |
 | `replay DIR [--data D] [--dump]` | Feed recorded fixtures through the real pipeline into a fresh archive. Refuses to write into an existing `archive.db`. |
+| `rebuild-derived [--data DIR]` | Recreate the derived tables (`chat_canonical`, `chat_stats`, the search indexes) from the raw tables; raw rows are not touched. Stop the service first: it takes SQLite's exclusive lock and fails while the service has the archive open. |
 | `version` | Program and whatsmeow versions. |
+
+V1 needs a fresh data folder. An archive written before the V1 schema is refused at open (ADR-35); there is no upgrade path.
 
 ## What is on disk
 

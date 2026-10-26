@@ -20,6 +20,7 @@ var MessageKinds = []string{"text", "image", "video", "audio", "voice", "documen
 var EventKinds = []string{"edit", "revoke", "protocol", "reaction", "pin", "poll_vote", "undecryptable", "secret_encrypted", "stub"}
 
 // EventCauses is the list of message_events.cause values; "" is no cause (every kind but undecryptable).
+// untrusted_identity is never produced (see W2(c) in docs/v1/STATE.md); it stays allowed so no table rebuild is needed.
 var EventCauses = []string{"", "no_sender_key", "untrusted_identity", "view_once_unavailable", "other"}
 
 // ConnectionStates is the list of connection_periods.state values; only non-ok states are recorded.

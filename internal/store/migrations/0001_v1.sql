@@ -58,7 +58,7 @@ CREATE TABLE message_events (
                                               -- secret_encrypted stub
   event_id    TEXT NOT NULL,
   source_id   TEXT NOT NULL DEFAULT '',       -- the event's own message ID (R11)
-  cause       TEXT NOT NULL DEFAULT '',       -- undecryptable: no_sender_key untrusted_identity
+  cause       TEXT NOT NULL DEFAULT '',       -- undecryptable: no_sender_key untrusted_identity (untrusted_identity never produced; see W2(c))
                                               -- view_once_unavailable other
   sender_jid  TEXT NOT NULL DEFAULT '',
   source      TEXT NOT NULL DEFAULT 'live' CHECK (source IN ('live','history','replay')),

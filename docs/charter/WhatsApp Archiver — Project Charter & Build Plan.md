@@ -284,7 +284,7 @@ The database has a raw layer that only capture writes, a derived layer that only
 
 v1.0's `nodes` table is removed with the role split.
 
-**Read views:** `chat_aliases` maps the LID and phone forms of a chat to one canonical id (LID preferred, as mautrix-whatsapp has done since August 2026); `messages_resolved` shows a message once even if it arrived under both forms. Raw rows are never rewritten (CON-7).
+**Read views:** `chat_canonical` maps the LID and phone forms of a chat to one canonical id (LID preferred, as mautrix-whatsapp has done since August 2026); reads join through it, so a message shows once even if it arrived under both forms. Raw rows are never rewritten (CON-7).
 
 The `jobs` table drives every live view in the UI. Rebuilding derived data means deleting artifacts for a module and re-queuing its jobs; raw tables are never touched.
 
@@ -456,7 +456,7 @@ Short experiments, a day or less each, that settle questions the research could 
 | 2 | iOS vs Android | Phase 0 acceptance (the phone is an iPhone, Q-7) | Compare spike 1's results, which come from the iPhone, with the Android data in the research (90 days on an ordinary pairing; about 22 months on full sync, or 3 years with a raised size limit) | If iOS stops much sooner, raise backup import in priority |
 | 3 | Version-drift drill | Phase 0 acceptance | Force a retired client version through the override with the version check off; then turn the check back on | If the alert, the `client_outdated` state or the recovery fails, fix before real use; if the version endpoint fails, ship update instructions instead |
 | 4 | Receipt audit | Phase 0 acceptance | With a second phone in the test group and Hamza's phone offline for 30 minutes, confirm no "online" status, no read receipts and no visible delivery ticks come from the archiver over 24 hours | Any visible receipt halts phase 1 until explained |
-| 5 | LID dedup | Phase 0 acceptance, after a re-pair | Count `(canonical chat, message id)` pairs that appear twice in raw rows, and check `messages_resolved` shows each once | A duplicate in the view means the dedup key changes before phase 1 |
+| 5 | LID dedup | Phase 0 acceptance, after a re-pair | Count `(canonical chat, message id)` pairs that appear twice in raw rows, and check the reads through `chat_canonical` show each once | A duplicate in the view means the dedup key changes before phase 1 |
 | 6 | ASR bake-off | Before phase 1 picks defaults | 30 real Saudi voice notes through faster-whisper large-v3 (int8, CPU), large-v3-turbo and one hosted API; manual word error rate on 10; real-time factor on the Ryzen; cost | Local real-time factor above 1.0, or much worse accuracy, makes the API the default |
 | 7 | Translation bake-off | Phase 1 | 50 informal messages through an LLM API and a CPU-local model, ranked blind by a native speaker | Decides the default translation engine |
 | 8 | modernc FTS5 + trigram | Before phase 3 | The modernc build has FTS5 and the trigram tokenizer, and normalised Arabic queries hit | If not, switch to CGO `mattn/go-sqlite3` with `sqlite_fts5` and accept per-platform builds |
