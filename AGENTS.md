@@ -7,7 +7,7 @@ Review work list: `docs/reviews/2026-10-14-phase0-review.md`. Prompts: `docs/pro
 
 ## Commands
 
-- `make test`: race-enabled tests.
+- `make test`: race-enabled tests, then the 300k-message scale test (`-run AtScale`) without `-race`.
 - `make lint`: pinned golangci-lint.
 - `make build-all`: Linux, macOS, and Windows builds.
 - `make check-fast`: Stop hook; race tests on changed packages plus lint.

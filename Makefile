@@ -49,10 +49,12 @@ check-fast: $(GO)
 
 # Full race tests, but only failing output and the last lines show; exit status is go test's.
 test-quiet: $(GO)
-	@out=$$(mktemp); $(GO) test -race ./... >$$out 2>&1; rc=$$?; tail -n 40 $$out; rm -f $$out; exit $$rc
+	@out=$$(mktemp); $(GO) test -race ./... >$$out 2>&1; rc=$$?; if [ $$rc -eq 0 ]; then $(GO) test -count=1 -run AtScale ./internal/store >>$$out 2>&1; rc=$$?; fi; tail -n 40 $$out; rm -f $$out; exit $$rc
 
+# Race tests, then the 300k-message scale test without -race (the race build seeds 50k: status_scale_race_test.go).
 test: $(GO)
 	$(GO) test -race ./...
+	$(GO) test -count=1 -run AtScale ./internal/store
 
 lint: tools $(GO)
 	$(LINT) run
