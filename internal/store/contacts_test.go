@@ -307,6 +307,9 @@ func TestSetContactNamesLeavesRawTablesAndMatchesTheRebuild(t *testing.T) {
 	for i, j := range jids {
 		names = append(names, store.ContactName{JID: j, Name: "Contact " + string(rune('A'+i))})
 	}
+	// A contact of the phone book that never wrote: a participants row with no message, chat or mapping. It needs its
+	// chat_canonical row at write time, or the rebuild (which lists participants.jid) would invent one.
+	names = append(names, store.ContactName{JID: "4242@s.whatsapp.net", Name: "Never wrote"})
 	setContacts(t, s, names...)
 	if after := raw(); after != before {
 		t.Errorf("raw tables changed:\n%s\n%s", before, after)

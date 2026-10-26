@@ -157,6 +157,12 @@ func workload(t *testing.T, s *store.Store) {
 	apply(t, s, ev("55@s.whatsapp.net", "NG1", "undecryptable", "U-NG1", 601, func(e *store.MessageEvent) { e.Cause = "other"; e.SenderJID = "" }))
 	mapping(t, s, "55@lid", "55@s.whatsapp.net")
 
+	// A stand-alone media row under a number with no other trace, a message under the LID, then the mapping: the media
+	// row is re-pointed to the canonical although no stats row is absorbed, so the merge must count it.
+	apply(t, s, store.Batch{Media: &store.Media{ChatJID: "77@s.whatsapp.net", MessageID: "M-1", Source: "history", Type: "image", State: "pending", DeclaredSize: 9, MessageTimestamp: 7}})
+	apply(t, s, mb("77@lid", "M-2", "text", "after the media", 700))
+	mapping(t, s, "77@lid", "77@s.whatsapp.net")
+
 	// Chats that only have a rule or a sighting (R20), then a rename and a rule on a known chat.
 	must(t, s.SetChatRules(ctx, []store.ChatRule{{JID: "999@g.us", Logging: true}, {JID: grp, Logging: true}}))
 	if _, err = s.MarkChatSeen(ctx, "888@g.us", 5); err != nil {

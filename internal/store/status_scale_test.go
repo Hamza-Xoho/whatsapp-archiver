@@ -112,8 +112,8 @@ func TestStatusReportAndChatListAtScale(t *testing.T) {
 		slices.Sort(took)
 		median := took[len(took)/2]
 		t.Logf("StatusReport at %d messages: median %v, min %v, max %v (plan target 100 ms)", scaleMessages, median, took[0], took[len(took)-1])
-		if median > 250*time.Millisecond {
-			t.Fatalf("StatusReport median %v, want well under 100 ms (fail over 250 ms)", median)
+		if median > statusMedianLimit {
+			t.Fatalf("StatusReport median %v, want under %v (plan target 100 ms)", median, statusMedianLimit)
 		}
 	})
 
