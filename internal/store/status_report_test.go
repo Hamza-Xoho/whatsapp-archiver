@@ -38,8 +38,10 @@ func TestStatusReportScansMessagesOnce(t *testing.T) {
 	if err = rows.Err(); err != nil {
 		t.Fatal(err)
 	}
-	if scans != 1 {
-		t.Fatalf("report scans messages %d times, want 1; plan:\n%s", scans, strings.Join(plan, "\n"))
+	// W2(f): the report reads chat_stats and scans messages no time at all (TestStatusReportTouchesOnlyDerivedTablesAndLedger
+	// pins zero); this older bound stays as the upper limit the query must never exceed.
+	if scans > 1 {
+		t.Fatalf("report scans messages %d times, want at most 1; plan:\n%s", scans, strings.Join(plan, "\n"))
 	}
 }
 
