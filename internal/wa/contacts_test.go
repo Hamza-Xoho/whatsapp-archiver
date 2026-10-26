@@ -54,12 +54,13 @@ func TestContactNamePreference(t *testing.T) {
 }
 
 type fakeSource struct {
-	mu    sync.Mutex
-	calls int
-	out   map[types.JID]types.ContactInfo
-	err   error
-	gate  chan struct{} // when set, a call blocks until it is closed or ctx ends
-	in    chan struct{} // when set, signalled as a call starts
+	mu     sync.Mutex
+	calls  int
+	out    map[types.JID]types.ContactInfo
+	err    error
+	gate   chan struct{} // when set, a call blocks until it is closed or ctx ends
+	onCall func()        // when set, runs as a call starts
+	in     chan struct{} // when set, signalled as a call starts
 }
 
 func (f *fakeSource) GetAllContacts(ctx context.Context) (map[types.JID]types.ContactInfo, error) {
@@ -67,6 +68,9 @@ func (f *fakeSource) GetAllContacts(ctx context.Context) (map[types.JID]types.Co
 	f.calls++
 	out, err, gate, in := f.out, f.err, f.gate, f.in
 	f.mu.Unlock()
+	if f.onCall != nil {
+		f.onCall()
+	}
 	if in != nil {
 		in <- struct{}{}
 	}
@@ -226,6 +230,32 @@ func TestContactSyncDebouncesAndCoalesces(t *testing.T) {
 	want := []ContactName{{"1@s.whatsapp.net", "Layla"}}
 	if !reflect.DeepEqual(sink.got[0], want) {
 		t.Errorf("written = %v, want %v", sink.got[0], want)
+	}
+}
+
+// A request that arrives during the debounce is served by the sync that follows it: when the source is read, no
+// request is left queued, so it does not cause a second sync.
+func TestContactSyncServesTheWindowsRequestsInOneSync(t *testing.T) {
+	sink := &fakeSink{wrote: make(chan struct{}, 10)}
+	mw := newManualWait()
+	src := &fakeSource{out: oneContact()}
+	s := NewContactSyncer(src, sink.put, slog.New(slog.DiscardHandler))
+	s.wait = mw.wait
+	queuedAtRead := -1
+	src.onCall = func() { queuedAtRead = len(s.kick) }
+	stop := runSyncer(t, s)
+	s.Notify(&events.Contact{})
+	waitFor(t, mw.entered, "the debounce wait")
+	s.Notify(&events.Connected{})
+	s.Notify(&events.BusinessName{})
+	mw.release <- struct{}{}
+	waitFor(t, sink.wrote, "the write")
+	stop()
+	if queuedAtRead != 0 {
+		t.Errorf("%d requests were still queued when the source was read, want 0", queuedAtRead)
+	}
+	if src.count() != 1 {
+		t.Errorf("reads = %d, want 1", src.count())
 	}
 }
 
