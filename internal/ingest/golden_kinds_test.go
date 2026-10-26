@@ -154,17 +154,18 @@ func kindScenarios() map[string][]any {
 		"events-history": {
 			&events.HistorySync{Data: &waHistorySync.HistorySync{SyncType: waHistorySync.HistorySync_RECENT.Enum(), ChunkOrder: proto.Uint32(1), Progress: proto.Uint32(100),
 				Conversations: []*waHistorySync.Conversation{{ID: proto.String(synGroup), Name: proto.String("Synthetic Group"), Messages: []*waHistorySync.HistorySyncMsg{
-					{Message: historyReactions(synWeb("H-TEXT-1", aliceLID, 60, &waE2E.Message{Conversation: proto.String("History message with reactions")}))},
+					{Message: historyReactions(synWeb("H-TEXT-1", aliceLID, 60, &waE2E.Message{Conversation: proto.String("History message with reactions")}), "HR")},
 					{Message: historyVotes(synWeb("H-POLL-1", aliceLID, 120, &waE2E.Message{PollCreationMessage: &waE2E.PollCreationMessage{Name: proto.String("Lunch?"), Options: options("Yes", "No", "Maybe")}}))},
-					{Message: historyReactions(synStub("H-STUB-1", bobLID, 180))},
+					{Message: historyReactions(synStub("H-STUB-1", bobLID, 180), "HS")},
 				}}}}},
 		},
 	}
 }
 
 func synWeb(id, participant string, sec int64, msg *waE2E.Message) *waWeb.WebMessageInfo {
+	push := map[string]string{aliceLID: "Alice", bobLID: "Bob"}[participant]
 	return &waWeb.WebMessageInfo{Key: &waCommon.MessageKey{RemoteJID: proto.String(synGroup), ID: proto.String(id), Participant: proto.String(participant)},
-		MessageTimestamp: proto.Uint64(uint64(synAt(sec).Unix())), PushName: proto.String("Alice"), Message: msg}
+		MessageTimestamp: proto.Uint64(uint64(synAt(sec).Unix())), PushName: proto.String(push), Message: msg}
 }
 
 func synStub(id, participant string, sec int64) *waWeb.WebMessageInfo {
@@ -173,10 +174,10 @@ func synStub(id, participant string, sec int64) *waWeb.WebMessageInfo {
 	return web
 }
 
-func historyReactions(web *waWeb.WebMessageInfo) *waWeb.WebMessageInfo {
+func historyReactions(web *waWeb.WebMessageInfo, prefix string) *waWeb.WebMessageInfo {
 	web.Reactions = []*waWeb.Reaction{
-		{Key: &waCommon.MessageKey{RemoteJID: proto.String(synGroup), ID: proto.String("HR-1"), Participant: proto.String(bobLID)}, Text: proto.String("👍"), SenderTimestampMS: proto.Int64(synAt(200).UnixMilli())},
-		{Key: &waCommon.MessageKey{RemoteJID: proto.String(synGroup), ID: proto.String("HR-2"), Participant: proto.String(aliceLID)}, Text: proto.String("❤"), SenderTimestampMS: proto.Int64(synAt(210).UnixMilli())},
+		{Key: &waCommon.MessageKey{RemoteJID: proto.String(synGroup), ID: proto.String(prefix + "-1"), Participant: proto.String(bobLID)}, Text: proto.String("👍"), SenderTimestampMS: proto.Int64(synAt(200).UnixMilli())},
+		{Key: &waCommon.MessageKey{RemoteJID: proto.String(synGroup), ID: proto.String(prefix + "-2"), Participant: proto.String(aliceLID)}, Text: proto.String("❤"), SenderTimestampMS: proto.Int64(synAt(210).UnixMilli())},
 	}
 	return web
 }
