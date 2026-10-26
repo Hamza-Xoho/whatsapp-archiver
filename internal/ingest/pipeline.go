@@ -45,6 +45,7 @@ type Pipeline struct {
 	now    func() time.Time
 	sleep  func(context.Context, time.Duration)
 	parse  HistoryParser
+	votes  VoteDecryptor // nil: live poll votes keep an empty value
 	seen   *SeenTracker  // nil: first sightings are not recorded
 	bus    *activity.Bus // nil: nothing is published
 }
@@ -192,7 +193,9 @@ func (p *Pipeline) Handle(evt any) (ack bool) {
 		}
 		switch e := evt.(type) {
 		case *events.Message:
-			logErr(p.Ingest(ctx, FromMessage(e, "live", now)))
+			r := FromMessage(e, "live", now)
+			p.nameVote(ctx, e, &r)
+			logErr(p.Ingest(ctx, r))
 		case *events.UndecryptableMessage:
 			logErr(p.Ingest(ctx, FromUndecryptable(e, now)))
 		case *events.HistorySync:

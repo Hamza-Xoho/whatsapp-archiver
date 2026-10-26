@@ -157,7 +157,7 @@ func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) er
 	mon := health.NewMonitor(cfg, notifier, systemClock{}, health.DiskFree, client.VersionInUse).WithVersionReason(client.VersionReason).WithLogger(log).WithThresholds(live.alerts).WithActivity(bus)
 	queue := media.NewQueue(cfg.DataDir, live.media, live.chatMedia, st, client, systemClock{}, log, mon.Panic).WithActivity(bus)
 	filter := ingest.NewFilter(rules, aliases)
-	pipeline := ingest.NewPipeline(st, filter, queue, mon, log).WithHistoryParser(client.HistoryParser()).WithContext(ctx).WithSeen(seen).WithActivity(bus)
+	pipeline := ingest.NewPipeline(st, filter, queue, mon, log).WithHistoryParser(client.HistoryParser()).WithVoteDecryptor(client.VoteDecryptor()).WithContext(ctx).WithSeen(seen).WithActivity(bus)
 	handler := pipeline.Handle
 	if recordDir != "" {
 		handler = ingest.NewRecorder(recordDir).WithFilter(filter).Wrap(handler)

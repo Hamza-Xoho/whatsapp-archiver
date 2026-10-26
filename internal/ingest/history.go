@@ -107,12 +107,13 @@ func (p *Pipeline) ImportHistory(ctx context.Context, evt *events.HistorySync) (
 				continue
 			}
 			var r Result
+			var parent *events.Message
 			if web.GetMessage() == nil {
 				// A stub (revoke, ciphertext, group change marker …) has no body: it is a stub event, never a message row.
 				r = FromStub(message, web, now)
 				p.log.Info("history stub archived", "chat", chat, "id", web.GetKey().GetID(), "stub", web.GetMessageStubType().String())
 			} else {
-				r = FromMessage(message, "history", now)
+				r, parent = FromMessage(message, "history", now), message
 			}
 			keepMessage, keepErr := p.keep(ctx, r.Chat.JID, r.Kind)
 			if keepErr != nil {
@@ -130,6 +131,18 @@ func (p *Pipeline) ImportHistory(ctx context.Context, evt *events.HistorySync) (
 				continue
 			}
 			stored++
+			// The reactions and poll updates the message carries are events of their own (R14). They are not counted as
+			// messages; a permanent rejection of one is logged by persist and does not stop the chunk.
+			for _, e := range p.embeddedEvents(message.Info.Chat, web, parent, now) {
+				if kept, keepErr := p.keep(ctx, e.Chat.JID, e.Kind); keepErr != nil {
+					return stored, skipped, keepErr
+				} else if !kept {
+					continue
+				}
+				if embErr := p.ingest(ctx, e, false); embErr != nil && !isPermanent(embErr) {
+					return stored, skipped, embErr
+				}
+			}
 		}
 	}
 	// The ledger row claims the whole chunk, so it is written last: a chunk cut short (SIGTERM, a write that kept
