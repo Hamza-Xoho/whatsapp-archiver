@@ -89,15 +89,18 @@ func TestUndecryptableCauseIsStored(t *testing.T) {
 	}
 }
 
-// New text belongs to edits only; a reaction's emoji and a vote's options are the event's value.
-func TestOnlyEditsHaveNewText(t *testing.T) {
-	r := ingest.FromMessage(messageEvent("g@g.us", "RX", &waE2E.Message{ReactionMessage: &waE2E.ReactionMessage{Key: &waCommon.MessageKey{ID: proto.String("T")}, Text: proto.String("👍")}}), "live", time.Unix(20, 0))
-	if r.Event.NewText != "" || r.Event.Value != "👍" {
-		t.Fatalf("event=%+v", r.Event)
-	}
+// An edit's text is new_text (the viewer and the search read it there); a vote's options are the value only.
+func TestEditTextIsNewTextAndVoteOptionsAreNot(t *testing.T) {
 	e := ingest.FromMessage(messageEvent("g@g.us", "ED", &waE2E.Message{ProtocolMessage: &waE2E.ProtocolMessage{Key: &waCommon.MessageKey{ID: proto.String("T")}, Type: waE2E.ProtocolMessage_MESSAGE_EDIT.Enum(), EditedMessage: text("new")}}), "live", time.Unix(20, 0))
 	if e.Event.NewText != "new" {
 		t.Fatalf("event=%+v", e.Event)
+	}
+	st := testkit.Store(t)
+	p := ingest.NewPipeline(st, ingest.NewFilter(nil, nil), &queueFake{}, &healthFake{}, quiet()).WithVoteDecryptor((&voteFake{hashes: [][]byte{hashOf("Yes")}}).decrypt)
+	p.Handle(messageEvent("g@g.us", "POLL", pollMessage("Lunch?", "Yes", "No")))
+	p.Handle(voteEvent("PV1", "POLL"))
+	if got := rows(t, st, `SELECT new_text,value FROM message_events WHERE kind='poll_vote'`); len(got) != 1 || got[0] != `|{"options":["Yes"]}` {
+		t.Fatalf("poll_vote=%v", got)
 	}
 }
 
