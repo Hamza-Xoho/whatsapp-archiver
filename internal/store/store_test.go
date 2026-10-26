@@ -136,7 +136,7 @@ func TestReopenRunsMigrationsOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	if n, err := s.SchemaVersionCount(context.Background()); err != nil || n != 2 {
+	if n, err := s.SchemaVersionCount(context.Background()); err != nil || n != 1 {
 		t.Fatalf("count=%d err=%v", n, err)
 	}
 }

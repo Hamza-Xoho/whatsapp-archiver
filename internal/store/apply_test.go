@@ -55,7 +55,7 @@ var (
 )
 
 func init() {
-	sqlite.RegisterConnectionHook(func(conn sqlite.ExecQuerier, dsn string) error {
+	sqlite.RegisterConnectionHook(func(conn sqlite.ExecQuerierContext, dsn string) error {
 		if h, ok := conn.(sqlite.HookRegisterer); ok && !strings.Contains(dsn, "mode=ro") {
 			c := commitCounter(dsnPath(dsn))
 			h.RegisterCommitHook(func() int32 { c.Add(1); return 0 })
