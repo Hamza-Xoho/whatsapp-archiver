@@ -73,6 +73,8 @@ Single status record for V1 (max 150 lines, update in place; history lives in gi
 - A reaction's or poll vote's `event_id` derives from its own message ID, so a live and a history copy are one row only when the chat JID has the same form in both; CON-7 (JIDs as received) otherwise keeps both.
 - Absent proto fields are absent keys in `details` (coordinates, accuracy, speed, sequence).
 
+- W2 done 26 Oct (a-f + final review + fix wave, head b4bf00d): schema v1, typed normaliser, derived tables/FTS, contact names, status on chat_stats; StatusReport 0.7 ms and ChatList p95 1.3 ms at 300k (no race). Not pushed.
+
 ## In flight
 
 - W0 step 3 (Hamza): done 26 Oct: practice instance unlinked on the phone and its process stopped (PID 288900); only the `SaudiSpyWithMyWifi` Wi-Fi profile left; stale DNS 192.168.68.1 gone. Reboot test still open (optional).
@@ -93,6 +95,9 @@ Single status record for V1 (max 150 lines, update in place; history lives in gi
 - R8 tie-break: "smallest LID" is by string order ("10@lid" < "9@lid"), same as the old `canonicalOf`; task (d) `RebuildDerived` must use the same comparison.
 
 ## Open questions
+
+- I2 (Hamza): switch `Aliases` to `chat_canonical` and change the H1 assertion to `[1@lid, 9@s.whatsapp.net]` (sibling-LID rule under-exclusion). Recommended by the W2 final review.
+- I3 (Hamza, before W5/W7): history_spool keeps decrypted blobs whose messages carry `messageSecret`, contradicting "keys never stored" (backups keep it ~7 days). Options: (a) separate never-backed-up spool.db, (b) strip MessageSecret before spooling, (c) accept in the charter.
 
 - (none open from W1; ADR-39 and charter v1.3 signed by Hamza 26 Oct.)
 - W3 and W4 run in parallel after W2 merges.
