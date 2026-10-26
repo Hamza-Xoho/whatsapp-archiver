@@ -3,7 +3,9 @@ package ingest_test
 import (
 	"bytes"
 	"compress/zlib"
+	"encoding/hex"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 
@@ -304,25 +306,37 @@ func TestStripHistorySyncReturnsACleanCopyAndKeepsTheOriginal(t *testing.T) {
 	}
 }
 
-// The consumer sees nothing but the secrets go: importing the stripped chunk stores exactly what importing the original
-// stores (the pipeline already keeps secrets out of raw_proto, so the archives are byte-identical).
-func TestImportOfAStrippedChunkEqualsImportOfTheOriginal(t *testing.T) {
+// The consumer sees nothing but the secrets go: importing the stripped chunk stores the same messages and events as
+// importing the original, and the archive then holds none of the planted secrets. The comparison leaves out raw_proto
+// and event_id on purpose: raw_proto of the original import still holds secrets the live path does not clear (a quoted
+// message's context secrets and a poll's encKey, found while writing this test), and event_id of a protocol event is
+// derived from its content, which the strip changes.
+func TestImportOfAStrippedChunkStoresTheSameMessages(t *testing.T) {
 	f := &secretFixture{withSecrets: true}
 	original := f.build()
 	stripped := ingest.StripHistorySync(original)
-	dump := func(hs *waHistorySync.HistorySync) string {
+	imported := func(hs *waHistorySync.HistorySync) (logical []string, dump string) {
 		st := testkit.Store(t)
 		p := historyPipeline(st, ingest.NewFilter(nil, nil), &queueFake{})
 		if _, _, err := p.ImportHistory(t.Context(), &events.HistorySync{Data: hs}); err != nil {
 			t.Fatal(err)
 		}
-		out, err := ingest.DumpRaw(st)
+		logical = append(rows(t, st, "SELECT chat_jid,id,sender_jid,kind,text,caption,quoted_id,details,ts,source FROM messages ORDER BY chat_jid,id"),
+			rows(t, st, "SELECT chat_jid,target_id,kind,source_id,sender_jid,value,ts FROM message_events ORDER BY kind,source_id,target_id,value")...)
+		dump, err := ingest.DumpRaw(st)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return out
+		return logical, dump
 	}
-	if a, b := dump(original), dump(stripped); a != b {
-		t.Fatalf("the archives differ after importing the original and the stripped chunk (%d against %d bytes)", len(a), len(b))
+	want, _ := imported(original)
+	got, dump := imported(stripped)
+	if len(want) < 10 || !slices.Equal(want, got) {
+		t.Fatalf("stored rows differ (or the fixture imported too little):\nwant %q\ngot  %q", want, got)
+	}
+	for i, secret := range f.secrets {
+		if strings.Contains(strings.ToLower(dump), strings.ToLower(hex.EncodeToString(secret))) {
+			t.Errorf("planted secret #%d is in the archive after importing the stripped chunk", i)
+		}
 	}
 }
