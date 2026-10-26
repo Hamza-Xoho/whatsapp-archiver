@@ -10,13 +10,14 @@ import (
 )
 
 // legacyChatStatsQuery is ChatStats as it was before the status-cost fix, copied here as the oracle that the rewritten
-// query must agree with row for row. It rescans media, open gaps and the alias view once per chat.
-const legacyChatStatsQuery = legacyViews + `SELECT m.canonical_jid,COALESCE(MAX(c.name),''),COUNT(*),MIN(m.ts),MAX(m.ts),
+// query must agree with row for row. W2(f): the name is the chat's name over all the JID forms of the chat (chat_stats
+// name, nameExpr), where the old query read only the chats row of the form a message was stored under. It rescans media, open gaps and the alias view once per chat.
+const legacyChatStatsQuery = legacyViews + `SELECT m.canonical_jid,COALESCE((SELECT MAX(t.name) FROM chat_canonical a JOIN chats t ON t.jid=a.alias WHERE a.canonical=m.canonical_jid),''),COUNT(*),MIN(m.ts),MAX(m.ts),
  (SELECT COUNT(*) FROM media x LEFT JOIN chat_aliases a ON a.alias_jid=x.chat_jid WHERE COALESCE(a.canonical_jid,x.chat_jid)=m.canonical_jid AND x.state IN ('failed')),
  (SELECT COUNT(*) FROM media x LEFT JOIN chat_aliases a ON a.alias_jid=x.chat_jid WHERE COALESCE(a.canonical_jid,x.chat_jid)=m.canonical_jid AND x.state IN ('expired','retry_requested')),
  (SELECT COUNT(*) FROM media x LEFT JOIN chat_aliases a ON a.alias_jid=x.chat_jid WHERE COALESCE(a.canonical_jid,x.chat_jid)=m.canonical_jid AND x.state IN ('pending','downloading')),
  (SELECT COUNT(*) FROM open_gaps g LEFT JOIN chat_aliases a ON a.alias_jid=g.chat_jid WHERE COALESCE(a.canonical_jid,g.chat_jid)=m.canonical_jid)
- FROM messages_resolved m LEFT JOIN chats c ON c.jid=m.chat_jid GROUP BY m.canonical_jid ORDER BY m.canonical_jid`
+ FROM messages_resolved m GROUP BY m.canonical_jid ORDER BY m.canonical_jid`
 
 // legacyViews recreates the dropped chat_aliases and messages_resolved views (ADR-35) as CTEs that build the aliases
 // from chat_canonical, so the old queries can still serve as oracles for the counting, the duplicate rank and the

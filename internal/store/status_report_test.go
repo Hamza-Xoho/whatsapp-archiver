@@ -99,6 +99,18 @@ func TestStatusReportEqualsSeparateQueries(t *testing.T) {
 	if err = rows.Err(); err != nil {
 		t.Fatal(err)
 	}
+	// W2(f), accepted in W2(d): chat_stats times are the min and max over all message rows of the canonical, where the
+	// previous query took them over one row per duplicated id (the first received). Only a duplicate whose two copies
+	// carry different ts shows the difference, and this archive has one: a1 is 5000 (live) and 4000 (history copy), so
+	// the oldest message of 9001@lid is 4000, not 4500.
+	for i := range wantChats {
+		if wantChats[i].CanonicalJID == "9001@lid" {
+			if wantChats[i].Oldest != 4500 {
+				t.Fatalf("fixture changed: previous oldest of 9001@lid = %d, want 4500", wantChats[i].Oldest)
+			}
+			wantChats[i].Oldest = 4000
+		}
+	}
 	if !reflect.DeepEqual(got.Chats, wantChats) {
 		t.Fatalf("Chats differ from the previous query:\n got %+v\nwant %+v", got.Chats, wantChats)
 	}
@@ -120,8 +132,15 @@ func TestStatusReportEqualsSeparateQueries(t *testing.T) {
 	if err = hrows.Err(); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got.Coverage.OldestByChat, wantOldest) {
-		t.Fatalf("OldestByChat differs from the previous query:\n got %v\nwant %v", got.Coverage.OldestByChat, wantOldest)
+	// Same accepted divergence for the oldest history message: chat_stats takes the oldest history row of any copy, so a1's
+	// history copy (4000, the live copy came first) now counts for 9001@lid.
+	wantNow := map[string]int64{}
+	for k, v := range wantOldest {
+		wantNow[k] = v
+	}
+	wantNow["9001@lid"] = 4000
+	if !reflect.DeepEqual(got.Coverage.OldestByChat, wantNow) {
+		t.Fatalf("OldestByChat differs from the previous query (9001@lid aside):\n got %v\nwant %v", got.Coverage.OldestByChat, wantNow)
 	}
 	if _, ok := wantOldest["9002@s.whatsapp.net"]; ok {
 		t.Fatal("a chat with only live messages has an oldest history entry")
