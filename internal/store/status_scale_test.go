@@ -9,11 +9,8 @@ import (
 	"time"
 )
 
-// scaleMessages is the size of the archive the W2(f) scale tests read (plan W2(f): 300k messages).
-const scaleMessages = 300_000
-
 // seedScaleArchive writes n messages over 250 chats straight into the raw tables with recursive CTEs (the way
-// rebuild_bench_test.go does) and then derives everything with RebuildDerived. Every tenth chat has a LID form: a third
+// rebuild_bench_test.go does) and then derives chat_canonical and chat_stats. Every tenth chat has a LID form: a third
 // of its messages are stored under the LID, and every fiftieth is stored under both forms (a duplicate id that only the
 // canonical collapses). One message in twenty has a media row in some state, 60 gaps are open, and a handful of closed
 // ones have a message with the target id.
@@ -21,6 +18,7 @@ func seedScaleArchive(t *testing.T, n int) *Store {
 	t.Helper()
 	s := openInternal(t)
 	ctx := context.Background()
+	started := time.Now()
 	if _, err := s.write.ExecContext(ctx, "PRAGMA synchronous=OFF"); err != nil {
 		t.Fatal(err)
 	}
@@ -55,11 +53,25 @@ FROM messages WHERE seq%20=0`, nil},
 			t.Fatalf("seed %.60s: %v", st.query, err)
 		}
 	}
+	t.Logf("seeded %d messages in %v", n, time.Since(started).Round(time.Millisecond))
+	// RebuildDerived also builds both FTS tables, which takes over five minutes at 300k messages under -race (8.7 s
+	// without it) and is not what these tests read. The two tables they do read are filled by the same code RebuildDerived
+	// runs for them: rebuildCanonical and statsSelect(false), in one transaction.
 	begin := time.Now()
-	if err := s.RebuildDerived(ctx); err != nil {
+	tx, err := s.write.BeginTx(ctx, nil)
+	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("seeded %d messages; RebuildDerived took %v", n, time.Since(begin).Round(time.Millisecond))
+	if err = rebuildCanonical(ctx, tx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.ExecContext(ctx, statsSelect(false)); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("derived chat_canonical and chat_stats in %v", time.Since(begin).Round(time.Millisecond))
 	return s
 }
 
