@@ -147,3 +147,23 @@ func TestMessagesWithoutAFileHaveNoMediaRow(t *testing.T) {
 		}
 	}
 }
+
+// An absent proto field is an absent key (store/kinds.go): zero is a real value for a coordinate, so only a field that
+// is set is written.
+func TestAbsentPlaceFieldsAreOmitted(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		msg  *waE2E.Message
+		want string
+	}{
+		{"location without coordinates", &waE2E.Message{LocationMessage: &waE2E.LocationMessage{Name: proto.String("Somewhere")}}, `{"name":"Somewhere"}`},
+		{"location on the equator", &waE2E.Message{LocationMessage: &waE2E.LocationMessage{DegreesLatitude: proto.Float64(0), DegreesLongitude: proto.Float64(0)}}, `{"lat":0,"lon":0}`},
+		{"live location with a position only", &waE2E.Message{LiveLocationMessage: &waE2E.LiveLocationMessage{DegreesLatitude: proto.Float64(24.5), DegreesLongitude: proto.Float64(46.5)}}, `{"lat":24.5,"lon":46.5}`},
+		{"live location with a zero speed", &waE2E.Message{LiveLocationMessage: &waE2E.LiveLocationMessage{SpeedInMps: proto.Float32(0), SequenceNumber: proto.Int64(0)}}, `{"speed":0,"sequence":0}`},
+		{"event place with a name only", &waE2E.Message{EventMessage: &waE2E.EventMessage{Name: proto.String("e"), Location: &waE2E.LocationMessage{Name: proto.String("Park")}}}, `{"name":"e","location":{"name":"Park"},"canceled":false}`},
+	} {
+		if m := normalized(c.msg); m.Details != c.want {
+			t.Errorf("%s: details=%s, want %s", c.name, m.Details, c.want)
+		}
+	}
+}

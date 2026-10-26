@@ -70,6 +70,7 @@ func TestUndecryptableCause(t *testing.T) {
 		{"view once type alone", events.UndecryptableMessage{UnavailableType: events.UnavailableTypeViewOnce}, "view_once_unavailable"},
 		{"no ciphertext, no sender key", events.UndecryptableMessage{IsUnavailable: true}, "no_sender_key"},
 		{"decryption failed", events.UndecryptableMessage{}, "other"},
+		{"unavailable with another type", events.UndecryptableMessage{IsUnavailable: true, UnavailableType: "bot_unavailable"}, "other"},
 		{"hidden failure", events.UndecryptableMessage{DecryptFailMode: events.DecryptFailHide}, "other"},
 	} {
 		c.evt.Info = messageEvent("g@g.us", "U2", nil).Info
@@ -269,5 +270,19 @@ func TestVoteDecryptionNeverRunsForOtherMessages(t *testing.T) {
 	p.Handle(messageEvent("g@g.us", "R1", &waE2E.Message{ReactionMessage: &waE2E.ReactionMessage{Key: &waCommon.MessageKey{ID: proto.String("T1")}, Text: proto.String("👍")}}))
 	if len(v.seen) != 0 {
 		t.Fatalf("decrypt ran for %v", v.seen)
+	}
+}
+
+// A history poll update without a vote has nothing to name: the value stays empty, unlike a vote that selects nothing.
+func TestHistoryPollUpdateWithoutAVoteKeepsAnEmptyValue(t *testing.T) {
+	st := testkit.Store(t)
+	p := historyPipeline(st, ingest.NewFilter(nil, nil), &queueFake{})
+	poll := webMsg("POLL", "3@lid", false, pollMessage("Lunch?", "Yes", "No"))
+	poll.PollUpdates = []*waWeb.PollUpdate{{PollUpdateMessageKey: &waCommon.MessageKey{ID: proto.String("PV9"), Participant: proto.String("4@lid")}, SenderTimestampMS: proto.Int64(15_000)}}
+	if _, _, err := p.ImportHistory(t.Context(), chunk("g@g.us", poll)); err != nil {
+		t.Fatal(err)
+	}
+	if got := rows(t, st, `SELECT source_id,value FROM message_events WHERE kind='poll_vote'`); len(got) != 1 || got[0] != "PV9|" {
+		t.Fatalf("poll_vote=%v", got)
 	}
 }

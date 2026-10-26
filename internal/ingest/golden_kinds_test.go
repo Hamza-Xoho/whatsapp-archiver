@@ -99,10 +99,12 @@ func kindScenarios() map[string][]any {
 			alice("K-LOC-1", 60, &waE2E.Message{LocationMessage: &waE2E.LocationMessage{DegreesLatitude: proto.Float64(24.7136), DegreesLongitude: proto.Float64(46.6753),
 				Name: proto.String("Riyadh"), Address: proto.String("King Fahd Rd"), URL: proto.String("https://maps.example/riyadh")}}),
 			bob("K-LOC-2", 120, &waE2E.Message{LocationMessage: &waE2E.LocationMessage{DegreesLatitude: proto.Float64(21.4858), DegreesLongitude: proto.Float64(39.1925)}}),
+			alice("K-LOC-3", 180, &waE2E.Message{LocationMessage: &waE2E.LocationMessage{Name: proto.String("A place without coordinates")}}),
 		},
 		"kind-live-location": {
 			alice("K-LIVE-1", 60, &waE2E.Message{LiveLocationMessage: &waE2E.LiveLocationMessage{DegreesLatitude: proto.Float64(24.5), DegreesLongitude: proto.Float64(46.5),
 				AccuracyInMeters: proto.Uint32(12), SpeedInMps: proto.Float32(3.5), SequenceNumber: proto.Int64(7), Caption: proto.String("On my way")}}),
+			bob("K-LIVE-2", 120, &waE2E.Message{LiveLocationMessage: &waE2E.LiveLocationMessage{DegreesLatitude: proto.Float64(24.6), DegreesLongitude: proto.Float64(46.6)}}),
 		},
 		"kind-contact": {
 			alice("K-CONTACT-1", 60, &waE2E.Message{ContactMessage: &waE2E.ContactMessage{DisplayName: proto.String("Omar Test"),
