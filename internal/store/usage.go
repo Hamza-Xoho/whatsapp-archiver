@@ -26,10 +26,12 @@ type Usage struct {
 	WeeklyGrowth int64
 }
 
-// Usage reads the media sizes and the growth estimate as of now. It uses the read pool only.
+// Usage reads the media sizes and the growth estimate as of now. The sizes of a chat are summed over all its JID forms
+// (chat_canonical) and listed under its canonical JID; a media row alone makes no chat_stats row (R20), so the sums come
+// from the media table itself. It uses the read pool only.
 func (s *Store) Usage(ctx context.Context, now time.Time) (Usage, error) {
 	u := Usage{ByMediaType: map[string]int64{}}
-	err := s.scanRows(ctx, `SELECT chat_jid,SUM(declared_size) FROM media WHERE state='done' GROUP BY chat_jid ORDER BY 2 DESC,1`, nil, func(rows *sql.Rows) error {
+	err := s.scanRows(ctx, `SELECT COALESCE(a.canonical,x.chat_jid),SUM(x.declared_size) FROM media x LEFT JOIN chat_canonical a ON a.alias=x.chat_jid WHERE x.state='done' GROUP BY 1 ORDER BY 2 DESC,1`, nil, func(rows *sql.Rows) error {
 		var c ChatBytes
 		if err := rows.Scan(&c.ChatJID, &c.Bytes); err != nil {
 			return err

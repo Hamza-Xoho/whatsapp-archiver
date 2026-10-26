@@ -231,7 +231,12 @@ func (s *Store) insert(ctx context.Context, query string, args ...any) (bool, er
 	return n > 0, err
 }
 
-// aliasSet selects the aliases of chat ?1: the chat itself, the lids of a phone number, the phone numbers of a lid and
+// chatForms selects every JID form of chat ?1 from chat_canonical (R8): the chat itself and every alias that shares its
+// canonical JID. The canonical is one primary-key probe and the aliases one range of chat_canonical_by, so the cost does
+// not depend on the size of messages or chats. Every read of "the chat under any of its forms" uses it.
+const chatForms = `SELECT ?1 UNION SELECT alias FROM chat_canonical WHERE canonical=COALESCE((SELECT canonical FROM chat_canonical WHERE alias=?1),?1)`
+
+// aliasSet selects the aliases of chat ?1 for Aliases (id_mappings, not chat_canonical; see Aliases): the chat itself, the lids of a phone number, the phone numbers of a lid and
 // the other phone numbers of those lids. It uses only id_mappings primary-key and (pn, lid) index lookups, so its cost
 // does not depend on the size of messages or chats.
 const aliasSet = `SELECT ?1
@@ -248,6 +253,10 @@ const dedupeQuery = `SELECT EXISTS(SELECT 1 FROM chat_canonical a JOIN messages 
 // aliasesQuery lists the aliases of chat ?1 other than itself.
 const aliasesQuery = aliasSet + ` EXCEPT SELECT ?1 ORDER BY 1`
 
+// Aliases lists the JID forms that stand for the same chat as jid, as the ingest filter and the rule screens need them:
+// a LID's phone numbers, a phone number's LIDs and the other phone numbers of those LIDs. It still reads id_mappings
+// (primary-key and (pn, lid) lookups): chat_canonical would also list the other LIDs of a person from a LID, which the
+// H1 test (TestAliasesUnionForPhoneWithSeveralLIDs) pins as "never"; see the W2(f) divergence in docs/v1/STATE.md.
 func (s *Store) Aliases(ctx context.Context, jid string) ([]string, error) {
 	rows, err := s.read.QueryContext(ctx, aliasesQuery, jid)
 	if err != nil {

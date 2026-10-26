@@ -5,44 +5,13 @@ import (
 	"database/sql"
 )
 
-// statusReportQuery is the one query behind `archiver status`. It evaluates the window function that dedupes messages
-// by (canonical chat, id) once, into the resolved CTE, and every message-derived column comes from that one result:
-// the per-chat counts and range, and the oldest history message per chat. Media and gap aggregates are one pass each
-// over their own table and joined per chat; a correlated subquery per chat would rescan them for every chat, so the
-// cost would grow with chats times archive size. The canonical JID of a chat is its chat_canonical row; a chat
-// without one is its own. Task (f) replaces this with a read of chat_stats.
-// Columns: canonical_jid, name, messages, oldest, newest, media failed, expired, pending, open gaps, and the oldest
-// history ts (NULL when the chat has no history message).
-var statusReportQuery = `WITH resolved AS MATERIALIZED (
- SELECT canonical_jid,chat_jid,id,ts,source FROM (
-  SELECT COALESCE(a.canonical,m.chat_jid) AS canonical_jid,m.chat_jid,m.id,m.ts,m.source,
-   ROW_NUMBER() OVER (PARTITION BY COALESCE(a.canonical,m.chat_jid),m.id ORDER BY m.received_at,m.chat_jid) AS duplicate_rank
-  FROM messages m LEFT JOIN chat_canonical a ON a.alias=m.chat_jid
- ) WHERE duplicate_rank=1
-),
-messages_by_chat AS (
- SELECT rs.canonical_jid,COALESCE(MAX(c.name),'') AS name,COUNT(*) AS messages,MIN(rs.ts) AS oldest,MAX(rs.ts) AS newest,
-  MIN(CASE WHEN rs.source='history' THEN rs.ts END) AS oldest_history
- FROM resolved rs LEFT JOIN chats c ON c.jid=rs.chat_jid GROUP BY rs.canonical_jid
-),
-media_by_chat AS (
- SELECT COALESCE(a.canonical,x.chat_jid) AS canonical_jid,
-  SUM(x.state='failed') AS failed,
-  SUM(x.state IN ('expired','retry_requested')) AS expired,
-  SUM(x.state IN ('pending','downloading')) AS pending
- FROM media x LEFT JOIN chat_canonical a ON a.alias=x.chat_jid
- WHERE x.state IN ('failed','expired','retry_requested','pending','downloading')
- GROUP BY 1
-),
-gaps_by_chat AS (
- SELECT canonical_jid,COUNT(*) AS gaps FROM open_gaps GROUP BY 1
-)
-SELECT b.canonical_jid,b.name,b.messages,b.oldest,b.newest,
- COALESCE(md.failed,0),COALESCE(md.expired,0),COALESCE(md.pending,0),COALESCE(g.gaps,0),b.oldest_history
- FROM messages_by_chat b
- LEFT JOIN media_by_chat md ON md.canonical_jid=b.canonical_jid
- LEFT JOIN gaps_by_chat g ON g.canonical_jid=b.canonical_jid
- ORDER BY b.canonical_jid`
+// statusReportQuery is the one query behind the chat half of `archiver status`: a read of chat_stats, the table the
+// writer maintains (schema 4.4), so its cost is O(chats) and does not grow with messages, media or events. A chat with
+// no message is not listed (the chat list adds those). The name is the chat_stats name: the chat's name, else the
+// contact name, else the push name (nameExpr). The oldest history ts is NULL when the chat has no history message.
+// Columns: canonical_jid, name, messages, oldest, newest, media failed, expired, pending, open gaps, oldest history ts.
+const statusReportQuery = `SELECT canonical,name,messages,oldest_ts,last_ts,media_failed,media_expired,media_pending,gaps_open,oldest_history_ts
+ FROM chat_stats WHERE messages>0 ORDER BY canonical`
 
 // StatusReport is everything `archiver status` reads from the archive.
 type StatusReport struct {
@@ -50,7 +19,7 @@ type StatusReport struct {
 	Coverage Coverage
 }
 
-// StatusReport reads the per-chat statistics and the history coverage with one pass over the messages.
+// StatusReport reads the per-chat statistics from chat_stats and the history coverage from the ledger.
 func (s *Store) StatusReport(ctx context.Context) (StatusReport, error) {
 	r := StatusReport{Coverage: Coverage{OldestByChat: map[string]int64{}}}
 	err := s.read.QueryRowContext(ctx, historyChunksQuery).Scan(&r.Coverage.Chunks, &r.Coverage.LastProgress, &r.Coverage.LastChunkTime, &r.Coverage.Complete)
@@ -77,7 +46,7 @@ func (s *Store) StatusReport(ctx context.Context) (StatusReport, error) {
 }
 
 // chatStatsQuery is the same query under its old name, kept for the plan test of ChatStats.
-var chatStatsQuery = statusReportQuery
+const chatStatsQuery = statusReportQuery
 
 // ChatStats counts media as failed, expired (including a re-upload request waiting for the phone) and pending
 // (including a download in progress); done and skipped rows are not counted.

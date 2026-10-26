@@ -44,7 +44,7 @@ check-fast: $(GO)
 	  | grep '\.go$$' | while read -r f; do d=$$(dirname "$$f"); [ -d "$$d" ] && echo "$$d"; done | sort -u \
 	  | while read -r d; do if [ "$$d" = . ]; then echo .; else echo "./$$d/..."; fi; done); \
 	if [ -z "$$pkgs" ]; then echo "check-fast: no Go changes"; \
-	else echo "check-fast: $$pkgs"; $(GO) test -race $$pkgs || exit 1; fi
+	else echo "check-fast: $$pkgs"; $(GO) test -race -short $$pkgs || exit 1; fi
 	@$(MAKE) --no-print-directory lint
 
 # Full race tests, but only failing output and the last lines show; exit status is go test's.

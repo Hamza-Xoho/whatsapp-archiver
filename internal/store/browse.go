@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -40,106 +41,88 @@ type Trace struct {
 	Gap     bool
 }
 
-// canonicalOf is the canonical JID of the column or parameter X, as chat_aliases defines it (the LID of a mapped
-// phone number or LID, else X itself), answered from id_mappings lookups instead of building the view.
-func canonicalOf(x string) string {
-	return `COALESCE((SELECT im.lid FROM id_mappings im WHERE im.lid=` + x + ` OR im.pn=` + x + ` ORDER BY im.lid LIMIT 1),` + x + `)`
-}
+// chatListQuery is the chats screen: one row of chat_stats per chat (every chat with a message, a rule, a sighting or a
+// directory row, R20), newest activity first, the quiet ones (no message) after the chats that have messages at the same
+// time. Rules and sightings are aggregated per canonical through chat_canonical: a chat logs unless some form of it has
+// logging off, has a media rule if some form has one, and is new when it was seen and no form was acknowledged.
+const chatListQuery = `SELECT s.canonical,s.name,s.messages,s.oldest_ts,s.last_ts,s.media_failed,s.media_expired,s.media_pending,s.gaps_open,
+ COALESCE(r.logging,1),COALESCE(r.media,0),COALESCE(NOT f.acked,0)
+FROM chat_stats s
+LEFT JOIN (SELECT a.canonical AS c,MIN(x.logging) AS logging,MAX(x.media<>'') AS media FROM chat_rules x JOIN chat_canonical a ON a.alias=x.jid GROUP BY a.canonical) r ON r.c=s.canonical
+LEFT JOIN (SELECT a.canonical AS c,MAX(x.acknowledged) AS acked FROM chat_seen x JOIN chat_canonical a ON a.alias=x.jid GROUP BY a.canonical) f ON f.c=s.canonical
+ORDER BY s.last_ts DESC,s.messages=0,s.canonical`
 
 // ChatList is the chats screen: every chat with messages, newest activity first, then every chat known only from
-// chat_rules, chat_seen or chats (no stored message: zero counts), each once under its canonical JID. DisplayName is the chat's name (a
-// group's subject), else the participant's name for a direct chat, else the JID. filter keeps the chats whose name or
-// JID contains it, ignoring case.
+// chat_rules, chat_seen or chats (no stored message: zero counts), each once under its canonical JID. DisplayName is the
+// chat's name (a group's subject), else the contact name, else the push name, else the JID (the order of nameExpr).
+// filter keeps the chats whose name or JID contains it, ignoring case. It reads chat_stats and the rule and sighting
+// tables only: O(chats).
 func (s *Store) ChatList(ctx context.Context, filter string) ([]ChatRow, error) {
-	report, err := s.StatusReport(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("chat list: %w", err)
-	}
-	people, err := s.stringsByCanonical(ctx, `SELECT `+canonicalOf("p.jid")+`,MAX(p.push_name) FROM participants p WHERE p.push_name<>'' GROUP BY 1`)
-	if err != nil {
-		return nil, err
-	}
-	type ruleAgg struct{ logging, media bool }
-	rules := map[string]ruleAgg{}
-	err = s.scanRows(ctx, `SELECT `+canonicalOf("r.jid")+`,MIN(r.logging),MAX(r.media<>'') FROM chat_rules r GROUP BY 1`, nil, func(rows *sql.Rows) error {
-		var jid string
-		var a ruleAgg
-		if err := rows.Scan(&jid, &a.logging, &a.media); err != nil {
-			return err
-		}
-		rules[jid] = a
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	// A chat is new when it was seen under some JID form and no form of it has been acknowledged.
-	fresh := map[string]bool{}
-	err = s.scanRows(ctx, `SELECT `+canonicalOf("c.jid")+`,MAX(c.acknowledged) FROM chat_seen c GROUP BY 1`, nil, func(rows *sql.Rows) error {
-		var jid string
-		var acked bool
-		if err := rows.Scan(&jid, &acked); err != nil {
-			return err
-		}
-		fresh[jid] = !acked
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	chats, err := s.stringsByCanonical(ctx, `SELECT `+canonicalOf("jid")+`,MAX(name) FROM (SELECT jid,'' AS name FROM chat_rules UNION ALL SELECT jid,'' FROM chat_seen UNION ALL SELECT jid,name FROM chats) GROUP BY 1`)
-	if err != nil {
-		return nil, err
-	}
-	listed := make(map[string]bool, len(report.Chats))
-	for _, c := range report.Chats {
-		listed[c.CanonicalJID] = true
-	}
-	quiet := make([]string, 0, len(chats))
-	for jid := range chats {
-		if !listed[jid] {
-			quiet = append(quiet, jid)
-		}
-	}
-	sort.Strings(quiet)
-	for _, jid := range quiet {
-		report.Chats = append(report.Chats, ChatStat{CanonicalJID: jid, Name: chats[jid]})
-	}
 	needle := strings.ToLower(filter)
-	out := make([]ChatRow, 0, len(report.Chats))
-	for _, c := range report.Chats {
-		row := ChatRow{ChatStat: c, DisplayName: c.Name, Logging: true, New: fresh[c.CanonicalJID]}
-		if row.DisplayName == "" {
-			row.DisplayName = people[c.CanonicalJID]
+	var out []ChatRow
+	err := s.scanRows(ctx, chatListQuery, nil, func(rows *sql.Rows) error {
+		var row ChatRow
+		c := &row.ChatStat
+		if err := rows.Scan(&c.CanonicalJID, &c.Name, &c.MessageCount, &c.Oldest, &c.Newest, &c.MediaFailed, &c.MediaExpired, &c.MediaPending, &c.OpenGaps, &row.Logging, &row.HasMediaRule, &row.New); err != nil {
+			return err
 		}
+		row.DisplayName = c.Name
 		if row.DisplayName == "" {
 			row.DisplayName = c.CanonicalJID
 		}
-		if r, ok := rules[c.CanonicalJID]; ok {
-			row.Logging, row.HasMediaRule = r.logging, r.media
-		}
 		if needle != "" && !strings.Contains(strings.ToLower(row.DisplayName), needle) && !strings.Contains(strings.ToLower(c.CanonicalJID), needle) {
-			continue
+			return nil
 		}
 		out = append(out, row)
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("chat list: %w", err)
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].Newest > out[j].Newest })
 	return out, nil
 }
 
-// ChatName is the chat's name, else the participant's name for a direct chat, over all its JID forms; "" when the
-// archive knows neither.
+// nameOfJID is the display name of the chat of the JID in column col (nameExpr over its canonical JID).
+func nameOfJID(col string) string {
+	return nameExpr(`COALESCE((SELECT canonical FROM chat_canonical WHERE alias=` + col + `),` + col + `)`)
+}
+
+// ChatName is the chat's name, else the contact name, else the push name, over all its JID forms; "" when the archive
+// knows none of them.
 func (s *Store) ChatName(ctx context.Context, jid string) (string, error) {
 	var name string
-	err := s.read.QueryRowContext(ctx, `SELECT COALESCE((SELECT name FROM chats WHERE jid IN (`+aliasSet+`) AND name<>'' ORDER BY jid LIMIT 1),
- (SELECT push_name FROM participants WHERE jid IN (`+aliasSet+`) AND push_name<>'' ORDER BY jid LIMIT 1),'')`, jid).Scan(&name)
-	if err != nil {
+	if err := s.read.QueryRowContext(ctx, `SELECT `+nameOfJID("?1"), jid).Scan(&name); err != nil {
 		return "", fmt.Errorf("chat name of %s: %w", jid, err)
 	}
 	return name, nil
 }
 
-// chatPageQuery is messages_resolved for one chat: its messages under every JID form (aliasSet of ?1), each id once
+// senderNames maps each JID to its display name (nameOfJID) in one query; a JID without a name is absent.
+func (s *Store) senderNames(ctx context.Context, jids []string) (map[string]string, error) {
+	out := make(map[string]string, len(jids))
+	if len(jids) == 0 {
+		return out, nil
+	}
+	args := make([]any, len(jids))
+	marks := make([]string, len(jids))
+	for i, j := range jids {
+		args[i] = j
+		marks[i] = fmt.Sprintf("(?%d)", i+1)
+	}
+	err := s.scanRows(ctx, `WITH s(j) AS (VALUES `+strings.Join(marks, ",")+`) SELECT j,`+nameOfJID("s.j")+` FROM s`, args, func(rows *sql.Rows) error {
+		var j, name string
+		if err := rows.Scan(&j, &name); err != nil {
+			return err
+		}
+		if name != "" {
+			out[j] = name
+		}
+		return nil
+	})
+	return out, err
+}
+
+// chatPageQuery is messages_resolved for one chat: its messages under every JID form (chatForms of ?1), each id once
 // (the first received copy), newest first, at most ?3, and, when ?2 > 0, after the cursor (?2, ?4) in that order:
 // older than ?2, or at ?2 with an id below ?4. The dedupe rank is computed over all the chat's rows before the cursor
 // filter. Restricting to the chat's forms before the window function keeps the cost to the chat's own rows instead of
@@ -147,10 +130,10 @@ func (s *Store) ChatName(ctx context.Context, jid string) (string, error) {
 const chatPageQuery = `WITH m AS (
  SELECT chat_jid,id,sender_jid,ts,CASE WHEN text<>'' THEN text ELSE caption END AS body,quoted_id,CASE WHEN kind IN ('image','video','gif','audio','voice','document','sticker') THEN kind ELSE '' END AS media_type,
   ROW_NUMBER() OVER (PARTITION BY id ORDER BY received_at,chat_jid) AS rk
- FROM messages WHERE chat_jid IN (` + aliasSet + `)
+ FROM messages WHERE chat_jid IN (` + chatForms + `)
 )
-SELECT m.id,m.sender_jid,COALESCE(p.push_name,''),m.body,m.media_type,m.ts,m.quoted_id
-FROM m LEFT JOIN participants p ON p.jid=m.sender_jid
+SELECT m.id,m.sender_jid,m.body,m.media_type,m.ts,m.quoted_id
+FROM m
 WHERE m.rk=1 AND (?2<=0 OR m.ts<?2 OR (m.ts=?2 AND m.id<?4))
 ORDER BY m.ts DESC,m.id DESC LIMIT ?3`
 
@@ -160,7 +143,7 @@ func (s *Store) ChatPage(ctx context.Context, canonicalJID string, beforeTS int6
 	var page []ViewMessage
 	err := s.scanRows(ctx, chatPageQuery, []any{canonicalJID, beforeTS, limit, beforeID}, func(rows *sql.Rows) error {
 		var m ViewMessage
-		if err := rows.Scan(&m.ID, &m.Sender, &m.SenderName, &m.Text, &m.MediaType, &m.TS, &m.QuotedID); err != nil {
+		if err := rows.Scan(&m.ID, &m.Sender, &m.Text, &m.MediaType, &m.TS, &m.QuotedID); err != nil {
 			return err
 		}
 		page = append(page, m)
@@ -168,6 +151,19 @@ func (s *Store) ChatPage(ctx context.Context, canonicalJID string, beforeTS int6
 	})
 	if err != nil || len(page) == 0 {
 		return page, err
+	}
+	var senders []string
+	for _, m := range page {
+		if m.Sender != "" && !slices.Contains(senders, m.Sender) {
+			senders = append(senders, m.Sender)
+		}
+	}
+	names, err := s.senderNames(ctx, senders)
+	if err != nil {
+		return nil, err
+	}
+	for i := range page {
+		page[i].SenderName = names[page[i].Sender]
 	}
 	at := make(map[string]int, len(page))
 	args := []any{canonicalJID}
@@ -179,7 +175,7 @@ func (s *Store) ChatPage(ctx context.Context, canonicalJID string, beforeTS int6
 	}
 	in := strings.Join(marks, ",")
 	reactions := map[string]map[string]string{} // message id -> reactor -> current reaction
-	err = s.scanRows(ctx, `SELECT target_id,kind,sender_jid,new_text,value FROM message_events WHERE chat_jid IN (`+aliasSet+`) AND kind IN ('edit','revoke','reaction') AND target_id IN (`+in+`) ORDER BY ts,received_at,event_id`, args, func(rows *sql.Rows) error {
+	err = s.scanRows(ctx, `SELECT target_id,kind,sender_jid,new_text,value FROM message_events WHERE chat_jid IN (`+chatForms+`) AND kind IN ('edit','revoke','reaction') AND target_id IN (`+in+`) ORDER BY ts,received_at,event_id`, args, func(rows *sql.Rows) error {
 		var id, kind, sender, newText, value string
 		if err := rows.Scan(&id, &kind, &sender, &newText, &value); err != nil {
 			return err
@@ -213,7 +209,7 @@ func (s *Store) ChatPage(ctx context.Context, canonicalJID string, beforeTS int6
 			}
 		}
 	}
-	err = s.scanRows(ctx, `SELECT message_id,state FROM media WHERE chat_jid IN (`+aliasSet+`) AND message_id IN (`+in+`) ORDER BY chat_jid`, args, func(rows *sql.Rows) error {
+	err = s.scanRows(ctx, `SELECT message_id,state FROM media WHERE chat_jid IN (`+chatForms+`) AND message_id IN (`+in+`) ORDER BY chat_jid`, args, func(rows *sql.Rows) error {
 		var id, state string
 		if err := rows.Scan(&id, &state); err != nil {
 			return err
@@ -235,7 +231,7 @@ func (s *Store) Trace(ctx context.Context, chatJID, id string) (Trace, error) {
 	var t Trace
 	m := &t.Message
 	var mentions string
-	err := s.read.QueryRowContext(ctx, `SELECT chat_jid,id,sender_jid,from_me,push_name,kind,text,caption,quoted_id,quoted_sender,mentions,forwarded,forward_score,view_once,ephemeral_secs,details,source,ts,received_at,raw_proto FROM messages WHERE id=?2 AND chat_jid IN (`+aliasSet+`) ORDER BY received_at,chat_jid LIMIT 1`, chatJID, id).
+	err := s.read.QueryRowContext(ctx, `SELECT chat_jid,id,sender_jid,from_me,push_name,kind,text,caption,quoted_id,quoted_sender,mentions,forwarded,forward_score,view_once,ephemeral_secs,details,source,ts,received_at,raw_proto FROM messages WHERE id=?2 AND chat_jid IN (`+chatForms+`) ORDER BY received_at,chat_jid LIMIT 1`, chatJID, id).
 		Scan(&m.ChatJID, &m.ID, &m.SenderJID, &m.FromMe, &m.PushName, &m.Kind, &m.Text, &m.Caption, &m.QuotedID, &m.QuotedSender, &mentions, &m.Forwarded, &m.ForwardScore, &m.ViewOnce, &m.EphemeralSecs, &m.Details, &m.Source, &m.Timestamp, &m.ReceivedAt, &m.RawProto)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return t, fmt.Errorf("trace message %s: %w", id, err)
@@ -245,7 +241,7 @@ func (s *Store) Trace(ctx context.Context, chatJID, id string) (Trace, error) {
 			return t, fmt.Errorf("trace message %s: mentions: %w", id, err)
 		}
 	}
-	err = s.scanRows(ctx, `SELECT chat_jid,target_id,kind,event_id,source_id,cause,sender_jid,source,new_text,value,ts,received_at FROM message_events WHERE target_id=?2 AND chat_jid IN (`+aliasSet+`) ORDER BY ts,received_at,event_id`, []any{chatJID, id}, func(rows *sql.Rows) error {
+	err = s.scanRows(ctx, `SELECT chat_jid,target_id,kind,event_id,source_id,cause,sender_jid,source,new_text,value,ts,received_at FROM message_events WHERE target_id=?2 AND chat_jid IN (`+chatForms+`) ORDER BY ts,received_at,event_id`, []any{chatJID, id}, func(rows *sql.Rows) error {
 		var e MessageEvent
 		if err := rows.Scan(&e.ChatJID, &e.TargetID, &e.Kind, &e.EventID, &e.SourceID, &e.Cause, &e.SenderJID, &e.Source, &e.NewText, &e.Value, &e.Timestamp, &e.ReceivedAt); err != nil {
 			return err
@@ -271,7 +267,7 @@ func (s *Store) Trace(ctx context.Context, chatJID, id string) (Trace, error) {
 // ChatMedia is the media row of message id in the chat under any of its JID forms, or nil.
 func (s *Store) ChatMedia(ctx context.Context, chatJID, id string) (*Media, error) {
 	var m Media
-	err := s.read.QueryRowContext(ctx, `SELECT `+mediaColumns+` FROM media WHERE message_id=?2 AND chat_jid IN (`+aliasSet+`) ORDER BY chat_jid LIMIT 1`, chatJID, id).Scan(m.fields()...)
+	err := s.read.QueryRowContext(ctx, `SELECT `+mediaColumns+` FROM media WHERE message_id=?2 AND chat_jid IN (`+chatForms+`) ORDER BY chat_jid LIMIT 1`, chatJID, id).Scan(m.fields()...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
