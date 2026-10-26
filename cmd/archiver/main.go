@@ -46,6 +46,7 @@ func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 func run(args []string, out, errOut io.Writer) int {
 	if len(args) == 0 {
 		_, _ = fmt.Fprintln(errOut, "usage: archiver <pair|run|status|chats|backup|rebuild-derived|scrub|replay|version>")
+		_, _ = fmt.Fprintln(errOut, "  rebuild-derived --data <dir>: recreate chat_stats and the search index; stop the service first (it takes the archive exclusively)")
 		return 2
 	}
 	cmd := args[0]

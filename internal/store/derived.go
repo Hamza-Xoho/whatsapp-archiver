@@ -26,8 +26,9 @@ func typeExpr(ref string) string {
 }
 
 // statsSelect builds the INSERT ... SELECT that computes chat_stats rows from the raw tables: for every canonical (all
-// of them, or only ?1 when filtered) that has a message, a media row, a chats row, a rule or a sighting (R20). It is
-// the definition of chat_stats; the incremental updates are shortcuts that must give the same rows.
+// of them, or only ?1 when filtered) that has a message, a chats row, a rule or a sighting (R20). A media row alone
+// makes no row; its counts are read once the chat is seen. It is the definition of chat_stats; the incremental updates
+// are shortcuts that must give the same rows.
 func statsSelect(filtered bool) string {
 	byAlias, byGaps := "", ""
 	if filtered {
@@ -45,7 +46,7 @@ med AS (
   FROM chat_canonical a JOIN media x ON x.chat_jid=a.alias` + byAlias + ` GROUP BY a.canonical),
 gap AS (SELECT canonical_jid AS c, COUNT(*) AS n FROM open_gaps` + byGaps + ` GROUP BY canonical_jid),
 keys(c) AS (
-  SELECT c FROM msg UNION SELECT c FROM med
+  SELECT c FROM msg
   UNION SELECT a.canonical FROM chat_canonical a JOIN chats t ON t.jid=a.alias` + byAlias + `
   UNION SELECT a.canonical FROM chat_canonical a JOIN chat_rules t ON t.jid=a.alias` + byAlias + `
   UNION SELECT a.canonical FROM chat_canonical a JOIN chat_seen t ON t.jid=a.alias` + byAlias + `)
