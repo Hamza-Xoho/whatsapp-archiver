@@ -70,31 +70,19 @@ type merge struct {
 }
 
 // mergeStats brings chat_stats in line with a merge (schema 4.3 step 5). The stale rows of the canonicals that were
-// absorbed are deleted; when one of them had a row, the merged chat is recomputed from the raw tables (O(rows of the
-// chat), once per merge). Otherwise only what a new alias can change is refreshed: the name and the gaps.
+// absorbed are deleted and the merged chat is recomputed from the raw tables (O(rows of the chat), once per new
+// mapping). A cheaper refresh of the name and the gaps alone would miss rows that the re-pointed aliases bring in
+// without a stats row of their own (a stand-alone media row), so rebuild would differ from incremental.
 func mergeStats(ctx context.Context, tx execer, mg merge) error {
-	absorbed := false
 	for _, old := range mg.before {
 		if old == mg.canonical {
 			continue
 		}
-		res, err := tx.ExecContext(ctx, `DELETE FROM chat_stats WHERE canonical=?`, old)
-		if err != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM chat_stats WHERE canonical=?`, old); err != nil {
 			return fmt.Errorf("delete stale stats of %s: %w", old, classify(err))
 		}
-		if n, err := res.RowsAffected(); err != nil {
-			return err
-		} else if n > 0 {
-			absorbed = true
-		}
 	}
-	if absorbed {
-		return recomputeStats(ctx, tx, mg.canonical)
-	}
-	if _, err := refreshIdentity(ctx, tx, mg.canonical); err != nil {
-		return err
-	}
-	return gapsOf(ctx, tx, mg.canonical, "", false)
+	return recomputeStats(ctx, tx, mg.canonical)
 }
 
 // rewriteComponent walks the id_mappings component that contains lid and pn and points every member's chat_canonical

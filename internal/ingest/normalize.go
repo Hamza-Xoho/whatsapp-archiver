@@ -77,6 +77,8 @@ func clearMessageSecrets(msg *waE2E.Message) {
 	} {
 		clearMessageSecrets(wrapper.GetMessage())
 	}
+	// An edit holds the new content in ProtocolMessage.EditedMessage, with a context info of its own.
+	clearMessageSecrets(msg.GetProtocolMessage().GetEditedMessage())
 }
 
 // keyMaterial lists the protocol message types whose payload holds keys: app-state sync keys, contact hash keys,

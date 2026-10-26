@@ -117,8 +117,7 @@ func (s *Store) SetChatRules(ctx context.Context, rules []ChatRule) error {
 	return nil
 }
 
-// Setting returns a setting and whether it is set. An archive from before the settings tables (opened read-only, so
-// not migrated) has no setting.
+// Setting returns a setting and whether it is set.
 func (s *Store) Setting(ctx context.Context, key string) (string, bool, error) {
 	var v string
 	err := s.read.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=?`, key).Scan(&v)
@@ -126,18 +125,9 @@ func (s *Store) Setting(ctx context.Context, key string) (string, bool, error) {
 		return "", false, nil
 	}
 	if err != nil {
-		if has, herr := s.hasSettingsTable(ctx); herr == nil && !has {
-			return "", false, nil
-		}
 		return "", false, fmt.Errorf("read setting %s: %w", key, err)
 	}
 	return v, true, nil
-}
-
-func (s *Store) hasSettingsTable(ctx context.Context) (bool, error) {
-	var n int
-	err := s.read.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='settings'`).Scan(&n)
-	return n > 0, err
 }
 
 func (s *Store) SetSetting(ctx context.Context, key, value string) error {
@@ -262,7 +252,7 @@ func (s *Store) ImportConfigOnce(ctx context.Context, cfg *config.Config) (bool,
 }
 
 // ConfigImported reports whether config.yaml's settings were imported into this archive, so the archive's chat rules
-// are the live ones. An archive from before the settings tables (opened read-only, not migrated) reports false.
+// are the live ones.
 func (s *Store) ConfigImported(ctx context.Context) (bool, error) {
 	_, ok, err := s.Setting(ctx, config.ImportMarker)
 	return ok, err

@@ -32,6 +32,9 @@ func (s *Store) SetContactNames(ctx context.Context, names []ContactName) (int, 
 		if n.Name == "" {
 			continue
 		}
+		if err = ensureCanonical(ctx, tx, n.JID); err != nil { // every stored JID has a row (R8); the rebuild lists participants.jid
+			return 0, err
+		}
 		res, err := tx.ExecContext(ctx, `INSERT INTO participants(jid,contact_name,updated_at) VALUES(?1,?2,?3)
  ON CONFLICT(jid) DO UPDATE SET contact_name=excluded.contact_name,updated_at=excluded.updated_at
  WHERE excluded.contact_name<>participants.contact_name`, n.JID, n.Name, at)
