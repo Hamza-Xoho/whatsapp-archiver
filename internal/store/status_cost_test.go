@@ -18,8 +18,9 @@ const legacyChatStatsQuery = legacyViews + `SELECT m.canonical_jid,COALESCE(MAX(
  (SELECT COUNT(*) FROM open_gaps g LEFT JOIN chat_aliases a ON a.alias_jid=g.chat_jid WHERE COALESCE(a.canonical_jid,g.chat_jid)=m.canonical_jid)
  FROM messages_resolved m LEFT JOIN chats c ON c.jid=m.chat_jid GROUP BY m.canonical_jid ORDER BY m.canonical_jid`
 
-// legacyViews recreates the dropped chat_aliases and messages_resolved views (ADR-35) as CTEs over chat_canonical, so
-// the old queries can still serve as oracles: same columns, same duplicate rank, now fed by the derived table.
+// legacyViews recreates the dropped chat_aliases and messages_resolved views (ADR-35) as CTEs that build the aliases
+// from chat_canonical, so the old queries can still serve as oracles for the counting, the duplicate rank and the
+// columns. It does not check that chat_canonical itself is right: the mapping tests in apply_test.go cover that.
 const legacyViews = `WITH chat_aliases AS (SELECT alias AS alias_jid, canonical AS canonical_jid FROM chat_canonical),
 messages_resolved AS (SELECT * FROM (
   SELECT m.*, COALESCE(a.canonical_jid, m.chat_jid) AS canonical_jid,

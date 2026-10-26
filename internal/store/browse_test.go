@@ -309,3 +309,29 @@ func TestChatListIncludesChatsWithoutMessages(t *testing.T) {
 		t.Errorf("the chat with messages should sort first: %+v", rows[0])
 	}
 }
+
+// Only media kinds are a viewer "media type". A message of a kind that carries no file (unknown, location, contact,
+// poll, text...) has MediaType "", so the viewer shows nothing under it.
+func TestChatPageMediaTypeIsOnlySetForMediaKinds(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	kinds := []string{"text", "unknown", "location", "contact", "poll", "system", "image", "voice", "gif", "sticker"}
+	for i, kind := range kinds {
+		m := store.Message{ChatJID: "g@g.us", ID: fmt.Sprintf("m%02d", i), SenderJID: "1@lid", Timestamp: int64(100 + i), ReceivedAt: 1, Source: "live", Kind: kind, RawProto: []byte("x")}
+		if _, err := s.InsertMessage(ctx, m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page, err := s.ChatPage(ctx, "g@g.us", 0, "", 20)
+	if err != nil || len(page) != len(kinds) {
+		t.Fatalf("page=%d err=%v", len(page), err)
+	}
+	want := map[string]string{"text": "", "unknown": "", "location": "", "contact": "", "poll": "", "system": "", "image": "image", "voice": "voice", "gif": "gif", "sticker": "sticker"}
+	for i, kind := range kinds {
+		for _, v := range page {
+			if v.ID == fmt.Sprintf("m%02d", i) && v.MediaType != want[kind] {
+				t.Errorf("kind %s: MediaType = %q, want %q", kind, v.MediaType, want[kind])
+			}
+		}
+	}
+}

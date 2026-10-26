@@ -227,3 +227,21 @@ func TestMessageIDIsPathEscapedInLinks(t *testing.T) {
 		t.Fatalf("escaped link does not open the trace: status %d", code)
 	}
 }
+
+// A message with no body this build knows (kind unknown) or no file (location) shows no media line in the viewer:
+// before V1 its media_type was empty and nothing appeared under it.
+func TestViewerShowsNoMediaLineForKindsWithoutAFile(t *testing.T) {
+	u := newChatsUI(t)
+	for i, kind := range []string{"unknown", "location"} {
+		m := store.Message{ChatJID: "g@g.us", ID: fmt.Sprint("k", i), SenderJID: "1@lid", Timestamp: int64(1760000000 + i), ReceivedAt: 1, Source: "live", Kind: kind, RawProto: []byte("x")}
+		if _, err := u.st.InsertMessage(t.Context(), m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got := u.page(t, "/chats/g@g.us")
+	for _, bad := range []string{"unknown", "location", "not downloaded"} {
+		if strings.Contains(got, bad) {
+			t.Fatalf("the viewer shows %q for a message without a file: %s", bad, got)
+		}
+	}
+}
