@@ -165,6 +165,8 @@ func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) er
 	if recordDir != "" {
 		handler = ingest.NewRecorder(recordDir).WithFilter(filter).Wrap(handler)
 	}
+	contacts := newContactSync(client.ContactNames(), st, log)
+	handler = withContactSync(contacts, handler)
 	handlers := &inFlight{}
 	handler = handlers.wrap(handler)
 	// `run` connects through the pairer: capture at once when paired, else nothing until the dashboard starts
@@ -186,6 +188,7 @@ func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) er
 	loops := []func(context.Context){
 		afterPaired(ready, queue.Run),
 		mon.Run,
+		contacts.Run, // idle until a connect or contact event asks for a sync
 		afterPaired(ready, func(ctx context.Context) {
 			backup.Schedule(ctx, cfg, systemClock{}, publishBackup(bus, mon.BackupResult), live.backup)
 		}),
