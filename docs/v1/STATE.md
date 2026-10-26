@@ -14,7 +14,7 @@ Single status record for V1 (max 150 lines, update in place; history lives in gi
 
 - W2(b) migration and store rewrite (branch main, base eb9d4d4): `0001_v1.sql`, `Apply(Batch)`, kinds, ledger/spool, control tables, ports of ingest/media/web/cmd. Golden review, 26 Oct: `internal/ingest/testdata/golden/synthetic.sql` regenerated with `-update` after reading all 13 changed lines against the old file: raw_proto hex, ts, ids and values are byte-identical; the only differences are the new columns (participants push_name/contact_name; messages from_me, push_name, kind, text/caption split, quoted_sender, mentions `[]`, forward_score, view_once, ephemeral_secs, details `{}`; events source_id/cause/source; ledger stage `imported`, spool_id 0). `cmd/archiver/testdata/status.golden` differs in one line: data folder 109.8 KB to 249.8 KB (the V1 schema has about 35 more b-trees, one page each).
 
-- W2(c) normaliser fills every typed column (base 12ca198): all 16 kinds with `details`, context (quote, mentions, forwarding, expiry, view-once), media facts, `source_id` and `cause` on events, history reactions and poll updates (R14), live poll-vote naming (R15). Golden review, 26 Oct: created with `-update` after reading every line of the 19 new dumps (`kind-*`, `events-messages`, `events-undecryptable`, `events-history`; each INSERT checked column by column against its generator input in `internal/ingest/golden_kinds_test.go`, raw_proto checked by length and leading bytes, because the raw bytes are the unchanged marshalled input) and the 12 changed lines of `synthetic.sql` (read against the old file): the only differences are `quoted_sender` of SYN-REPLY-1, `cause='other'` on the undecryptable, `source_id` on revoke, edit and reaction, and the reaction's `event_id`, which now derives from its own message ID (so the live and the history copy of a reaction are one row).
+- W2(c) normaliser fills every typed column (base 12ca198): all 16 kinds with `details`, context (quote, mentions, forwarding, expiry, view-once), media facts, `source_id` and `cause` on events, history reactions and poll updates (R14), live poll-vote naming (R15). Golden review, 26 Oct: created with `-update` after reading every line of the 19 new dumps (`kind-*`, `events-messages`, `events-undecryptable`, `events-history`; each INSERT checked column by column against its generator input in `internal/ingest/golden_kinds_test.go`, raw_proto checked by length and leading bytes, because the raw bytes are the unchanged marshalled input) and the 5 changed lines of `synthetic.sql` (read against the old file): the only differences are `quoted_sender` of SYN-REPLY-1, `cause='other'` on the undecryptable, `source_id` on revoke, edit and reaction, and the reaction's `event_id`, which now derives from its own message ID (so the live and the history copy of a reaction are one row).
 
 ## In flight
 
@@ -23,7 +23,7 @@ Single status record for V1 (max 150 lines, update in place; history lives in gi
 
 ## Rulings
 
-- (a) The `add-message-kind` skill is deferred to W2, after `docs/v1/schema.md` exists.
+- (a) The `add-message-kind` skill (replaces `add-event-kind`) was written in W2(c).
 - (b) W0 is done on main without a worktree.
 - (c) No Co-Authored-By trailer on commits.
 - (d) Router reservation / static IP for ryzen skipped by Hamza (26 Oct): the connection is only needed for coding, so the address may change; `deploy-ryzen` and docs use 192.168.0.105 and must be rechecked if it does.

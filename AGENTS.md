@@ -48,4 +48,4 @@ Review work list: `docs/reviews/2026-10-14-phase0-review.md`. Prompts: `docs/pro
 - `internal/health`, `internal/backup`: alerts/snapshots; neither imports the WhatsApp client.
 - `internal/retry`, `internal/guard`, `internal/testkit`: shared implementations; do not duplicate.
 
-Procedures live in `.claude/skills/`: `bump-whatsmeow`, `add-event-kind`, and `record-fixtures`.
+Procedures live in `.claude/skills/`: `bump-whatsmeow`, `add-message-kind`, and `record-fixtures`.
