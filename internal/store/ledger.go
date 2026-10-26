@@ -3,8 +3,12 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"slices"
+	"strings"
 )
 
 // History ledger stages (R10). A chunk is ledgered as received when its blob is spooled and as imported when its
@@ -43,8 +47,72 @@ const (
 	BlobRaw  = "raw"
 )
 
-// SpoolMetaDenylist lists the JSON keys SpoolReceive refuses in Meta (RED STUB: empty).
-func SpoolMetaDenylist() []string { return nil }
+// spoolMetaDenylist is the set of JSON key names SpoolReceive refuses in Meta (I3, Hamza, option b, 26 Oct 2026): key
+// material must never reach the backed-up archive.db. Names are normalised (lower case, without "_" and "-") and
+// matched whole, at any depth, in objects and arrays; values are never inspected. directPath, sizes and the sync type are
+// not key material and pass. TestSpoolMetaDenylistIsPinned pins the list, so changing it is deliberate.
+//
+//	mediakey, fileencsha256, filesha256, enckey, enchandle  the notification's download credentials (R9)
+//	messagesecret, botmessagesecret, secret, tctoken, token  secrets and tokens by their usual names
+//	key, keydata, privatekey, password, passphrase           generic key and credential names
+var spoolMetaDenylist = map[string]bool{
+	"botmessagesecret": true, "enchandle": true, "enckey": true, "fileencsha256": true, "filesha256": true, "key": true,
+	"keydata": true, "mediakey": true, "messagesecret": true, "passphrase": true, "password": true, "privatekey": true,
+	"secret": true, "tctoken": true, "token": true,
+}
+
+// SpoolMetaDenylist returns the normalised key names SpoolReceive refuses in Meta, sorted.
+func SpoolMetaDenylist() []string {
+	out := make([]string, 0, len(spoolMetaDenylist))
+	for k := range spoolMetaDenylist {
+		out = append(out, k)
+	}
+	slices.Sort(out)
+	return out
+}
+
+var metaKeyNormaliser = strings.NewReplacer("_", "", "-", "")
+
+// checkSpoolMeta reports a Meta that is not a JSON object or holds a denylisted key at any depth. The error wraps
+// ErrConstraint: such a row can never be stored, however often it is retried.
+func checkSpoolMeta(meta string) error {
+	dec := json.NewDecoder(strings.NewReader(meta))
+	var doc any
+	if err := dec.Decode(&doc); err != nil {
+		return fmt.Errorf("spool meta is not JSON: %w: %w", ErrConstraint, err)
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return fmt.Errorf("spool meta has trailing data: %w", ErrConstraint)
+	}
+	if _, ok := doc.(map[string]any); !ok {
+		return fmt.Errorf("spool meta is not a JSON object: %w", ErrConstraint)
+	}
+	if key, bad := denylistedKey(doc); bad {
+		return fmt.Errorf("spool meta holds key material (key %q, see SpoolMetaDenylist): %w", key, ErrConstraint)
+	}
+	return nil
+}
+
+func denylistedKey(v any) (string, bool) {
+	switch x := v.(type) {
+	case map[string]any:
+		for k, val := range x {
+			if spoolMetaDenylist[strings.ToLower(metaKeyNormaliser.Replace(k))] {
+				return k, true
+			}
+			if key, bad := denylistedKey(val); bad {
+				return key, true
+			}
+		}
+	case []any:
+		for _, val := range x {
+			if key, bad := denylistedKey(val); bad {
+				return key, true
+			}
+		}
+	}
+	return "", false
+}
 
 // Spool is a row of history_spool: a downloaded, decrypted, still compressed history blob and the non-key fields of
 // its notification (R9). The importer works through the rows with ImportedAt zero.
@@ -60,16 +128,20 @@ type Spool struct {
 
 // SpoolReceive spools a chunk and ledgers it as received in one transaction (ADR-37: the notification is acked only
 // after this commits). A resent chunk is a no-op: it reports the existing row and isNew false. Size is taken from the
-// blob.
+// blob. A Meta with key material is refused with ErrConstraint before anything is written (SpoolMetaDenylist); the blob
+// itself is not parsed here: the history handler strips its secrets first (ingest.StripHistorySecrets).
 func (s *Store) SpoolReceive(ctx context.Context, sp Spool, chunk HistoryChunk) (id int64, isNew bool, err error) {
+	if sp.Meta == "" {
+		sp.Meta = "{}"
+	}
+	if err = checkSpoolMeta(sp.Meta); err != nil {
+		return 0, false, err
+	}
 	tx, err := s.write.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, false, fmt.Errorf("begin spool: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if sp.Meta == "" {
-		sp.Meta = "{}"
-	}
 	if sp.Blob == nil {
 		sp.Blob = []byte{}
 	}

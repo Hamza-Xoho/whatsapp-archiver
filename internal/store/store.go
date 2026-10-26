@@ -236,27 +236,20 @@ func (s *Store) insert(ctx context.Context, query string, args ...any) (bool, er
 // not depend on the size of messages or chats. Every read of "the chat under any of its forms" uses it.
 const chatForms = `SELECT ?1 UNION SELECT alias FROM chat_canonical WHERE canonical=COALESCE((SELECT canonical FROM chat_canonical WHERE alias=?1),?1)`
 
-// aliasSet selects the aliases of chat ?1 for Aliases (id_mappings, not chat_canonical; see Aliases): the chat itself, the lids of a phone number, the phone numbers of a lid and
-// the other phone numbers of those lids. It uses only id_mappings primary-key and (pn, lid) index lookups, so its cost
-// does not depend on the size of messages or chats.
-const aliasSet = `SELECT ?1
- UNION SELECT lid FROM id_mappings WHERE pn=?1
- UNION SELECT pn FROM id_mappings WHERE lid=?1
- UNION SELECT pn FROM id_mappings WHERE lid IN (SELECT lid FROM id_mappings WHERE pn=?1)`
-
 // dedupeQuery reports whether message ?2 already exists under any alias of chat ?1: it asks chat_canonical for the
 // chat's canonical JID, then its aliases, and probes messages by its (chat_jid, id) unique index. A chat with no
 // canonical row yet (its first message) is its own canonical.
 const dedupeQuery = `SELECT EXISTS(SELECT 1 FROM chat_canonical a JOIN messages m ON m.chat_jid=a.alias
  WHERE a.canonical=COALESCE((SELECT canonical FROM chat_canonical WHERE alias=?1),?1) AND m.id=?2)`
 
-// aliasesQuery lists the aliases of chat ?1 other than itself.
-const aliasesQuery = aliasSet + ` EXCEPT SELECT ?1 ORDER BY 1`
+// aliasesQuery lists the forms of chat ?1 other than itself: chatForms (the canonical group of ?1 in chat_canonical, two
+// index probes) minus ?1, sorted so the result is deterministic.
+const aliasesQuery = chatForms + ` EXCEPT SELECT ?1 ORDER BY 1`
 
 // Aliases lists the JID forms that stand for the same chat as jid, as the ingest filter and the rule screens need them:
-// a LID's phone numbers, a phone number's LIDs and the other phone numbers of those LIDs. It still reads id_mappings
-// (primary-key and (pn, lid) lookups): chat_canonical would also list the other LIDs of a person from a LID, which the
-// H1 test (TestAliasesUnionForPhoneWithSeveralLIDs) pins as "never"; see the W2(f) divergence in docs/v1/STATE.md.
+// every other member of its canonical group in chat_canonical (R8), sorted. For a person with two LIDs mapped to one
+// phone number, each LID lists the other LID and the phone number; this is the set ChatList takes MIN(logging) over,
+// so a rule on one LID stops them all (I2, Hamza, 26 Oct 2026). A chat the archive has not stored has no forms.
 func (s *Store) Aliases(ctx context.Context, jid string) ([]string, error) {
 	rows, err := s.read.QueryContext(ctx, aliasesQuery, jid)
 	if err != nil {
