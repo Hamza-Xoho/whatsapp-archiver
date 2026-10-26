@@ -56,7 +56,8 @@ func (a *alertsFake) Notify(_ context.Context, title, body string) error {
 
 type noQueue struct{}
 
-func (noQueue) Enqueue(context.Context, store.Media) error  { return nil }
+func (noQueue) Decide(context.Context, *store.Media) error  { return nil }
+func (noQueue) Wake()                                       {}
 func (noQueue) OnRetry(context.Context, *events.MediaRetry) {}
 
 type fixedClock struct{}

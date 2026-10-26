@@ -26,7 +26,7 @@ func dumpOf(t *testing.T, received int64) string {
 	}
 	steps := []error{
 		st.UpsertChat(ctx, store.Chat{JID: "c@g.us", Name: "it's"}),
-		st.UpsertParticipant(ctx, store.Participant{JID: "sender@lid", DisplayName: "S"}),
+		st.UpsertParticipant(ctx, store.Participant{JID: "sender@lid", PushName: "S"}),
 		st.InsertHistoryChunk(ctx, store.HistoryChunk{ID: "h", SyncType: "RECENT", ReceivedAt: received}),
 	}
 	_, err := st.InsertIDMapping(ctx, store.IDMapping{LID: "2@lid", PN: "1@s.whatsapp.net", Source: "history", FirstSeen: at})
@@ -55,13 +55,13 @@ func TestDumpRawIsSortedAndOmitsReceiveTimes(t *testing.T) {
 	}
 	want := strings.Join([]string{
 		`INSERT INTO chats(jid,name,type,parent_jid) VALUES('c@g.us','it''s','','');`,
-		`INSERT INTO participants(jid,display_name) VALUES('sender@lid','S');`,
+		`INSERT INTO participants(jid,push_name,contact_name) VALUES('sender@lid','S','');`,
 		`INSERT INTO id_mappings(lid,pn,source) VALUES('2@lid','1@s.whatsapp.net','history');`,
-		`INSERT INTO messages(chat_jid,id,sender_jid,ts,source,text,quoted_id,forwarded,media_type,raw_proto) VALUES('c@g.us','a','sender@lid',10,'live','a','',0,'',X'AB01');`,
-		`INSERT INTO messages(chat_jid,id,sender_jid,ts,source,text,quoted_id,forwarded,media_type,raw_proto) VALUES('c@g.us','b','sender@lid',10,'live','b','',0,'',X'AB01');`,
-		`INSERT INTO message_events(chat_jid,target_id,kind,event_id,sender_jid,ts,new_text,value,raw_proto) VALUES('c@g.us','a','reaction','e','',0,'','+',X'01');`,
+		`INSERT INTO messages(chat_jid,id,sender_jid,from_me,push_name,kind,text,caption,quoted_id,quoted_sender,mentions,forwarded,forward_score,view_once,ephemeral_secs,details,source,ts,raw_proto) VALUES('c@g.us','a','sender@lid',0,'','text','a','','','','[]',0,0,0,0,'{}','live',10,X'AB01');`,
+		`INSERT INTO messages(chat_jid,id,sender_jid,from_me,push_name,kind,text,caption,quoted_id,quoted_sender,mentions,forwarded,forward_score,view_once,ephemeral_secs,details,source,ts,raw_proto) VALUES('c@g.us','b','sender@lid',0,'','text','b','','','','[]',0,0,0,0,'{}','live',10,X'AB01');`,
+		`INSERT INTO message_events(chat_jid,target_id,kind,event_id,source_id,cause,sender_jid,source,ts,new_text,value,raw_proto) VALUES('c@g.us','a','reaction','e','','','','live',0,'','+',X'01');`,
 		`INSERT INTO chat_events(chat_jid,kind,event_id,sender_jid,ts,value,raw_proto) VALUES('c@g.us','app_state','e','',0,'{}',X'');`,
-		`INSERT INTO history_sync_chunks(id,sync_type,chunk_order,progress,conversation_count,message_count,oldest_ts,newest_ts) VALUES('h','RECENT',0,0,0,0,0,0);`,
+		`INSERT INTO history_sync_chunks(id,stage,spool_id,sync_type,chunk_order,progress,conversation_count,message_count,oldest_ts,newest_ts) VALUES('h','imported',0,'RECENT',0,0,0,0,0,0);`,
 	}, "\n") + "\n"
 	if early != want {
 		t.Fatalf("dump:\n%s\nwant:\n%s", early, want)

@@ -63,7 +63,7 @@ func TestWorkerPanicMarksRowFailedAndIsCounted(t *testing.T) {
 func TestPendingAndDownloadingRowsRecoverAfterRestart(t *testing.T) {
 	st := testkit.Store(t)
 	for id, state := range map[string]string{"PEND": "pending", "DOWN": "downloading"} {
-		if err := st.InsertMedia(t.Context(), store.Media{ChatJID: "g@g.us", MessageID: id, Type: "document", State: state, RawProto: []byte(id)}); err != nil {
+		if err := testkit.InsertMedia(t.Context(), st, store.Media{ChatJID: "g@g.us", MessageID: id, Type: "document", State: state, RawProto: []byte(id)}); err != nil {
 			t.Fatal(err)
 		}
 	}

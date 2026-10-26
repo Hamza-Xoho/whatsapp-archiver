@@ -60,7 +60,7 @@ func (r *storageRig) file(t *testing.T, path string, n int) {
 func (r *storageRig) growth(t *testing.T, bytes int64) {
 	t.Helper()
 	m := store.Media{ChatJID: "g@g.us", MessageID: "big", Type: "video", DeclaredSize: bytes * 4, State: "done", UpdatedAt: r.now.Add(-time.Hour).Unix(), Source: "live"}
-	if err := r.st.InsertMedia(t.Context(), m); err != nil {
+	if err := testkit.InsertMedia(t.Context(), r.st, m); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -194,7 +194,7 @@ func TestStorageListsLargestChatsWithNamesAndStopsAtTen(t *testing.T) {
 	r := newStorageRig(t, 100*gib)
 	for i := range 12 {
 		m := store.Media{ChatJID: fmt.Sprintf("c%02d@g.us", i), MessageID: "m", Type: "image", DeclaredSize: int64(i+1) << 20, State: "done", UpdatedAt: r.now.Unix(), Source: "live"}
-		if err := r.st.InsertMedia(t.Context(), m); err != nil {
+		if err := testkit.InsertMedia(t.Context(), r.st, m); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -60,7 +60,7 @@ func TestInsertMessageCostDoesNotGrowWithTableSize(t *testing.T) {
 	}
 	small := insertN("A")
 	if _, err = s.write.ExecContext(ctx, `WITH RECURSIVE c(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM c WHERE i<?)
-INSERT INTO messages(chat_jid,id,ts,received_at,source,raw_proto) SELECT 'seed' || (i%50) || '@g.us','S' || i,i,1,'history',x'78' FROM c`, seed); err != nil {
+INSERT INTO messages(chat_jid,id,kind,ts,received_at,source,raw_proto) SELECT 'seed' || (i%50) || '@g.us','S' || i,'text',i,1,'history',x'78' FROM c`, seed); err != nil {
 		t.Fatal(err)
 	}
 	large := insertN("B")

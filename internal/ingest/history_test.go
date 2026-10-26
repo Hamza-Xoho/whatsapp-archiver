@@ -91,8 +91,8 @@ func TestHistoryEphemeralAndDocumentCaptionAreUnwrapped(t *testing.T) {
 	if err != nil || stored != 2 || skipped != 0 {
 		t.Fatalf("stored=%d skipped=%d err=%v", stored, skipped, err)
 	}
-	got := strings.Join(rows(t, st, "SELECT id,text,media_type FROM messages ORDER BY id"), ",")
-	if got != "DOC|syllabus|document,EPH|disappearing hello|" || len(q.items) != 1 || q.items[0].MessageID != "DOC" {
+	got := strings.Join(rows(t, st, "SELECT id,text,caption,kind FROM messages ORDER BY id"), ",")
+	if got != "DOC||syllabus|document,EPH|disappearing hello||text" || len(q.items) != 1 || q.items[0].MessageID != "DOC" {
 		t.Fatalf("messages=%s media=%+v", got, q.items)
 	}
 }
@@ -122,7 +122,7 @@ func TestHistoryPushNameIsStored(t *testing.T) {
 	if _, _, err := p.ImportHistory(t.Context(), chunk("g@g.us", m)); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(rows(t, st, "SELECT jid,display_name FROM participants"), ","); got != "3@lid|Alice" {
+	if got := strings.Join(rows(t, st, "SELECT jid,push_name FROM participants"), ","); got != "3@lid|Alice" {
 		t.Fatalf("participants=%s", got)
 	}
 }
@@ -292,7 +292,7 @@ func TestEmptyPushNameKeepsKnownDisplayName(t *testing.T) {
 		t.Fatal(err)
 	}
 	p.Handle(messageEvent("g@g.us", "L1", text("live")))
-	if got := strings.Join(rows(t, st, "SELECT jid,display_name FROM participants"), ","); got != "2@lid|Alice" {
+	if got := strings.Join(rows(t, st, "SELECT jid,push_name FROM participants"), ","); got != "2@lid|Alice" {
 		t.Fatalf("participants=%s", got)
 	}
 }

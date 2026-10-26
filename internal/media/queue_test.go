@@ -35,9 +35,7 @@ func TestDocumentDownloads(t *testing.T) {
 	q := NewQueue(t.TempDir(), func() (config.MediaRules, error) {
 		return config.MediaRules{Download: []string{"document"}, Workers: 1}, nil
 	}, nil, st, d, fakeClock{time.Unix(1, 0)}, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
-	if err := q.Enqueue(t.Context(), store.Media{ChatJID: "g@g.us", MessageID: "A", Type: "document", MIME: "application/pdf", State: "pending"}); err != nil {
-		t.Fatal(err)
-	}
+	enqueue(t, q, store.Media{ChatJID: "g@g.us", MessageID: "A", Type: "document", MIME: "application/pdf", State: "pending"})
 	stop := start(t, q)
 	eventually(t, "document done", func() bool { return row(t, st, "g@g.us", "A").State == "done" })
 	stop() // waits for Run to return, so reading the fake afterwards is race-free

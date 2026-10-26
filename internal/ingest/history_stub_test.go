@@ -25,14 +25,14 @@ type rejectingWriter struct {
 	tries int
 }
 
-func (w *rejectingWriter) InsertMessage(ctx context.Context, m store.Message) (bool, error) {
-	if m.ID == w.id {
+func (w *rejectingWriter) Apply(ctx context.Context, b store.Batch) (store.Applied, error) {
+	if b.Message != nil && b.Message.ID == w.id {
 		if w.tries++; w.tries > 100 {
 			panic("a rejected write was retried")
 		}
-		return false, fmt.Errorf("insert message %s: %w", m.ID, store.ErrConstraint)
+		return store.Applied{}, fmt.Errorf("insert message %s: %w", b.Message.ID, store.ErrConstraint)
 	}
-	return w.Store.InsertMessage(ctx, m)
+	return w.Store.Apply(ctx, b)
 }
 
 // stubChunk is one DM conversation [A text, STUB, C text] followed by a second conversation with message D.
@@ -222,14 +222,14 @@ type stuckWriter struct {
 	tries int
 }
 
-func (w *stuckWriter) InsertMessage(ctx context.Context, m store.Message) (bool, error) {
-	if m.ID == w.id {
+func (w *stuckWriter) Apply(ctx context.Context, b store.Batch) (store.Applied, error) {
+	if b.Message != nil && b.Message.ID == w.id {
 		if w.tries++; w.tries > 1000 {
 			panic("write retried after the serve context ended")
 		}
-		return false, errors.New("database is locked")
+		return store.Applied{}, errors.New("database is locked")
 	}
-	return w.Store.InsertMessage(ctx, m)
+	return w.Store.Apply(ctx, b)
 }
 
 // C1: a stopped serve context still ends the chunk: once a failing write is abandoned at shutdown, the later

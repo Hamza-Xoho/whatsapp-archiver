@@ -24,11 +24,11 @@ type runawayWriter struct {
 	limit  int
 }
 
-func (w *runawayWriter) InsertMessage(ctx context.Context, m store.Message) (bool, error) {
+func (w *runawayWriter) Apply(ctx context.Context, b store.Batch) (store.Applied, error) {
 	if w.calls["InsertMessage"] >= w.limit {
 		w.cancel()
 	}
-	return w.flakyWriter.InsertMessage(ctx, m)
+	return w.flakyWriter.Apply(ctx, b)
 }
 
 // constraintWriter fails every message insert the way SQLite reports a constraint violation. cancel (if set)
@@ -39,12 +39,12 @@ type constraintWriter struct {
 	cancel context.CancelFunc
 }
 
-func (w *constraintWriter) InsertMessage(context.Context, store.Message) (bool, error) {
+func (w *constraintWriter) Apply(context.Context, store.Batch) (store.Applied, error) {
 	w.calls++
 	if w.calls >= 20 {
 		w.cancel()
 	}
-	return false, fmt.Errorf("insert message: %w", store.ErrConstraint)
+	return store.Applied{}, fmt.Errorf("insert message: %w", store.ErrConstraint)
 }
 
 // H2: after the retry policy gives up, the write is retried at its longest interval, not in a hot loop.
@@ -134,12 +134,12 @@ type lateConstraintWriter struct {
 	transient int
 }
 
-func (w *lateConstraintWriter) InsertMessage(ctx context.Context, m store.Message) (bool, error) {
+func (w *lateConstraintWriter) Apply(ctx context.Context, b store.Batch) (store.Applied, error) {
 	if w.calls < w.transient {
 		w.calls++
-		return false, errors.New("database is locked")
+		return store.Applied{}, errors.New("database is locked")
 	}
-	return w.constraintWriter.InsertMessage(ctx, m)
+	return w.constraintWriter.Apply(ctx, b)
 }
 
 // B1/H2 carry-over: a constraint error that appears after the retry policy gave up still stops the retry loop.

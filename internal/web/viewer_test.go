@@ -63,7 +63,7 @@ func TestViewerListsReactions(t *testing.T) {
 func TestViewerShowsSenderNameAndChatName(t *testing.T) {
 	u := newChatsUI(t)
 	u.msg(t, "g@g.us", "a", "5551@s.whatsapp.net", 1760000000, "hello")
-	if err := u.st.UpsertParticipant(t.Context(), store.Participant{JID: "5551@s.whatsapp.net", DisplayName: "Aisha"}); err != nil {
+	if err := u.st.UpsertParticipant(t.Context(), store.Participant{JID: "5551@s.whatsapp.net", PushName: "Aisha"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := u.st.UpsertChat(t.Context(), store.Chat{JID: "g@g.us", Name: "Family", Type: "group"}); err != nil {
@@ -133,7 +133,7 @@ func TestViewerEscapesHostileText(t *testing.T) {
 	u := newChatsUI(t)
 	const hostile = "<script>alert(1)</script>"
 	u.msg(t, "g@g.us", "a", "5551@s.whatsapp.net", 1760000000, hostile)
-	if err := u.st.UpsertParticipant(t.Context(), store.Participant{JID: "5551@s.whatsapp.net", DisplayName: hostile}); err != nil {
+	if err := u.st.UpsertParticipant(t.Context(), store.Participant{JID: "5551@s.whatsapp.net", PushName: hostile}); err != nil {
 		t.Fatal(err)
 	}
 	if err := u.st.UpsertChat(t.Context(), store.Chat{JID: "g@g.us", Name: hostile, Type: "group"}); err != nil {

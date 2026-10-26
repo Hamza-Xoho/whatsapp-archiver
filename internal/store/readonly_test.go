@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"whatsapp-archiver/internal/store"
+	"whatsapp-archiver/internal/testkit"
 )
 
 // folderState lists the files in dir with their sizes and modification times.
@@ -154,11 +155,11 @@ func TestChatStatsCountsMediaByState(t *testing.T) {
 	}
 	states := map[string]string{"f1": "failed", "f2": "failed", "e1": "expired", "r1": "retry_requested", "p1": "pending", "d1": "downloading", "ok": "done", "sk": "skipped"}
 	for id, state := range states {
-		if err := s.InsertMedia(ctx, store.Media{ChatJID: "g@g.us", MessageID: id, State: state}); err != nil {
+		if err := testkit.InsertMedia(ctx, s, store.Media{ChatJID: "g@g.us", MessageID: id, State: state}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := s.InsertMedia(ctx, store.Media{ChatJID: "other@g.us", MessageID: "o", State: "failed"}); err != nil {
+	if err := testkit.InsertMedia(ctx, s, store.Media{ChatJID: "other@g.us", MessageID: "o", State: "failed"}); err != nil {
 		t.Fatal(err)
 	}
 	stats, err := s.ChatStats(ctx)

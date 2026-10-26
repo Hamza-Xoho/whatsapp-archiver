@@ -60,10 +60,10 @@ func TestPerChatMediaRuleOverridesGlobal(t *testing.T) {
 	}
 }
 
-// "An error, never an answer": when a rule cannot be read, Enqueue makes no download decision and returns the error,
+// "An error, never an answer": when a rule cannot be read, Decide makes no download decision and returns the error,
 // so Pipeline.persist retries it and alerts. Guessing the global rules would download media of a chat set to
 // download nothing, seen under its other JID form.
-func TestEnqueueRuleReadErrorMakesNoDecision(t *testing.T) {
+func TestDecideRuleReadErrorMakesNoDecision(t *testing.T) {
 	boom := errors.New("database is locked")
 	image := config.MediaRules{Download: []string{"image"}}
 	cases := map[string]struct {
@@ -77,9 +77,13 @@ func TestEnqueueRuleReadErrorMakesNoDecision(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			st := testkit.Store(t)
 			q := NewQueue(t.TempDir(), c.global, c.perChat, st, &fakeDown{}, fakeClock{time.Unix(1, 0)}, quietLog(), nil)
-			err := q.Enqueue(t.Context(), store.Media{ChatJID: "1234@lid", MessageID: "M", Type: "image", Source: "live"})
+			m := store.Media{ChatJID: "1234@lid", MessageID: "M", Type: "image", Source: "live"}
+			err := q.Decide(t.Context(), &m)
 			if !errors.Is(err, boom) {
-				t.Fatalf("Enqueue err = %v, want the read error", err)
+				t.Fatalf("Decide err = %v, want the read error", err)
+			}
+			if m.State != "" {
+				t.Fatalf("a decision was made without a rule: state %q", m.State)
 			}
 			if _, err = st.MediaByID(t.Context(), "1234@lid", "M"); !errors.Is(err, sql.ErrNoRows) {
 				t.Fatalf("a media row was written without a rule: err=%v", err)

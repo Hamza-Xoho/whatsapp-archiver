@@ -12,6 +12,7 @@ import (
 	"modernc.org/sqlite"
 
 	"whatsapp-archiver/internal/store"
+	"whatsapp-archiver/internal/testkit"
 )
 
 func TestInsertMessageIsIdempotent(t *testing.T) {
@@ -218,7 +219,7 @@ func TestUpsertAndMediaConstraintErrorsAreClassified(t *testing.T) {
 			return s.UpsertParticipant(context.Background(), store.Participant{JID: "1@lid"})
 		},
 		"media": func(s *store.Store) error {
-			return s.InsertMedia(context.Background(), store.Media{ChatJID: "g@g.us", MessageID: "A", State: "pending"})
+			return testkit.InsertMedia(context.Background(), s, store.Media{ChatJID: "g@g.us", MessageID: "A", State: "pending"})
 		},
 	}
 	for table, write := range writes {

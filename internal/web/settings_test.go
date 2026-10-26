@@ -16,6 +16,7 @@ import (
 	"whatsapp-archiver/internal/config"
 	"whatsapp-archiver/internal/media"
 	"whatsapp-archiver/internal/store"
+	"whatsapp-archiver/internal/testkit"
 	"whatsapp-archiver/internal/wa"
 )
 
@@ -50,7 +51,7 @@ func mediaForm(cap string) url.Values {
 	return url.Values{"download": {"image", "video"}, "skip": {"sticker"}, "video_max_mb": {cap}, "workers": {"2"}, "retry_requests_per_minute": {"10"}}
 }
 
-// A saved media rule decides the next item: the queue reads the store at each Enqueue, as serve's live settings do.
+// A saved media rule decides the next item: the queue reads the store at each Decide, as serve's live settings do.
 func TestSettingsMediaSaveAppliesToNextDownloadDecision(t *testing.T) {
 	u := settingsUI(t)
 	ctx := t.Context()
@@ -64,14 +65,18 @@ func TestSettingsMediaSaveAppliesToNextDownloadDecision(t *testing.T) {
 	q := media.NewQueue(t.TempDir(), global, nil, u.st, fakeDown{}, fixedClock{}, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
 	enqueue := func(id string) store.Media {
 		t.Helper()
-		if err := q.Enqueue(ctx, store.Media{ChatJID: "g@g.us", MessageID: id, Type: "video", DeclaredSize: 150 << 20, RawProto: []byte(id)}); err != nil {
+		m := store.Media{ChatJID: "g@g.us", MessageID: id, Type: "video", DeclaredSize: 150 << 20, RawProto: []byte(id)}
+		if err := q.Decide(ctx, &m); err != nil {
 			t.Fatal(err)
 		}
-		m, err := u.st.MediaByID(ctx, "g@g.us", id)
+		if err := testkit.InsertMedia(ctx, u.st, m); err != nil {
+			t.Fatal(err)
+		}
+		got, err := u.st.MediaByID(ctx, "g@g.us", id)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return m
+		return got
 	}
 	if m := enqueue("BEFORE"); m.State != "skipped" || m.Reason != "over 100 MB cap" {
 		t.Fatalf("before the change: %+v", m)

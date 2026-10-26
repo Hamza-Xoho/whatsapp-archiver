@@ -14,14 +14,14 @@ import (
 // rejectingStore is the archive with every message write rejected by a constraint.
 type rejectingStore struct{ *store.Store }
 
-func (rejectingStore) InsertMessage(context.Context, store.Message) (bool, error) {
-	return false, fmt.Errorf("insert message: %w", store.ErrConstraint)
+func (rejectingStore) Apply(context.Context, store.Batch) (store.Applied, error) {
+	return store.Applied{}, fmt.Errorf("insert message: %w", store.ErrConstraint)
 }
 
 // panickingStore is the archive with a message write that panics (recovered by the handler guard).
 type panickingStore struct{ *store.Store }
 
-func (panickingStore) InsertMessage(context.Context, store.Message) (bool, error) { panic("boom") }
+func (panickingStore) Apply(context.Context, store.Batch) (store.Applied, error) { panic("boom") }
 
 // H14 M1: a replay during which writes failed or a panic was recovered exits non-zero and says so; a short result is
 // never reported as a success.

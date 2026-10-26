@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"whatsapp-archiver/internal/store"
+	"whatsapp-archiver/internal/testkit"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden files in testdata")
@@ -79,9 +80,9 @@ func seedFolder(t *testing.T) string {
 		mustDo(t, err)
 	}
 	for id, state := range map[string]string{"f1": "failed", "e1": "expired", "r1": "retry_requested", "p1": "pending", "d1": "downloading", "ok": "done"} {
-		mustDo(t, st.InsertMedia(ctx, store.Media{ChatJID: familyJID, MessageID: id, Source: "live", State: state}))
+		mustDo(t, testkit.InsertMedia(ctx, st, store.Media{ChatJID: familyJID, MessageID: id, Source: "live", State: state}))
 	}
-	mustDo(t, st.InsertMedia(ctx, store.Media{ChatJID: laylaPN, MessageID: "m1", Source: "history", State: "failed"}))
+	mustDo(t, testkit.InsertMedia(ctx, st, store.Media{ChatJID: laylaPN, MessageID: "m1", Source: "history", State: "failed"}))
 	for _, h := range []store.HistoryChunk{{ID: "h1", SyncType: "FULL", Progress: 20, ReceivedAt: utc("2026-10-10T08:05:00Z")}, {ID: "h2", SyncType: "FULL", Progress: 60, ReceivedAt: utc("2026-10-10T08:20:00Z")}, {ID: "h3", SyncType: "FULL", Progress: 100, ReceivedAt: utc("2026-10-10T09:00:00Z")}} {
 		mustDo(t, st.InsertHistoryChunk(ctx, h))
 	}

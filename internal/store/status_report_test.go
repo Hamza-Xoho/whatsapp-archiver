@@ -9,7 +9,7 @@ import (
 )
 
 // legacyOldestHistoryQuery is the second messages_resolved query of HistoryCoverage before the one-pass report.
-const legacyOldestHistoryQuery = `SELECT canonical_jid,MIN(ts) FROM messages_resolved WHERE source='history' GROUP BY canonical_jid`
+const legacyOldestHistoryQuery = legacyViews + `SELECT canonical_jid,MIN(ts) FROM messages_resolved WHERE source='history' GROUP BY canonical_jid`
 
 // TestStatusReportScansMessagesOnce pins the cost of `archiver status`: the query behind StatusReport reads the
 // messages table once. The message_keys CTE of ChatStats and the oldest-history query of HistoryCoverage each used

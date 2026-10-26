@@ -136,7 +136,11 @@ func enqueue(t *testing.T, q *Queue, m store.Media) {
 	if m.State == "" {
 		m.State = "pending"
 	}
-	if err := q.Enqueue(t.Context(), m); err != nil {
+	if err := q.Decide(t.Context(), &m); err != nil {
 		t.Fatal(err)
 	}
+	if err := testkit.InsertMedia(t.Context(), q.store, m); err != nil {
+		t.Fatal(err)
+	}
+	q.Wake()
 }

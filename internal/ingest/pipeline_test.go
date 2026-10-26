@@ -17,10 +17,11 @@ import (
 
 type queueFake struct{ items []store.Media }
 
-func (q *queueFake) Enqueue(_ context.Context, m store.Media) error {
-	q.items = append(q.items, m)
+func (q *queueFake) Decide(_ context.Context, m *store.Media) error {
+	q.items = append(q.items, *m)
 	return nil
 }
+func (q *queueFake) Wake()                                       {}
 func (q *queueFake) OnRetry(context.Context, *events.MediaRetry) {}
 
 type healthFake struct {

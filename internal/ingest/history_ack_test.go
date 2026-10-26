@@ -11,18 +11,20 @@ import (
 	"whatsapp-archiver/internal/testkit"
 )
 
-// cutWriter is the real store whose InsertMessage fails from call number `from` on, like a store that stops answering
+// cutWriter is the real store whose message writes fail from call number `from` on, like a store that stops answering
 // in the middle of a chunk.
 type cutWriter struct {
 	*store.Store
 	from, calls int
 }
 
-func (w *cutWriter) InsertMessage(ctx context.Context, m store.Message) (bool, error) {
-	if w.calls++; w.calls >= w.from {
-		return false, errors.New("database is locked")
+func (w *cutWriter) Apply(ctx context.Context, b store.Batch) (store.Applied, error) {
+	if b.Message != nil {
+		if w.calls++; w.calls >= w.from {
+			return store.Applied{}, errors.New("database is locked")
+		}
 	}
-	return w.Store.InsertMessage(ctx, m)
+	return w.Store.Apply(ctx, b)
 }
 
 func threeMessageChunk() *events.HistorySync {
@@ -80,8 +82,8 @@ func TestNoHistoryLossAcrossInjectedShutdown(t *testing.T) {
 			t.Fatalf("redelivery %d: %v", i+1, err)
 		}
 	}
-	if got := rows(t, reopened, "SELECT count(*) FROM messages_resolved"); len(got) != 1 || got[0] != "3" {
-		t.Fatalf("messages_resolved=%v, want 3", got)
+	if got := rows(t, reopened, "SELECT count(DISTINCT id) FROM messages"); len(got) != 1 || got[0] != "3" {
+		t.Fatalf("distinct messages=%v, want 3", got)
 	}
 	if n := chunkCount(t, reopened); n != 1 {
 		t.Fatalf("ledger has %d chunks, want 1", n)

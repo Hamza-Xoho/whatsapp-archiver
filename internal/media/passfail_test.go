@@ -15,7 +15,7 @@ import (
 // instead of reading the same expired row again and again; a later wake or tick tries it once more.
 func TestRequestPassEndsWhenFailingARowCannotBeSaved(t *testing.T) {
 	st := testkit.Store(t)
-	if err := st.InsertMedia(t.Context(), store.Media{ChatJID: "123@g.us", MessageID: "STUCK", SenderJID: "5@lid", Type: "image", State: "expired", RetryDirectPath: "new", RawProto: []byte("x")}); err != nil {
+	if err := testkit.InsertMedia(t.Context(), st, store.Media{ChatJID: "123@g.us", MessageID: "STUCK", SenderJID: "5@lid", Type: "image", State: "expired", RetryDirectPath: "new", RawProto: []byte("x")}); err != nil {
 		t.Fatal(err)
 	}
 	// Make every write that sets a row failed abort, as a full disk would.

@@ -26,7 +26,7 @@ func TestUsageSumsDoneMediaByChatAndType(t *testing.T) {
 		{ChatJID: "a@g.us", MessageID: "5", Type: "image", DeclaredSize: 5000, State: "pending", UpdatedAt: usageNow.Unix()},
 		{ChatJID: "a@g.us", MessageID: "6", Type: "video", DeclaredSize: 6000, State: "skipped", UpdatedAt: usageNow.Unix()},
 	} {
-		if err := s.InsertMedia(ctx, m); err != nil {
+		if err := testkit.InsertMedia(ctx, s, m); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -49,7 +49,7 @@ func TestUsageSumsDoneMediaByChatAndType(t *testing.T) {
 func TestUsageGrowthAddsDatabaseGrowthFromRecentMessages(t *testing.T) {
 	s := open(t)
 	ctx := t.Context()
-	if err := s.InsertMedia(ctx, doneMedia("a@g.us", "1", "image", 400, usageNow.Add(-time.Hour))); err != nil {
+	if err := testkit.InsertMedia(ctx, s, doneMedia("a@g.us", "1", "image", 400, usageNow.Add(-time.Hour))); err != nil {
 		t.Fatal(err)
 	}
 	// Four weeks of messages older than the window add nothing.

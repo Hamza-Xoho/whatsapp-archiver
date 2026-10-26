@@ -61,17 +61,21 @@ func (w *flakyWriter) InsertIDMapping(ctx context.Context, m store.IDMapping) (b
 	}
 	return w.Store.InsertIDMapping(ctx, m)
 }
-func (w *flakyWriter) InsertMessage(ctx context.Context, m store.Message) (bool, error) {
-	if err := w.fail("InsertMessage"); err != nil {
-		return false, err
+
+// Apply counts the same calls the writer had before V1 (one UpsertChat for a batch with a chat, one InsertMessage for
+// a batch with a message), in the same order, so the failure injection and the call counts keep their meaning.
+func (w *flakyWriter) Apply(ctx context.Context, b store.Batch) (store.Applied, error) {
+	if b.Chat != nil {
+		if err := w.fail("UpsertChat"); err != nil {
+			return store.Applied{}, err
+		}
 	}
-	return w.Store.InsertMessage(ctx, m)
-}
-func (w *flakyWriter) UpsertChat(ctx context.Context, c store.Chat) error {
-	if err := w.fail("UpsertChat"); err != nil {
-		return err
+	if b.Message != nil {
+		if err := w.fail("InsertMessage"); err != nil {
+			return store.Applied{}, err
+		}
 	}
-	return w.Store.UpsertChat(ctx, c)
+	return w.Store.Apply(ctx, b)
 }
 func (w *flakyWriter) InsertHistoryChunk(ctx context.Context, h store.HistoryChunk) error {
 	if err := w.fail("InsertHistoryChunk"); err != nil {
@@ -80,19 +84,19 @@ func (w *flakyWriter) InsertHistoryChunk(ctx context.Context, h store.HistoryChu
 	return w.Store.InsertHistoryChunk(ctx, h)
 }
 
-// flakyQueue fails the first `failures` Enqueue calls, then delegates to a recording queue.
+// flakyQueue fails the first `failures` Decide calls (the media rules cannot be read), then delegates to a recording queue.
 type flakyQueue struct {
 	queueFake
 	failures, calls int
 }
 
-func (q *flakyQueue) Enqueue(ctx context.Context, m store.Media) error {
+func (q *flakyQueue) Decide(ctx context.Context, m *store.Media) error {
 	q.calls++
 	if q.failures > 0 {
 		q.failures--
 		return errors.New("database is locked")
 	}
-	return q.queueFake.Enqueue(ctx, m)
+	return q.queueFake.Decide(ctx, m)
 }
 
 func quiet() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }

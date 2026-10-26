@@ -68,7 +68,7 @@ func TestExpiredRowAtAttemptCapFailsWithoutRequest(t *testing.T) {
 	st := testkit.Store(t)
 	clock := newClock()
 	d := expiredDown()
-	if err := st.InsertMedia(t.Context(), store.Media{ChatJID: "123@g.us", MessageID: "CAP", SenderJID: "5@lid", Type: "image", State: "expired", Attempts: maxAttempts, RawProto: []byte("x")}); err != nil {
+	if err := testkit.InsertMedia(t.Context(), st, store.Media{ChatJID: "123@g.us", MessageID: "CAP", SenderJID: "5@lid", Type: "image", State: "expired", Attempts: maxAttempts, RawProto: []byte("x")}); err != nil {
 		t.Fatal(err)
 	}
 	q := newTestQueue(t, st, d, config.MediaRules{Download: []string{"image"}, Workers: 1}, clock, nil)

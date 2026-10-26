@@ -23,12 +23,12 @@ type panicWriter struct {
 	panics int
 }
 
-func (w *panicWriter) InsertMessage(ctx context.Context, m store.Message) (bool, error) {
-	if w.panics > 0 {
+func (w *panicWriter) Apply(ctx context.Context, b store.Batch) (store.Applied, error) {
+	if w.panics > 0 && b.Message != nil {
 		w.panics--
 		panic("boom in writer")
 	}
-	return w.Store.InsertMessage(ctx, m)
+	return w.Store.Apply(ctx, b)
 }
 
 // Table 1 / RF10: a panic while handling an event is recovered at the handler boundary, reported once as
@@ -255,14 +255,14 @@ func TestDocumentAudioAndVideoMedia(t *testing.T) {
 		text string
 	}{
 		{"document", &waE2E.Message{DocumentMessage: &waE2E.DocumentMessage{Mimetype: proto.String("application/pdf"), Caption: proto.String("notes")}}, "document", "application/pdf", "notes"},
-		{"voice note", &waE2E.Message{AudioMessage: &waE2E.AudioMessage{Mimetype: proto.String("audio/ogg; codecs=opus"), PTT: proto.Bool(true)}}, "audio", "audio/ogg; codecs=opus", ""},
+		{"voice note", &waE2E.Message{AudioMessage: &waE2E.AudioMessage{Mimetype: proto.String("audio/ogg; codecs=opus"), PTT: proto.Bool(true)}}, "voice", "audio/ogg; codecs=opus", ""},
 		{"audio", &waE2E.Message{AudioMessage: &waE2E.AudioMessage{Mimetype: proto.String("audio/mpeg")}}, "audio", "audio/mpeg", ""},
 		{"video", &waE2E.Message{VideoMessage: &waE2E.VideoMessage{Mimetype: proto.String("video/mp4"), Caption: proto.String("clip")}}, "video", "video/mp4", "clip"},
 		{"gif", &waE2E.Message{VideoMessage: &waE2E.VideoMessage{Mimetype: proto.String("video/mp4"), GifPlayback: proto.Bool(true)}}, "gif", "video/mp4", ""},
 	}
 	for _, c := range cases {
 		r := ingest.FromMessage(messageEvent("1@lid", "M", c.msg), "live", time.Unix(20, 0))
-		if r.Media == nil || r.Media.Type != c.kind || r.Media.MIME != c.mime || r.Message == nil || r.Message.MediaType != c.kind || r.Message.Text != c.text {
+		if r.Media == nil || r.Media.Type != c.kind || r.Media.MIME != c.mime || r.Message == nil || r.Message.Kind != c.kind || r.Message.Caption != c.text || r.Message.Text != "" {
 			t.Fatalf("%s: media=%+v message=%+v", c.name, r.Media, r.Message)
 		}
 	}
@@ -277,7 +277,7 @@ func TestHistoryViewOnceIsUnwrapped(t *testing.T) {
 	if stored, _, err := p.ImportHistory(t.Context(), chunk("g@g.us", webMsg("ONCE", "3@lid", false, once))); err != nil || stored != 1 {
 		t.Fatalf("stored=%d err=%v", stored, err)
 	}
-	if got := strings.Join(rows(t, st, "SELECT id,text,media_type FROM messages"), ","); got != "ONCE|look|image" || len(q.items) != 1 || q.items[0].Type != "image" {
+	if got := strings.Join(rows(t, st, "SELECT id,caption,kind FROM messages"), ","); got != "ONCE|look|image" || len(q.items) != 1 || q.items[0].Type != "image" {
 		t.Fatalf("messages=%s media=%+v", got, q.items)
 	}
 }

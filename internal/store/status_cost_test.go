@@ -11,12 +11,22 @@ import (
 
 // legacyChatStatsQuery is ChatStats as it was before the status-cost fix, copied here as the oracle that the rewritten
 // query must agree with row for row. It rescans media, open gaps and the alias view once per chat.
-const legacyChatStatsQuery = `SELECT m.canonical_jid,COALESCE(MAX(c.name),''),COUNT(*),MIN(m.ts),MAX(m.ts),
+const legacyChatStatsQuery = legacyViews + `SELECT m.canonical_jid,COALESCE(MAX(c.name),''),COUNT(*),MIN(m.ts),MAX(m.ts),
  (SELECT COUNT(*) FROM media x LEFT JOIN chat_aliases a ON a.alias_jid=x.chat_jid WHERE COALESCE(a.canonical_jid,x.chat_jid)=m.canonical_jid AND x.state IN ('failed')),
  (SELECT COUNT(*) FROM media x LEFT JOIN chat_aliases a ON a.alias_jid=x.chat_jid WHERE COALESCE(a.canonical_jid,x.chat_jid)=m.canonical_jid AND x.state IN ('expired','retry_requested')),
  (SELECT COUNT(*) FROM media x LEFT JOIN chat_aliases a ON a.alias_jid=x.chat_jid WHERE COALESCE(a.canonical_jid,x.chat_jid)=m.canonical_jid AND x.state IN ('pending','downloading')),
  (SELECT COUNT(*) FROM open_gaps g LEFT JOIN chat_aliases a ON a.alias_jid=g.chat_jid WHERE COALESCE(a.canonical_jid,g.chat_jid)=m.canonical_jid)
  FROM messages_resolved m LEFT JOIN chats c ON c.jid=m.chat_jid GROUP BY m.canonical_jid ORDER BY m.canonical_jid`
+
+// legacyViews recreates the dropped chat_aliases and messages_resolved views (ADR-35) as CTEs over chat_canonical, so
+// the old queries can still serve as oracles: same columns, same duplicate rank, now fed by the derived table.
+const legacyViews = `WITH chat_aliases AS (SELECT alias AS alias_jid, canonical AS canonical_jid FROM chat_canonical),
+messages_resolved AS (SELECT * FROM (
+  SELECT m.*, COALESCE(a.canonical_jid, m.chat_jid) AS canonical_jid,
+         ROW_NUMBER() OVER (PARTITION BY COALESCE(a.canonical_jid, m.chat_jid), m.id ORDER BY m.received_at, m.chat_jid) AS duplicate_rank
+  FROM messages m LEFT JOIN chat_aliases a ON a.alias_jid = m.chat_jid
+) WHERE duplicate_rank = 1)
+`
 
 // seedStatsArchive writes an archive of msgs messages over chats chats through the store's write methods. Every tenth
 // chat also has a LID: some messages arrive under either alias, and the alias is learned after the messages, so the
@@ -77,7 +87,7 @@ func seedStatsArchive(t *testing.T, chats, msgs int) *Store {
 	states := []string{"done", "failed", "expired", "retry_requested", "pending", "downloading", "skipped"}
 	for n := 0; n < msgs/5; n++ {
 		r := refs[n*5]
-		if err := s.InsertMedia(ctx, Media{ChatJID: r.chat, MessageID: r.id, SenderJID: "s@lid", Source: "live", Type: "image", MIME: "image/jpeg", DeclaredSize: 10, Path: "p", State: states[n%len(states)], Attempts: 1, UpdatedAt: 1, MessageTimestamp: int64(n * 5)}); err != nil {
+		if _, err := s.Apply(ctx, Batch{Media: &Media{ChatJID: r.chat, MessageID: r.id, SenderJID: "s@lid", Source: "live", Type: "image", MIME: "image/jpeg", DeclaredSize: 10, Path: "p", State: states[n%len(states)], Attempts: 1, UpdatedAt: 1, MessageTimestamp: int64(n * 5)}}); err != nil {
 			t.Fatal(err)
 		}
 	}

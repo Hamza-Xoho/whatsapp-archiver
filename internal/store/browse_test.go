@@ -11,6 +11,7 @@ import (
 
 	"whatsapp-archiver/internal/config"
 	"whatsapp-archiver/internal/store"
+	"whatsapp-archiver/internal/testkit"
 )
 
 func browseMsg(t *testing.T, s *store.Store, chat, id, sender string, ts int64, text string) {
@@ -51,7 +52,7 @@ func TestChatListNamesRulesAndFilter(t *testing.T) {
 	if err := s.UpsertChat(ctx, store.Chat{JID: "120363001@g.us", Name: "Family", Type: "group"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.UpsertParticipant(ctx, store.Participant{JID: "5551@s.whatsapp.net", DisplayName: "Aisha"}); err != nil {
+	if err := s.UpsertParticipant(ctx, store.Participant{JID: "5551@s.whatsapp.net", PushName: "Aisha"}); err != nil {
 		t.Fatal(err)
 	}
 	media := &config.MediaRules{Download: []string{}}
@@ -169,7 +170,7 @@ func TestChatPageResolvesAliasesAndEvents(t *testing.T) {
 	if _, err := s.InsertIDMapping(ctx, store.IDMapping{LID: "77@lid", PN: "9665@s.whatsapp.net", Source: "test", FirstSeen: time.Unix(1, 0)}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.UpsertParticipant(ctx, store.Participant{JID: "9665@s.whatsapp.net", DisplayName: "Omar"}); err != nil {
+	if err := s.UpsertParticipant(ctx, store.Participant{JID: "9665@s.whatsapp.net", PushName: "Omar"}); err != nil {
 		t.Fatal(err)
 	}
 	browseMsg(t, s, "77@lid", "a", "9665@s.whatsapp.net", 10, "original")
@@ -180,7 +181,7 @@ func TestChatPageResolvesAliasesAndEvents(t *testing.T) {
 	browseEvent(t, s, store.MessageEvent{ChatJID: "77@lid", TargetID: "a", Kind: "reaction", EventID: "x1", SenderJID: "p1", Value: "👍", Timestamp: 13})
 	browseEvent(t, s, store.MessageEvent{ChatJID: "77@lid", TargetID: "a", Kind: "reaction", EventID: "x2", SenderJID: "p2", Value: "😂", Timestamp: 14})
 	browseEvent(t, s, store.MessageEvent{ChatJID: "77@lid", TargetID: "a", Kind: "reaction", EventID: "x3", SenderJID: "p2", Value: "", Timestamp: 15})
-	if err := s.InsertMedia(ctx, store.Media{ChatJID: "9665@s.whatsapp.net", MessageID: "b", Type: "image", State: "done"}); err != nil {
+	if err := testkit.InsertMedia(ctx, s, store.Media{ChatJID: "9665@s.whatsapp.net", MessageID: "b", Type: "image", State: "done"}); err != nil {
 		t.Fatal(err)
 	}
 	page, err := s.ChatPage(ctx, "77@lid", 0, "", 10)
@@ -207,7 +208,7 @@ func TestTraceListsEventsMediaAndGap(t *testing.T) {
 	ctx := context.Background()
 	browseMsg(t, s, "g@g.us", "a", "1@lid", 10, "hello")
 	browseEvent(t, s, store.MessageEvent{ChatJID: "g@g.us", TargetID: "a", Kind: "edit", EventID: "e1", NewText: "hi", Timestamp: 11})
-	if err := s.InsertMedia(ctx, store.Media{ChatJID: "g@g.us", MessageID: "a", Type: "image", State: "pending"}); err != nil {
+	if err := testkit.InsertMedia(ctx, s, store.Media{ChatJID: "g@g.us", MessageID: "a", Type: "image", State: "pending"}); err != nil {
 		t.Fatal(err)
 	}
 	tr, err := s.Trace(ctx, "g@g.us", "a")

@@ -10,11 +10,12 @@ import (
 	"testing"
 
 	"whatsapp-archiver/internal/store"
+	"whatsapp-archiver/internal/testkit"
 )
 
 func (u *chatsUI) mediaRow(t *testing.T, chat, id, state, mime, path string) {
 	t.Helper()
-	if err := u.st.InsertMedia(t.Context(), store.Media{ChatJID: chat, MessageID: id, Type: "image", MIME: mime, State: state, Path: path}); err != nil {
+	if err := testkit.InsertMedia(t.Context(), u.st, store.Media{ChatJID: chat, MessageID: id, Type: "image", MIME: mime, State: state, Path: path}); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -19,11 +19,11 @@ type capWriter struct {
 	limit int
 }
 
-func (w *capWriter) InsertMessage(ctx context.Context, m store.Message) (bool, error) {
+func (w *capWriter) Apply(ctx context.Context, b store.Batch) (store.Applied, error) {
 	if w.calls["InsertMessage"] >= w.limit {
 		panic("write retried after the serve context ended")
 	}
-	return w.flakyWriter.InsertMessage(ctx, m)
+	return w.flakyWriter.Apply(ctx, b)
 }
 
 // M5 / B1: a write that keeps failing is retried until the pipeline's context ends; Handle then returns, the event

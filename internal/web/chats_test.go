@@ -76,7 +76,7 @@ func postForm(t *testing.T, h http.Handler, path string, form url.Values) (strin
 func TestChatListUsesParticipantNameForDirectChats(t *testing.T) {
 	u := newChatsUI(t)
 	u.message(t, "966500000001@s.whatsapp.net", "a")
-	if err := u.st.UpsertParticipant(t.Context(), store.Participant{JID: "966500000001@s.whatsapp.net", DisplayName: "Aisha"}); err != nil {
+	if err := u.st.UpsertParticipant(t.Context(), store.Participant{JID: "966500000001@s.whatsapp.net", PushName: "Aisha"}); err != nil {
 		t.Fatal(err)
 	}
 	got := u.page(t, "/chats")
@@ -199,7 +199,8 @@ func TestRuleFormRejectsBadInput(t *testing.T) {
 
 type nopQueue struct{}
 
-func (nopQueue) Enqueue(context.Context, store.Media) error  { return nil }
+func (nopQueue) Decide(context.Context, *store.Media) error  { return nil }
+func (nopQueue) Wake()                                       {}
 func (nopQueue) OnRetry(context.Context, *events.MediaRetry) {}
 
 type nopHealth struct{}
