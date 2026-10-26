@@ -78,7 +78,7 @@ func TestMentionsAreKeptAsReceived(t *testing.T) {
 
 // Arabic text with diacritics, tatweel and an RTL mention is stored byte for byte; folding is the search index's job.
 func TestArabicTextIsStoredVerbatim(t *testing.T) {
-	body := "السَّلامُ عَلَيْكُمْ يا @٢٠٠٠٠٠٠٠٠٠٠١ في المجمـــوعة‏"
+	body := "السَّلامُ عَلَيْكُمْ يا @٢٠٠٠٠٠٠٠٠٠٠١ في المجمـــوعة\u200f"
 	m := normalized(extended(body, &waE2E.ContextInfo{MentionedJID: []string{"20000000001@lid"}}))
 	if m.Text != body || m.Kind != "text" || !slices.Equal(m.Mentions, []string{"20000000001@lid"}) {
 		t.Fatalf("text=%q mentions=%v", m.Text, m.Mentions)

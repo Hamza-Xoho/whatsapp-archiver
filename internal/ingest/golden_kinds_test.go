@@ -56,7 +56,7 @@ func kindScenarios() map[string][]any {
 		"kind-text": {
 			alice("K-TEXT-1", 60, &waE2E.Message{Conversation: proto.String("Plain text")}),
 			// Arabic with diacritics, tatweel and an RTL mark, mentioning Bob by LID and Carol by phone number.
-			bob("K-TEXT-2", 120, &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{Text: proto.String("السَّلامُ عَلَيْكُمْ يا @20000000001 و@10000000003 في المجمـــوعة‏"),
+			bob("K-TEXT-2", 120, &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{Text: proto.String("السَّلامُ عَلَيْكُمْ يا @20000000001 و@10000000003 في المجمـــوعة\u200f"),
 				ContextInfo: &waE2E.ContextInfo{MentionedJID: []string{aliceLID, carolPN}}}}),
 			alice("K-TEXT-3", 180, &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{Text: proto.String("A reply"), ContextInfo: &waE2E.ContextInfo{StanzaID: proto.String("K-TEXT-2"),
 				Participant: proto.String(bobLID), QuotedMessage: &waE2E.Message{Conversation: proto.String("quoted body is not stored apart")}}}}),
