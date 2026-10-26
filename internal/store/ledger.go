@@ -37,6 +37,15 @@ func (s *Store) InsertHistoryChunk(ctx context.Context, h HistoryChunk) error {
 	return err
 }
 
+// Blob formats of history_spool.blob_format.
+const (
+	BlobZlib = "zlib"
+	BlobRaw  = "raw"
+)
+
+// SpoolMetaDenylist lists the JSON keys SpoolReceive refuses in Meta (RED STUB: empty).
+func SpoolMetaDenylist() []string { return nil }
+
 // Spool is a row of history_spool: a downloaded, decrypted, still compressed history blob and the non-key fields of
 // its notification (R9). The importer works through the rows with ImportedAt zero.
 type Spool struct {

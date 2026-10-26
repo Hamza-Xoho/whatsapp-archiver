@@ -288,9 +288,10 @@ func TestAliasesUnionForPhoneWithSeveralLIDs(t *testing.T) {
 	if err != nil || len(got) != 2 || got[0] != "1@lid" || got[1] != "2@lid" {
 		t.Fatalf("aliases of the phone=%v err=%v", got, err)
 	}
-	// From either lid: the phone number and the other lid's phone numbers, never the lid itself.
+	// From either lid: every other form of the same chat (chat_canonical), never the lid itself. Hamza approved on
+	// 26 Oct 2026: switch Aliases to chat_canonical, H1 assertion becomes [1@lid, 9@s.whatsapp.net].
 	got, err = s.Aliases(ctx, "2@lid")
-	if err != nil || len(got) != 1 || got[0] != "9@s.whatsapp.net" {
+	if err != nil || len(got) != 2 || got[0] != "1@lid" || got[1] != "9@s.whatsapp.net" {
 		t.Fatalf("aliases of a lid=%v err=%v", got, err)
 	}
 }
