@@ -12,14 +12,17 @@ import (
 // I3 (Hamza, option b, 26 Oct 2026): the history spool is in the backed-up archive.db, so its Meta JSON must never
 // carry key material. SpoolReceive refuses such a Meta; it does not parse the blob.
 
-// The denylist is pinned: a change to it must change this test too, so it is a deliberate decision.
+// The denylist is pinned: a change to it must change this test too, so it is a deliberate decision. Key names are
+// normalised (lower case, no "_" or "-"). A name that contains one of the words is refused, unless it ends in
+// "timestamp" (tcTokenTimestamp); the exact names are refused as whole names.
 func TestSpoolMetaDenylistIsPinned(t *testing.T) {
-	want := []string{
-		"botmessagesecret", "enchandle", "enckey", "fileencsha256", "filesha256", "key", "keydata", "mediakey",
-		"messagesecret", "passphrase", "password", "privatekey", "secret", "tctoken", "token",
+	words := []string{"enckey", "mediakey", "password", "privatekey", "secret", "token"}
+	names := []string{"enchandle", "fileencsha256", "filesha256", "initialhistbootstrapinlinepayload", "key", "keydata", "passphrase"}
+	if got := store.SpoolMetaDenylist(); !slices.Equal(got, words) {
+		t.Fatalf("denylist words = %v, want %v", got, words)
 	}
-	if got := store.SpoolMetaDenylist(); !slices.Equal(got, want) {
-		t.Fatalf("denylist = %v, want %v", got, want)
+	if got := store.SpoolMetaDenyNames(); !slices.Equal(got, names) {
+		t.Fatalf("denylist names = %v, want %v", got, names)
 	}
 }
 
@@ -38,6 +41,15 @@ func TestSpoolReceiveRejectsKeyMaterialInMeta(t *testing.T) {
 		"even with a null value": `{"secret":null}`,
 		"not json":               `{"size":`,
 		"not an object":          `["mediaKey"]`,
+		"secret as a substring":  `{"messageSecretProof":"x"}`,
+		"bot secret":             `{"botMessageSecret":"x"}`,
+		"token as a substring":   `{"accessTokens":"x"}`,
+		"tc token":               `{"tcToken":"x"}`,
+		"token with an expiry":   `{"sessionTokenExpiry":1}`,
+		"private key":            `{"myPrivateKeyBytes":"x"}`,
+		"enc key":                `{"pollEncKey":"x"}`,
+		"inline payload":         `{"initialHistBootstrapInlinePayload":"x"}`,
+		"passphrase":             `{"passphrase":"x"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			s := open(t)
@@ -54,12 +66,12 @@ func TestSpoolReceiveRejectsKeyMaterialInMeta(t *testing.T) {
 	}
 }
 
-// Names that merely contain a denylisted word are fine, and so are directPath and the sizes: the denylist matches whole
-// key names (case-insensitively, ignoring _ and -), not substrings, and never looks at values.
+// Names that merely contain the letters of a bare name (keyboard, monkey), a token timestamp, directPath and the sizes
+// are fine; values are never inspected (a text that says mediaKey is just text).
 func TestSpoolReceiveAcceptsKeyFreeMeta(t *testing.T) {
 	s := open(t)
 	sp := spool("c1")
-	sp.Meta = `{"syncType":"FULL","directPath":"/v/t62/abc","fileLength":99,"keyboard":1,"monkey":2,"tokens_used":3,"note":"mediaKey is just text here","nested":{"chunkOrder":4}}`
+	sp.Meta = `{"syncType":"FULL","directPath":"/v/t62/abc","fileLength":99,"keyboard":1,"monkey":2,"tcTokenTimestamp":3,"tcTokenSenderTimestamp":4,"note":"mediaKey is just text here","nested":{"chunkOrder":4}}`
 	if _, isNew, err := s.SpoolReceive(context.Background(), sp, store.HistoryChunk{ID: "c1", ReceivedAt: 1}); err != nil || !isNew {
 		t.Fatalf("SpoolReceive = %v, %v; want a new row", isNew, err)
 	}

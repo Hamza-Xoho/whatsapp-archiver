@@ -313,6 +313,44 @@ func TestStartLoggingClearsRuleOnAlias(t *testing.T) {
 	}
 }
 
+// I2: a person with two LIDs sharing a phone number is one chat. A rule off on the sibling LID is cleared when the chat
+// is switched on from its canonical row, so neither form stays excluded in the list or in capture.
+func TestStartLoggingClearsRuleOnSiblingLID(t *testing.T) {
+	u := newChatsUI(t)
+	for _, lid := range []string{"1@lid", "2@lid"} {
+		if _, err := u.st.InsertIDMapping(t.Context(), store.IDMapping{LID: lid, PN: "9@s.whatsapp.net", Source: "test", FirstSeen: time.Unix(1, 0)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	u.message(t, "1@lid", "a")
+	off := []store.ChatRule{{JID: "2@lid", Logging: false}}
+	if err := u.st.SetChatRules(t.Context(), off); err != nil {
+		t.Fatal(err)
+	}
+	u.rules.Replace(off)
+	body, code := postForm(t, u.handler(), "/chats/rules", url.Values{"jid[]": {"1@lid"}, "logging": {"on"}})
+	if code != http.StatusOK {
+		t.Fatalf("status %d: %s", code, body)
+	}
+	stored, err := u.st.ChatRules(t.Context())
+	if err != nil || len(stored) != 2 {
+		t.Fatalf("stored rules %+v (err %v), want a row for each LID", stored, err)
+	}
+	for _, r := range stored {
+		if !r.Logging {
+			t.Errorf("stored rule %+v is still off", r)
+		}
+	}
+	for _, form := range []string{"1@lid", "2@lid", "9@s.whatsapp.net"} {
+		if u.rules.Excluded(form) {
+			t.Errorf("%s is still excluded in the live rules", form)
+		}
+	}
+	if got := visibleText(body); strings.Contains(got, "Not logging") || !strings.Contains(got, "Logging") {
+		t.Fatalf("updated row: %s", got)
+	}
+}
+
 // Without JavaScript the forms still work: a plain POST is answered with a redirect back to the list.
 func TestPlainFormPostRedirectsToList(t *testing.T) {
 	u := newChatsUI(t)

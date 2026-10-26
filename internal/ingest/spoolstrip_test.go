@@ -79,6 +79,20 @@ func (f *secretFixture) build() *waHistorySync.HistorySync {
 		keyShare.ProtocolMessage.AppStateSyncKeyShare = &waE2E.AppStateSyncKeyShare{Keys: []*waE2E.AppStateSyncKey{{KeyData: &waE2E.AppStateSyncKeyData{KeyData: f.secret(23)}}}}
 	}
 
+	// Secrets under the wrappers: ephemeral, view-once (v1 and v2), device-sent, document with caption, and a quoted
+	// message inside an edit.
+	inner := func(n byte) *waE2E.Message {
+		return &waE2E.Message{Conversation: proto.String("inner"), MessageContextInfo: f.context(n)}
+	}
+	ephemeral := &waE2E.Message{EphemeralMessage: &waE2E.FutureProofMessage{Message: inner(56)}}
+	viewOnce := &waE2E.Message{ViewOnceMessage: &waE2E.FutureProofMessage{Message: inner(58)}, ViewOnceMessageV2: &waE2E.FutureProofMessage{Message: inner(60)}}
+	deviceSent := &waE2E.Message{DeviceSentMessage: &waE2E.DeviceSentMessage{DestinationJID: proto.String("g@g.us"), Message: inner(62)}, MessageContextInfo: f.context(64)}
+	docCaption := &waE2E.Message{DocumentWithCaptionMessage: &waE2E.FutureProofMessage{Message: &waE2E.Message{
+		DocumentMessage: &waE2E.DocumentMessage{Caption: proto.String("syllabus"), MediaKey: mediaKeyOfImage}, MessageContextInfo: f.context(66)}}}
+	editWithQuote := &waE2E.Message{ProtocolMessage: &waE2E.ProtocolMessage{Key: target, Type: waE2E.ProtocolMessage_MESSAGE_EDIT.Enum(),
+		EditedMessage: &waE2E.Message{ExtendedTextMessage: &waE2E.ExtendedTextMessage{Text: proto.String("edited with a quote"),
+			ContextInfo: &waE2E.ContextInfo{QuotedMessage: inner(68)}}, MessageContextInfo: f.context(70)}}}
+
 	msgText := f.message("TEXT", text1, 24)
 	msgText.Reactions = []*waWeb.Reaction{{Key: &waCommon.MessageKey{ID: proto.String("RX"), Participant: proto.String("4@lid")}, Text: proto.String("+1"), SenderTimestampMS: proto.Int64(1234)}}
 	msgPoll := f.message("POLL", poll, 26)
@@ -96,7 +110,8 @@ func (f *secretFixture) build() *waHistorySync.HistorySync {
 		Conversations: []*waHistorySync.Conversation{
 			{ID: proto.String("g@g.us"), TcToken: f.secret(31), ContactPrimaryIdentityKey: f.secret(32), Name: proto.String("Group"),
 				Messages: items(msgText, f.message("QUOTE", quoted, 33), f.message("EDIT", edit, 35), f.message("EDIT2", wrappedEdit, 37),
-					f.message("RX", reaction, 39), f.message("IMG", image, 41), msgPoll, f.message("NOTE", notification, 45), f.message("KEYS", keyShare, 47))},
+					f.message("RX", reaction, 39), f.message("IMG", image, 41), msgPoll, f.message("NOTE", notification, 45), f.message("KEYS", keyShare, 47),
+					f.message("EPH", ephemeral, 72), f.message("VO", viewOnce, 74), f.message("DEV", deviceSent, 76), f.message("DOC", docCaption, 78), f.message("EDITQ", editWithQuote, 80))},
 			{ID: proto.String("5@lid"), TcToken: f.secret(49), Messages: items(f.message("DM", text1, 50))},
 		},
 		StatusV3Messages: []*waWeb.WebMessageInfo{f.message("STATUS", text1, 52)},
@@ -190,7 +205,7 @@ func TestStripHistorySecretsClearsEveryMessage(t *testing.T) {
 			raw := marshal(t, got)
 			var left []int
 			for i, s := range with.secrets {
-				if bytes.Contains(raw, s) || bytes.Contains(out, s) {
+				if bytes.Contains(raw, s) { // raw is the decoded output, so a zlib blob is checked after decompression
 					left = append(left, i)
 				}
 			}

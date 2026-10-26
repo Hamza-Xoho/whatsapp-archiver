@@ -61,6 +61,9 @@ var spoolMetaDenylist = map[string]bool{
 	"secret": true, "tctoken": true, "token": true,
 }
 
+// SpoolMetaDenyNames returns the exact normalised key names SpoolReceive refuses in Meta, sorted (RED STUB).
+func SpoolMetaDenyNames() []string { return nil }
+
 // SpoolMetaDenylist returns the normalised key names SpoolReceive refuses in Meta, sorted.
 func SpoolMetaDenylist() []string {
 	out := make([]string, 0, len(spoolMetaDenylist))
