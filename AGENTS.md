@@ -31,7 +31,8 @@ Review work list: `docs/reviews/2026-10-14-phase0-review.md`. Prompts: `docs/pro
 ## Workflow
 
 - Strict red → green → refactor. Commit failing tests separately as `test: ...`.
-- During green create `.claude/green.lock`; do not edit tests; delete the lock after `make check`.
+- Run `make check-fast` before ending every turn.
+- During green create `.claude/green.lock`; while it exists, do not edit test files; delete the lock after `make check`.
 - Never delete, weaken, or skip a test. Add a failing regression test before fixing a bug.
 - Golden files may be created once with `-update` only after every line is reviewed and the review is logged in `docs/v1/STATE.md`.
 - Use fakes only at external boundaries. Every goroutine has an owner and stops on context cancellation.
@@ -48,4 +49,17 @@ Review work list: `docs/reviews/2026-10-14-phase0-review.md`. Prompts: `docs/pro
 - `internal/health`, `internal/backup`: alerts/snapshots; neither imports the WhatsApp client.
 - `internal/retry`, `internal/guard`, `internal/testkit`: shared implementations; do not duplicate.
 
-Procedures live in `.claude/skills/`: `bump-whatsmeow`, `add-message-kind`, and `record-fixtures`.
+## Skills
+
+- `.claude/skills/add-message-kind/SKILL.md`: use when adding a message or message-event kind to the V1 normaliser.
+- `.claude/skills/bump-whatsmeow/SKILL.md`: use when updating the pinned whatsmeow version.
+- `.claude/skills/deploy-ryzen/SKILL.md`: use for an approved build, install, verification, or rollback on ryzen.
+- `.claude/skills/record-fixtures/SKILL.md`: use when recording, scrubbing, reviewing, and committing replay fixtures.
+- `.claude/skills/ryzen-evidence/SKILL.md`: use for read-only operational evidence from ryzen.
+
+## Parallel work
+
+- `mainarchiver` is main-only; do not edit or commit there except when integrating merges.
+- Give each workstream its own worktree on branch `v1/<name>`, created from `origin/main`.
+- Hamza decides merge order.
+- Edit `docs/v1/STATE.md` only under your workstream's heading.
