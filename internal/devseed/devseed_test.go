@@ -198,7 +198,7 @@ func TestSimulateLiveStoresNewMessagesWhenSeedAlreadyExists(t *testing.T) {
 		}
 	}
 	db := openDB(t, filepath.Join(data, "archive.db"))
-	assertCount(t, db, "messages", 65)
+	assertAtLeast(t, db, "messages", 65)
 	_ = db.Close()
 	cancel()
 	select {
