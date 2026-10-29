@@ -19,7 +19,8 @@ const idleExpiredStoreCallsPerMinute = 45
 
 type countingMediaStore struct {
 	*store.Store
-	calls atomic.Int64
+	calls      atomic.Int64
+	staleCalls atomic.Int64
 }
 
 func (s *countingMediaStore) ResetMediaOnStart(ctx context.Context, now time.Time) error {
@@ -40,11 +41,25 @@ func (s *countingMediaStore) NextExpiredMedia(ctx context.Context) (*store.Media
 }
 func (s *countingMediaStore) FailStaleRetries(ctx context.Context, now time.Time) error {
 	s.calls.Add(1)
+	s.staleCalls.Add(1)
 	return s.Store.FailStaleRetries(ctx, now)
 }
 func (s *countingMediaStore) UpdateMedia(ctx context.Context, m store.Media) error {
 	s.calls.Add(1)
 	return s.Store.UpdateMedia(ctx, m)
+}
+
+func TestStaleRetryCleanupWakesAnOtherwiseIdleQueueHourly(t *testing.T) {
+	st := testkit.Store(t)
+	clock := newClock()
+	counted := &countingMediaStore{Store: st}
+	q := newTestQueue(t, st, &fakeDown{}, config.MediaRules{Download: []string{"image"}, Workers: 1}, clock, nil)
+	q.store = counted
+	stop := start(t, q)
+	eventually(t, "scheduler to become idle", func() bool { return counted.calls.Load() >= 2 })
+	clock.Advance(time.Hour)
+	eventually(t, "hourly stale cleanup", func() bool { return counted.staleCalls.Load() == 1 })
+	stop()
 }
 func (s *countingMediaStore) MediaByID(ctx context.Context, chat, id string) (store.Media, error) {
 	s.calls.Add(1)
