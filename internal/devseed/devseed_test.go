@@ -182,7 +182,11 @@ func derivedState(t *testing.T, db *sql.DB) string {
 		}
 	}
 	for _, table := range []string{"search_fts", "search_tri"} {
-		rows, err := db.Query(`SELECT term, doc, cnt FROM fts5vocab(?, 'row') ORDER BY term`, table)
+		vocab := "seed_vocab_" + table
+		if _, err := db.Exec(`CREATE VIRTUAL TABLE temp.` + vocab + ` USING fts5vocab(main, '` + table + `', 'row')`); err != nil {
+			t.Fatal(err)
+		}
+		rows, err := db.Query(`SELECT term, doc, cnt FROM temp.` + vocab + ` ORDER BY term`)
 		if err != nil {
 			t.Fatal(err)
 		}
