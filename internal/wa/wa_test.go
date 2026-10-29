@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"errors"
+	"fmt"
 	"io"
 	"path/filepath"
 	"strings"
@@ -130,9 +131,21 @@ func TestHistoryPropsUseConfiguredLimits(t *testing.T) {
 	}
 }
 func TestClassifyDownloadErr(t *testing.T) {
-	for _, err := range []error{whatsmeow.ErrMediaDownloadFailedWith404, whatsmeow.ErrMediaDownloadFailedWith410} {
-		if !errors.Is(classifyDownloadErr(err), ErrMediaExpired) {
-			t.Fatalf("err=%v", err)
+	for _, tt := range []struct {
+		err    error
+		status int
+	}{
+		{whatsmeow.ErrMediaDownloadFailedWith403, 403},
+		{whatsmeow.ErrMediaDownloadFailedWith404, 404},
+		{whatsmeow.ErrMediaDownloadFailedWith410, 410},
+	} {
+		got := classifyDownloadErr(tt.err)
+		if !errors.Is(got, ErrMediaExpired) {
+			t.Fatalf("err=%v", tt.err)
+		}
+		reason, class, status := DescribeDownloadError(got)
+		if class != "expired" || status != tt.status || !strings.Contains(reason, fmt.Sprint(tt.status)) {
+			t.Fatalf("DescribeDownloadError(%v) = %q, %q, %d", tt.err, reason, class, status)
 		}
 	}
 	other := errors.New("network")
