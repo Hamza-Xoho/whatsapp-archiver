@@ -5,6 +5,7 @@ package devseed
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -13,8 +14,12 @@ import (
 	"time"
 
 	"go.mau.fi/whatsmeow/types/events"
+	"whatsapp-archiver/internal/activity"
+	"whatsapp-archiver/internal/config"
+	"whatsapp-archiver/internal/health"
 	"whatsapp-archiver/internal/ingest"
 	"whatsapp-archiver/internal/store"
+	"whatsapp-archiver/internal/web"
 )
 
 type Options struct {
@@ -23,6 +28,8 @@ type Options struct {
 	Messages     int
 	Seed         int64
 	SimulateLive float64
+	Activity     *activity.Bus
+	Serve        bool
 }
 
 type Report struct {
@@ -51,7 +58,11 @@ func Seed(ctx context.Context, opts Options) (Report, error) {
 		return Report{}, err
 	}
 
-	pipe := newPipeline(st)
+	bus := opts.Activity
+	if bus == nil && opts.Serve {
+		bus = activity.NewBus(500)
+	}
+	pipe, rules := newPipeline(st, bus)
 	g := newGenerator(opts)
 	report := Report{Chats: opts.Chats, Messages: opts.Messages, KindCounts: make(map[string]int, len(store.MessageKinds))}
 	for i := 0; i < opts.Messages; i++ {
@@ -77,7 +88,12 @@ func Seed(ctx context.Context, opts Options) (Report, error) {
 	}
 
 	if opts.SimulateLive > 0 {
-		if err = simulate(ctx, pipe, g, opts.Messages, opts.SimulateLive); err != nil {
+		if opts.Serve {
+			err = serveAndSimulate(ctx, opts.DataDir, st, rules, bus, pipe, g, opts.Messages, opts.SimulateLive)
+		} else {
+			err = simulate(ctx, pipe, g, opts.Messages, opts.SimulateLive)
+		}
+		if err != nil {
 			return Report{}, err
 		}
 	}
@@ -99,10 +115,11 @@ func validate(opts Options) error {
 	return nil
 }
 
-func newPipeline(st *store.Store) *ingest.Pipeline {
-	filter := ingest.NewFilter(ingest.NewRuleSet(nil), nil)
+func newPipeline(st *store.Store, bus *activity.Bus) (*ingest.Pipeline, *ingest.RuleSet) {
+	rules := ingest.NewRuleSet(nil)
+	filter := ingest.NewFilter(rules, nil)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return ingest.NewPipeline(st, filter, seedQueue{}, seedHealth{}, log)
+	return ingest.NewPipeline(st, filter, seedQueue{}, seedHealth{}, log).WithActivity(bus), rules
 }
 
 type seedQueue struct{}
@@ -174,6 +191,43 @@ func simulate(ctx context.Context, pipe *ingest.Pipeline, g *generator, offset i
 				return fmt.Errorf("ingest simulated live message: %w", err)
 			}
 		}
+	}
+}
+
+func serveAndSimulate(ctx context.Context, dataDir string, st *store.Store, rules *ingest.RuleSet, bus *activity.Bus, pipe *ingest.Pipeline, g *generator, offset int, rate float64) error {
+	cfg, err := config.Load(filepath.Join(dataDir, "config.yaml"))
+	if err != nil {
+		return err
+	}
+	cfg.DataDir = dataDir
+	liveCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	listening := make(chan struct{})
+	serverDone := make(chan error, 1)
+	ui := web.New(web.Deps{
+		Store: st, Rules: rules, Activity: bus, Config: cfg,
+		Health: func() health.Snapshot {
+			return health.Snapshot{State: "connected", LastEvent: time.Now(), UpdatedAt: time.Now()}
+		},
+		Listening: func(string) { close(listening) },
+	})
+	go func() { serverDone <- ui.Run(liveCtx, cfg.Web.Listen) }()
+	select {
+	case <-listening:
+	case err = <-serverDone:
+		return err
+	case <-ctx.Done():
+		return nil
+	}
+	simulatorDone := make(chan error, 1)
+	go func() { simulatorDone <- simulate(liveCtx, pipe, g, offset, rate) }()
+	select {
+	case err = <-serverDone:
+		cancel()
+		return errors.Join(err, <-simulatorDone)
+	case err = <-simulatorDone:
+		cancel()
+		return errors.Join(err, <-serverDone)
 	}
 }
 
