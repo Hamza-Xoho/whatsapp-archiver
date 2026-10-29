@@ -99,8 +99,30 @@ func TestIdleExpiredBacklogHasBoundedStoreCalls(t *testing.T) {
 	q.Wake()
 	stop := start(t, q)
 	eventually(t, "initial request burst", func() bool { return len(d.requests()) == 10 })
-	clock.Advance(time.Minute)
-	eventually(t, "one fake minute of requests", func() bool { return len(d.requests()) >= 20 })
+	for requests := 11; requests <= 20; requests++ {
+		eventually(t, "next limiter timer", func() bool {
+			clock.mu.Lock()
+			defer clock.mu.Unlock()
+			for _, timer := range clock.timers {
+				if !timer.at.After(clock.now.Add(6 * time.Second)) {
+					return true
+				}
+			}
+			return false
+		})
+		clock.Advance(6 * time.Second)
+		eventually(t, fmt.Sprintf("%d requests through normal limiter ticks", requests), func() bool { return len(d.requests()) >= requests })
+	}
+	eventually(t, "reservation after twentieth request", func() bool {
+		clock.mu.Lock()
+		defer clock.mu.Unlock()
+		for _, timer := range clock.timers {
+			if !timer.at.After(clock.now.Add(6 * time.Second)) {
+				return true
+			}
+		}
+		return false
+	})
 	stop()
 	if got := counted.calls.Load(); got > idleExpiredStoreCallsPerMinute {
 		t.Fatalf("store calls in one fake minute = %d, want <= %d", got, idleExpiredStoreCallsPerMinute)
