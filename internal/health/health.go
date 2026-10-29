@@ -49,26 +49,27 @@ type Snapshot struct {
 	LastBackupPath string    `json:"last_backup_path"`
 }
 type Monitor struct {
-	mu        sync.Mutex
-	cfg       *config.Config
-	limits    func() config.AlertConfig // live thresholds; nil: cfg.Alerts
-	n         Notifier
-	clock     Clock
-	diskFree  func(string) (uint64, error)
-	version   func() string
-	reason    func() string
-	snapshot  Snapshot
-	gate      *alertGate
-	started   time.Time // baseline for rules whose event has not been seen yet
-	downSince time.Time // when the connection was last lost; zero while connected
-	lostAt    time.Time // when this process logged "connection lost"; zero until it has
-	queue     chan alert
-	log       *slog.Logger
-	bus       *activity.Bus // nil: nothing is published
-	ledger    ConnectionLedger
-	outbox    AlertStore
-	wakeAlert chan struct{}
-	heartbeat *http.Client
+	mu         sync.Mutex
+	transition sync.Mutex // serializes state changes with their durable ledger writes
+	cfg        *config.Config
+	limits     func() config.AlertConfig // live thresholds; nil: cfg.Alerts
+	n          Notifier
+	clock      Clock
+	diskFree   func(string) (uint64, error)
+	version    func() string
+	reason     func() string
+	snapshot   Snapshot
+	gate       *alertGate
+	started    time.Time // baseline for rules whose event has not been seen yet
+	downSince  time.Time // when the connection was last lost; zero while connected
+	lostAt     time.Time // when this process logged "connection lost"; zero until it has
+	queue      chan alert
+	log        *slog.Logger
+	bus        *activity.Bus // nil: nothing is published
+	ledger     ConnectionLedger
+	outbox     AlertStore
+	wakeAlert  chan struct{}
+	heartbeat  *http.Client
 }
 type alert struct{ title, body string }
 
@@ -172,6 +173,8 @@ func (m *Monitor) Seen(t time.Time, fromMe bool) {
 	}
 }
 func (m *Monitor) SetState(state, detail string) {
+	m.transition.Lock()
+	defer m.transition.Unlock()
 	m.mu.Lock()
 	prev := m.snapshot.State
 	at := m.clock.Now()
