@@ -98,6 +98,10 @@ Single status record for V1 (max 150 lines, update in place; history lives in gi
 - W0 step 3 (Hamza): done 26 Oct: practice instance unlinked on the phone and its process stopped (PID 288900); only the `SaudiSpyWithMyWifi` Wi-Fi profile left; stale DNS 192.168.68.1 gone. Reboot test still open (optional).
 - `sudo perf` on the practice PID is moot: the instance is stopped.
 
+## W6 UI specification
+
+- W6.0 done 29 Oct 2026: Hamza accepted all seven recommended product decisions. `docs/v1/ui.md` specifies text wireframes, states, copy, accessibility, 375 px mobile, dark mode, RTL Arabic and performance budgets for W6(a)-(g). No Go code changed.
+
 ## Rulings
 
 - (a) The `add-message-kind` skill (replaces `add-event-kind`) was written in W2(c).
