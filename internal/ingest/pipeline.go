@@ -212,6 +212,10 @@ func (p *Pipeline) Handle(evt any) (ack bool) {
 			p.queue.OnRetry(ctx, e)
 		case *events.Connected:
 			p.health.SetState("connected", "")
+		case *events.KeepAliveTimeout:
+			p.health.SetState("degraded", fmt.Sprintf("keepalive timeout (failures=%d)", e.ErrorCount))
+		case *events.KeepAliveRestored:
+			p.health.SetState("connected", "")
 		case *events.Disconnected:
 			p.health.SetState("disconnected", "")
 		case *events.LoggedOut:

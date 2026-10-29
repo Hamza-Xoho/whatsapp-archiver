@@ -125,7 +125,7 @@ func (m *Monitor) SetState(state, detail string) {
 	switch {
 	case state == "connected":
 		m.downSince = time.Time{}
-	case state == "disconnected" && m.downSince.IsZero():
+	case connectionDown(state) && m.downSince.IsZero():
 		m.downSince = m.clock.Now()
 	}
 	m.writeLocked()
@@ -240,7 +240,7 @@ func (m *Monitor) check() {
 		a = m.limits()
 		a.Ntfy = m.cfg.Alerts.Ntfy
 	}
-	if d := now.Sub(down); a.DisconnectedAfter > 0 && (s.State == "disconnected" || s.State == "") && d > a.DisconnectedAfter { // "" = never connected yet
+	if d := now.Sub(down); a.DisconnectedAfter > 0 && (connectionDown(s.State) || s.State == "") && d > a.DisconnectedAfter { // "" = never connected yet
 		m.gate.fire("disconnected", stateTitles["disconnected"], fmt.Sprintf("Disconnected for %s %s", d.Round(time.Minute), s.Detail))
 	}
 	if d := now.Sub(orStart(s.LastEvent, m.started)); a.NoEventsAfter > 0 && s.State == "connected" {
@@ -256,6 +256,10 @@ func (m *Monitor) check() {
 			m.condition(free < uint64(a.DiskFreeMinGB)<<30, "disk", "Disk space low", fmt.Sprintf("%d bytes free", free))
 		}
 	}
+}
+
+func connectionDown(state string) bool {
+	return state == "disconnected" || state == "degraded" || state == "reconnecting"
 }
 
 // condition fires key while holds is true and clears it once it is not.
