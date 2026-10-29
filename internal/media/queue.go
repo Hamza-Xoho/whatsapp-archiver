@@ -162,12 +162,12 @@ func (q *Queue) requestPass(ctx context.Context, current **store.Media) {
 	defer q.pass.Unlock()
 	now := q.clock.Now()
 	if err := q.store.FailStaleRetries(ctx, now); err != nil {
-		q.log.Error("stale re-upload requests not failed", "err", err)
+		q.logError("stale re-upload requests not failed", err)
 	}
 	for ctx.Err() == nil {
 		m, err := q.store.NextExpiredMedia(ctx)
 		if err != nil {
-			q.log.Error("expired media not read", "err", err)
+			q.logError("expired media not read", err)
 			return
 		}
 		if m == nil {
@@ -224,7 +224,7 @@ func (q *Queue) request(ctx context.Context, m *store.Media, now time.Time) bool
 // save writes the row; a failed write is logged, reported as false, and the row is re-claimable after a restart.
 func (q *Queue) save(ctx context.Context, m store.Media) bool {
 	if err := q.store.UpdateMedia(ctx, m); err != nil {
-		q.log.Error("media row not saved", "chat", m.ChatJID, "id", m.MessageID, "state", m.State, "err", err)
+		q.logError("media row not saved", err, "chat", m.ChatJID, "id", m.MessageID, "state", m.State)
 		return false
 	}
 	switch m.State {
@@ -236,6 +236,15 @@ func (q *Queue) save(ctx context.Context, m store.Media) bool {
 		q.bus.Publish(activity.Event{At: q.clock.Now(), Kind: "media", Chat: m.ChatJID, Detail: kind + " " + m.State})
 	}
 	return true
+}
+
+func (q *Queue) logError(message string, err error, attrs ...any) {
+	attrs = append(attrs, "err", err)
+	if errors.Is(err, context.Canceled) {
+		q.log.Info(message, attrs...)
+		return
+	}
+	q.log.Error(message, attrs...)
 }
 func (q *Queue) download(ctx context.Context, m *store.Media) {
 	var data []byte

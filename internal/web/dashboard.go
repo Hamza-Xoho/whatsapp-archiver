@@ -11,6 +11,7 @@ import (
 	"whatsapp-archiver/internal/config"
 	"whatsapp-archiver/internal/health"
 	"whatsapp-archiver/internal/ingest"
+	"whatsapp-archiver/internal/store"
 	"whatsapp-archiver/internal/view"
 )
 
@@ -54,6 +55,9 @@ type dashboardData struct {
 	Logging, NotLogging, Gaps   int
 	LoggingNoun, NotLoggingNoun string
 	Events                      []feedItem
+	Outages                     []store.OutageDay
+	HasOutages                  bool
+	LongestOutageMinutes        int
 }
 
 // dashboard is GET /. Like every GET it only reads.
@@ -90,12 +94,26 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "the archive could not be read", http.StatusInternalServerError)
 			return
 		}
+		outages, err := s.d.Store.OutageSummary(ctx, s.d.Now(), loc, 7)
+		if err != nil {
+			http.Error(w, "the archive could not be read", http.StatusInternalServerError)
+			return
+		}
+		data.Outages, data.HasOutages = outages.Days, outages.HasOutages
+		data.LongestOutageMinutes = roundedMinutes(outages.Longest)
 		data.HasArchive = true
 		data.History = view.HistoryLine(loc, report.Coverage)
 		data.LoggingNoun, data.NotLoggingNoun = chatNoun(data.Logging), chatNoun(data.NotLogging)
 	}
 	data.Events = s.recent(names, loc)
 	s.render(w, s.pages["dashboard"], "layout", data)
+}
+
+func roundedMinutes(d time.Duration) int {
+	if d <= 0 {
+		return 0
+	}
+	return int((d + time.Minute - 1) / time.Minute)
 }
 
 // healthPartial is GET /partials/health, the panel alone; the page re-fetches it on each health event.
