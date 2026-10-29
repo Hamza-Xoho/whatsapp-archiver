@@ -13,7 +13,9 @@ import (
 	"whatsapp-archiver/internal/testkit"
 )
 
-const idleExpiredStoreCallsPerMinute = 25
+// Ten requests at start plus ten over the first minute require a read and a state write each; five calls cover
+// startup and due-time scheduling without allowing a polling loop.
+const idleExpiredStoreCallsPerMinute = 45
 
 type countingMediaStore struct {
 	*store.Store
