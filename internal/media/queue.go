@@ -82,7 +82,7 @@ func NewQueue(dir string, global func() (config.MediaRules, error), perChat func
 		rpm = 10
 	}
 	requestRetry := time.Minute / time.Duration(rpm)
-	return &Queue{dir: dir, global: global, perChat: perChat, workers: workers, store: st, down: d, clock: c, log: l, wake: make(chan struct{}, 1), limiter: rate.NewLimiter(rate.Every(requestRetry), rpm), onPanic: onPanic, connected: func() bool { return true }, requestRetry: requestRetry}
+	return &Queue{dir: dir, global: global, perChat: perChat, workers: workers, store: st, down: d, clock: c, log: l, wake: make(chan struct{}, workers), limiter: rate.NewLimiter(rate.Every(requestRetry), rpm), onPanic: onPanic, connected: func() bool { return true }, requestRetry: requestRetry}
 }
 
 // WithConnected supplies the connection gate. While it reports false, the queue leaves every row untouched.
@@ -120,11 +120,14 @@ func (q *Queue) Decide(_ context.Context, m *store.Media) error {
 	return nil
 }
 
-// Wake tells the workers a media row exists. It never blocks.
+// Wake tells every worker that a media row or connection-state change may need attention. It never blocks.
 func (q *Queue) Wake() {
-	select {
-	case q.wake <- struct{}{}:
-	default:
+	for i := 0; i < q.workers; i++ {
+		select {
+		case q.wake <- struct{}{}:
+		default:
+			return
+		}
 	}
 }
 func (q *Queue) Run(ctx context.Context) {
@@ -186,7 +189,12 @@ func (q *Queue) work(ctx context.Context, current **store.Media) {
 			return
 		}
 		job, err := q.store.ClaimMedia(ctx, q.clock.Now())
-		if err != nil || job == nil {
+		if err != nil {
+			q.log.Error("media row not claimed", "err", err)
+			q.waitDelay(ctx, time.Minute)
+			return
+		}
+		if job == nil {
 			return
 		}
 		*current = job
