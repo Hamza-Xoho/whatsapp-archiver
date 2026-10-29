@@ -2,10 +2,13 @@ package wa
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -151,6 +154,27 @@ func TestClassifyDownloadErr(t *testing.T) {
 	other := errors.New("network")
 	if !errors.Is(classifyDownloadErr(other), other) {
 		t.Fatal("other error lost")
+	}
+}
+
+func TestClassifyNetworkDownloadErr(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		err    error
+		status int
+	}{
+		{"dns", &net.DNSError{Err: "no such host", Name: "mmg.whatsapp.net"}, 0},
+		{"timeout", context.DeadlineExceeded, 0},
+		{"server", whatsmeow.DownloadHTTPError{Response: &http.Response{StatusCode: 503}}, 503},
+		{"media conn", errors.New("failed to refresh media connections: temporarily unavailable"), 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := classifyDownloadErr(tt.err)
+			_, class, status := DescribeDownloadError(got)
+			if class != "network" || status != tt.status {
+				t.Fatalf("classification = %q/%d, want network/%d", class, status, tt.status)
+			}
+		})
 	}
 }
 
