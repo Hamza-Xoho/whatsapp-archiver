@@ -60,10 +60,11 @@ func (g *generator) message(i int) (ingest.Result, string, []byte) {
 	}
 	var file []byte
 	if mediaKind(kind) && !g.media[kind] {
-		file = []byte(fmt.Sprintf("synthetic %s media for seed %d\n", kind, g.opts.Seed))
+		var mime, ext string
+		file, mime, ext = mediaFixture(kind)
 		result.Media = &store.Media{
 			ChatJID: chat, MessageID: id, SenderJID: msg.SenderJID, Source: source, Type: kind,
-			MIME: mediaMIME(kind), Filename: kind + ".txt", Path: kind + ".bin", State: "done",
+			MIME: mime, Filename: kind + ext, Path: kind + ext, State: "done",
 			MessageTimestamp: ts, EnqueuedAt: ts, UpdatedAt: ts + 1, DoneAt: ts + 1,
 		}
 		g.media[kind] = true
@@ -118,19 +119,6 @@ func mediaKind(kind string) bool {
 		return true
 	default:
 		return false
-	}
-}
-
-func mediaMIME(kind string) string {
-	switch kind {
-	case "image", "sticker":
-		return "image/jpeg"
-	case "video", "gif":
-		return "video/mp4"
-	case "audio", "voice":
-		return "audio/ogg"
-	default:
-		return "application/octet-stream"
 	}
 }
 

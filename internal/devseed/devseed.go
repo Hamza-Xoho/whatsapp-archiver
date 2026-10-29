@@ -146,7 +146,7 @@ func writeMedia(dataDir string, media *store.Media, body []byte) error {
 		return fmt.Errorf("write synthetic media: %w", err)
 	}
 	sum := sha256.Sum256(body)
-	media.Path = filepath.ToSlash(filepath.Join("media", "devseed", name))
+	media.Path = path
 	media.SHA256 = fmt.Sprintf("%x", sum)
 	media.DeclaredSize = int64(len(body))
 	return nil
@@ -166,6 +166,7 @@ func addOutages(ctx context.Context, st *store.Store, base int64) error {
 }
 
 func simulate(ctx context.Context, pipe *ingest.Pipeline, g *generator, offset int, rate float64) error {
+	started := time.Now().UnixNano()
 	interval := time.Duration(float64(time.Second) / rate)
 	if interval < time.Microsecond {
 		interval = time.Microsecond
@@ -178,6 +179,8 @@ func simulate(ctx context.Context, pipe *ingest.Pipeline, g *generator, offset i
 			return nil
 		case <-ticker.C:
 			result, _, _ := g.message(i)
+			result.Message.ID = fmt.Sprintf("LIVE-%d-%d-%09d", g.opts.Seed, started, i-offset)
+			result.Message.RawProto = []byte("synthetic:" + result.Message.ID)
 			result.Message.Source = "live"
 			result.Received = time.Now()
 			result.Message.ReceivedAt = result.Received.Unix()
