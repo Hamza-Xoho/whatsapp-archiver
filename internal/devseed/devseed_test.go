@@ -1,6 +1,7 @@
 package devseed_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
@@ -66,6 +67,7 @@ func TestSmallSeedHasExpectedKindsAndCounts(t *testing.T) {
 			t.Errorf("media file %s has size %d, want 1..4096", name, info.Size())
 		}
 	}
+	assertPlayableMedia(t, db)
 
 	before := derivedState(t, db)
 	if err = db.Close(); err != nil {
@@ -86,6 +88,49 @@ func TestSmallSeedHasExpectedKindsAndCounts(t *testing.T) {
 	defer afterDB.Close()
 	if after := derivedState(t, afterDB); after != before {
 		t.Fatalf("RebuildDerived differs from incremental state\n--- incremental\n%s\n--- rebuilt\n%s", before, after)
+	}
+}
+
+func assertPlayableMedia(t *testing.T, db *sql.DB) {
+	t.Helper()
+	rows, err := db.Query(`SELECT type,path FROM media ORDER BY type`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var kind, path string
+		if err = rows.Scan(&kind, &path); err != nil {
+			t.Fatal(err)
+		}
+		if !filepath.IsAbs(path) {
+			t.Errorf("%s media path %q is relative; the media server resolves stored paths directly", kind, path)
+		}
+		body, readErr := os.ReadFile(path)
+		if readErr != nil {
+			t.Errorf("read %s fixture: %v", kind, readErr)
+			continue
+		}
+		var signature []byte
+		switch kind {
+		case "image", "sticker":
+			signature = []byte("\x89PNG\r\n\x1a\n")
+		case "audio", "voice":
+			signature = []byte("OggS")
+		case "video", "gif":
+			if len(body) < 8 || string(body[4:8]) != "ftyp" {
+				t.Errorf("%s fixture is not an MP4 file", kind)
+			}
+			continue
+		default:
+			continue
+		}
+		if !bytes.HasPrefix(body, signature) {
+			t.Errorf("%s fixture has no %q signature", kind, signature)
+		}
+	}
+	if err = rows.Err(); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -115,6 +160,46 @@ func TestSimulateLivePublishesToActivityBus(t *testing.T) {
 			t.Fatalf("timed out after %d activity events", i)
 		}
 	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("simulator did not stop after cancellation")
+	}
+}
+
+func TestSimulateLiveStoresNewMessagesWhenSeedAlreadyExists(t *testing.T) {
+	data := filepath.Join(t.TempDir(), "live-existing")
+	if _, err := devseed.Seed(context.Background(), devseed.Options{DataDir: data, Chats: 2, Messages: 64, Seed: 4}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	bus := activity.NewBus(100)
+	events, unsubscribe := bus.Subscribe(100)
+	defer unsubscribe()
+	done := make(chan error, 1)
+	go func() {
+		_, err := devseed.Seed(ctx, devseed.Options{
+			DataDir: data, Chats: 2, Messages: 16, Seed: 4,
+			SimulateLive: 100, Activity: bus,
+		})
+		done <- err
+	}()
+
+	// The rerun publishes its 16 static messages and two gaps before the first live message.
+	for i := 0; i < 19; i++ {
+		select {
+		case <-events:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("timed out after %d activity events", i)
+		}
+	}
+	db := openDB(t, filepath.Join(data, "archive.db"))
+	assertCount(t, db, "messages", 65)
+	_ = db.Close()
 	cancel()
 	select {
 	case err := <-done:
