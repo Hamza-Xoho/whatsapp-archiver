@@ -53,6 +53,18 @@ func TestRepoHasNoViolations(t *testing.T) {
 	}
 }
 
+func TestServePassesWhatsAppConnectionGateToMediaQueue(t *testing.T) {
+	_, file, _, _ := runtime.Caller(0)
+	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	src, err := os.ReadFile(filepath.Join(root, "cmd", "archiver", "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(src), ".WithConnected(client.IsConnected).WithActivity(bus)") {
+		t.Fatal("serve must pass the WhatsApp connection gate to the media queue")
+	}
+}
+
 func scanFixture(t *testing.T, name string) []archtest.Violation {
 	t.Helper()
 	root := t.TempDir()
