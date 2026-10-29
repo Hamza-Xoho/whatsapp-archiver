@@ -33,7 +33,7 @@ func runDevSeed(args []string, out, errOut io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	report, err := devseed.Seed(ctx, devseed.Options{
-		DataDir: *data, Chats: *chats, Messages: *messages, Seed: *seed, SimulateLive: rate,
+		DataDir: *data, Chats: *chats, Messages: *messages, Seed: *seed, SimulateLive: rate, Serve: rate > 0,
 	})
 	if err != nil {
 		_, _ = fmt.Fprintln(errOut, err)

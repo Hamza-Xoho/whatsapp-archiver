@@ -2,7 +2,7 @@ Single status record for V1 (max 150 lines, update in place; history lives in gi
 
 ## W6(h) synthetic seed and simulator
 
-- Done 29 Oct: `archiver devseed` creates deterministic Arabic/English data through `ingest.Pipeline.Ingest`, with all 16 message kinds, LID/phone aliases, gaps, outages and seven small media fixtures; `--simulate-live <rate>` appends until SIGINT. The 5-chat/2k test pins exact kind counts and incremental-vs-RebuildDerived state. `.claude/launch.json` serves `data/devseed` on 127.0.0.1:8090.
+- Done 29 Oct: `archiver devseed` creates deterministic Arabic/English data through `ingest.Pipeline.Ingest`, with all 16 message kinds, LID/phone aliases, gaps, outages and seven small media fixtures; `--simulate-live <rate>` serves the seeded UI and appends through the UI's activity bus until SIGINT, so SSE receives every event. The 5-chat/2k test pins exact kind counts and incremental-vs-RebuildDerived state. `.claude/launch.json` has static and live-5/s entries for `data/devseed` on 127.0.0.1:8090.
 - Measured clean 300k seed (250 chats, seed 42, no race): 5m53.6s, 143 MiB after close; 18,750 of each kind, 250 open gaps, two outages. Synthetic-only SQLite tuning uses `synchronous=OFF` with bounded 10k-page WAL checkpoints; normal capture is unchanged.
 
 ## Done
