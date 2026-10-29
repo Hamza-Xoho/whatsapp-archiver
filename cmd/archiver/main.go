@@ -18,6 +18,7 @@ import (
 	"whatsapp-archiver/internal/ingest"
 	"whatsapp-archiver/internal/media"
 	"whatsapp-archiver/internal/network"
+	"whatsapp-archiver/internal/sdnotify"
 	"whatsapp-archiver/internal/store"
 	"whatsapp-archiver/internal/wa"
 	"whatsapp-archiver/internal/web"
@@ -123,6 +124,10 @@ func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) er
 	if err != nil {
 		return err
 	}
+	if err = st.RecordProcessStart(ctx, time.Now().Unix()); err != nil {
+		_ = st.Close()
+		return err
+	}
 	// The first start of this build imports config.yaml's exclusions, media rules, alert thresholds and backup
 	// schedule into the archive; from then on the archive's copy is the live one.
 	if imported, err := st.ImportConfigOnce(ctx, cfg); err != nil {
@@ -178,6 +183,7 @@ func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) er
 	handler = withContactSync(contacts, handler)
 	handlers := &inFlight{}
 	handler = handlers.wrap(handler)
+	watchdog := serviceWatchdog{writer: st, handlers: handlers, now: time.Now, notify: sdnotify.Notify}
 	// `run` connects through the pairer: capture at once when paired, else nothing until the dashboard starts
 	// pairing, which carries on as capture. Media downloads and backups wait until the device is paired.
 	// `pair` pairs in the terminal as before, and the dashboard then offers no pairing of its own.
@@ -195,6 +201,7 @@ func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) er
 	ui := web.New(web.Deps{Store: st, Rules: rules, Health: mon.Status, Activity: bus, Config: cfg, Notifier: notifier, Pairer: browser,
 		Listening: func(addr string) { log.Info("dashboard listening", "listen", addr) }})
 	loops := []func(context.Context){
+		watchdog.run,
 		afterPaired(ready, queue.Run),
 		mon.Run,
 		contacts.Run, // idle until a connect or contact event asks for a sync
@@ -207,6 +214,11 @@ func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) er
 				log.Error("dashboard stopped; capture continues", "err", err)
 			}
 		},
+	}
+	if err := sdnotify.Notify("READY=1"); err != nil {
+		_ = client.Close()
+		_ = st.Close()
+		return fmt.Errorf("notify systemd ready: %w", err)
 	}
 	// Shutdown order: cancel ctx, client.Run returns, the loops are joined, the event handler in flight is waited for
 	// (at most handlerDrainBound), then the client and the store are closed.

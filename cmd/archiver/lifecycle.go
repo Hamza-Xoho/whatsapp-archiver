@@ -51,10 +51,13 @@ const handlerDrainBound = 30 * time.Second
 
 // inFlight tracks the whatsmeow event handlers that are running, so that shutdown can wait for them.
 type inFlight struct {
-	after   func(time.Duration) <-chan time.Time // the bound's timer; nil means time.After
-	mu      sync.Mutex
-	closing bool
-	wg      sync.WaitGroup
+	after         func(time.Duration) <-chan time.Time // the bound's timer; nil means time.After
+	now           func() time.Time
+	mu            sync.Mutex
+	closing       bool
+	active        int
+	oldestStarted time.Time
+	wg            sync.WaitGroup
 }
 
 // wrap returns h counted as in flight while it runs. Once drain has started, an arriving event is not handled: the
@@ -67,10 +70,32 @@ func (f *inFlight) wrap(h func(any) bool) func(any) bool {
 			return false
 		}
 		f.wg.Add(1)
+		f.active++
+		if f.active == 1 {
+			now := time.Now
+			if f.now != nil {
+				now = f.now
+			}
+			f.oldestStarted = now()
+		}
 		f.mu.Unlock()
-		defer f.wg.Done()
+		defer func() {
+			f.mu.Lock()
+			f.active--
+			if f.active == 0 {
+				f.oldestStarted = time.Time{}
+			}
+			f.mu.Unlock()
+			f.wg.Done()
+		}()
 		return h(evt)
 	}
+}
+
+func (f *inFlight) progressing(now time.Time, maxStall time.Duration) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.active == 0 || now.Sub(f.oldestStarted) <= maxStall
 }
 
 // drain waits for the handlers in flight, at most handlerDrainBound; a handler still running then is reported and

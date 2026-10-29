@@ -3,13 +3,14 @@ Description=WhatsApp Archiver
 After=network-online.target
 Wants=network-online.target
 [Service]
-Type=simple
+Type=notify
+WatchdogSec=120
 User=whatsapp-archiver
 Group=whatsapp-archiver
 WorkingDirectory=/opt/whatsapp-archiver
 ExecStart=/opt/whatsapp-archiver/archiver run --data /var/lib/whatsapp-archiver
 Restart=always
-RestartSec=10
+RestartSec=5
 RestartPreventExitStatus=3
 NoNewPrivileges=true
 PrivateTmp=true
