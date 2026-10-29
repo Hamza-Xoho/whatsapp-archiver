@@ -17,6 +17,7 @@ import (
 	"whatsapp-archiver/internal/health"
 	"whatsapp-archiver/internal/ingest"
 	"whatsapp-archiver/internal/media"
+	"whatsapp-archiver/internal/network"
 	"whatsapp-archiver/internal/store"
 	"whatsapp-archiver/internal/wa"
 	"whatsapp-archiver/internal/web"
@@ -144,6 +145,11 @@ func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) er
 		return err
 	}
 	live := liveSettings{st: st, cfg: cfg, log: log, rules: rules, aliases: aliases}
+	httpClient, err := network.NewHTTPClient(ctx, cfg.Network.FallbackDNS, st)
+	if err != nil {
+		_ = st.Close()
+		return fmt.Errorf("configure network fallback: %w", err)
+	}
 	client, err := wa.Open(ctx, cfg, log)
 	if err != nil {
 		_ = st.Close()
@@ -152,10 +158,11 @@ func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) er
 	if testSocket != nil {
 		client.UseSocket(testSocket)
 	}
+	client.UseHTTPClient(httpClient)
 	bus := activity.NewBus(500)
 	var notifier health.Notifier
 	if cfg.Alerts.Ntfy != nil {
-		notifier = health.NewNtfy(cfg.Alerts.Ntfy)
+		notifier = health.NewNtfyWithClient(cfg.Alerts.Ntfy, httpClient)
 	}
 	mon := health.NewMonitor(cfg, notifier, systemClock{}, health.DiskFree, client.VersionInUse).WithVersionReason(client.VersionReason).WithLogger(log).WithThresholds(live.alerts).WithActivity(bus)
 	client.WithConnectionHealth(mon)
@@ -242,7 +249,11 @@ func alertNotPaired(cfg *config.Config, errOut io.Writer) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
-	if err := health.NewNtfy(cfg.Alerts.Ntfy).Notify(ctx, "WhatsApp Archiver is not paired", notPairedBody); err != nil {
+	httpClient, err := network.NewHTTPClient(ctx, cfg.Network.FallbackDNS, nil)
+	if err == nil {
+		err = health.NewNtfyWithClient(cfg.Alerts.Ntfy, httpClient).Notify(ctx, "WhatsApp Archiver is not paired", notPairedBody)
+	}
+	if err != nil {
 		_, _ = fmt.Fprintln(errOut, "ntfy alert failed:", err)
 	}
 }

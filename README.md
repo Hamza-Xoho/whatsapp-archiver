@@ -271,6 +271,10 @@ alerts:
 # `time` and `keep` are first-start values (the Settings page owns them afterwards).
 backup: {destination: "/srv/backups/whatsapp-archiver", time: "03:30", keep: 7}
 
+# If the host resolver fails, try these DNS servers, then each host's persisted last-known-good IP.
+network:
+  fallback_dns: ["1.1.1.1:53", "8.8.8.8:53"]
+
 wa:
   check_latest_version: true   # ask WhatsApp for its newest client version at start and after a rejection
   version_override: ""         # force one version, for example "2.3000.1040847988"; used only for the drill
