@@ -1,0 +1,91 @@
+package media
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"whatsapp-archiver/internal/config"
+	"whatsapp-archiver/internal/store"
+	"whatsapp-archiver/internal/testkit"
+)
+
+const idleExpiredStoreCallsPerMinute = 25
+
+type countingMediaStore struct {
+	*store.Store
+	calls atomic.Int64
+}
+
+func (s *countingMediaStore) ResetMediaOnStart(ctx context.Context, now time.Time) error {
+	s.calls.Add(1)
+	return s.Store.ResetMediaOnStart(ctx, now)
+}
+func (s *countingMediaStore) ClaimMedia(ctx context.Context, now time.Time) (*store.Media, error) {
+	s.calls.Add(1)
+	return s.Store.ClaimMedia(ctx, now)
+}
+func (s *countingMediaStore) NextMediaDue(ctx context.Context) (time.Time, bool, error) {
+	s.calls.Add(1)
+	return s.Store.NextMediaDue(ctx)
+}
+func (s *countingMediaStore) NextExpiredMedia(ctx context.Context) (*store.Media, error) {
+	s.calls.Add(1)
+	return s.Store.NextExpiredMedia(ctx)
+}
+func (s *countingMediaStore) FailStaleRetries(ctx context.Context, now time.Time) error {
+	s.calls.Add(1)
+	return s.Store.FailStaleRetries(ctx, now)
+}
+func (s *countingMediaStore) UpdateMedia(ctx context.Context, m store.Media) error {
+	s.calls.Add(1)
+	return s.Store.UpdateMedia(ctx, m)
+}
+func (s *countingMediaStore) MediaByID(ctx context.Context, chat, id string) (store.Media, error) {
+	s.calls.Add(1)
+	return s.Store.MediaByID(ctx, chat, id)
+}
+
+func TestIdleExpiredBacklogHasBoundedStoreCalls(t *testing.T) {
+	st := testkit.Store(t)
+	db, err := sql.Open("sqlite", "file:"+st.Path()+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stmt, err := tx.Prepare(`INSERT INTO media(chat_jid,message_id,source_rank,type,state) VALUES('g@g.us',?,1,'image','expired')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 10_000; i++ {
+		if _, err = stmt.Exec(fmt.Sprintf("E%05d", i)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = stmt.Close()
+	if err = tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	clock := newClock()
+	d := expiredDown()
+	counted := &countingMediaStore{Store: st}
+	q := newTestQueue(t, st, d, config.MediaRules{Download: []string{"image"}, Workers: 1, RetryRequestsPerMinute: 10}, clock, nil)
+	q.store = counted
+	q.Wake()
+	stop := start(t, q)
+	eventually(t, "initial request burst", func() bool { return len(d.requests()) == 10 })
+	clock.Advance(time.Minute)
+	eventually(t, "one fake minute of requests", func() bool { return len(d.requests()) >= 20 })
+	stop()
+	if got := counted.calls.Load(); got > idleExpiredStoreCallsPerMinute {
+		t.Fatalf("store calls in one fake minute = %d, want <= %d", got, idleExpiredStoreCallsPerMinute)
+	}
+}

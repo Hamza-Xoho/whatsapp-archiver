@@ -63,6 +63,12 @@ type testClock struct {
 	mu    sync.Mutex
 	now   time.Time
 	reads int
+	timers []fakeTimer
+}
+
+type fakeTimer struct {
+	at time.Time
+	ch chan time.Time
 }
 
 func newClock() *testClock { return &testClock{now: time.Unix(1_700_000_000, 0)} }
@@ -75,7 +81,28 @@ func (c *testClock) Now() time.Time {
 func (c *testClock) Advance(d time.Duration) {
 	c.mu.Lock()
 	c.now = c.now.Add(d)
+	var ready []fakeTimer
+	keep := c.timers[:0]
+	for _, timer := range c.timers {
+		if !timer.at.After(c.now) {
+			ready = append(ready, timer)
+		} else {
+			keep = append(keep, timer)
+		}
+	}
+	c.timers = keep
 	c.mu.Unlock()
+	for _, timer := range ready {
+		timer.ch <- c.now
+	}
+}
+
+func (c *testClock) After(d time.Duration) <-chan time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	ch := make(chan time.Time, 1)
+	c.timers = append(c.timers, fakeTimer{at: c.now.Add(d), ch: ch})
+	return ch
 }
 func (c *testClock) Reads() int {
 	c.mu.Lock()
