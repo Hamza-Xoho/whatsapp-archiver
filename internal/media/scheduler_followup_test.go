@@ -49,7 +49,12 @@ func TestReconnectWakesEveryConfiguredWorker(t *testing.T) {
 	var gateChecks atomic.Int32
 	started := make(chan struct{}, 3)
 	release := make(chan struct{})
-	defer close(release)
+	released := false
+	defer func() {
+		if !released {
+			close(release)
+		}
+	}()
 	d := &fakeDown{download: func([]byte, string) ([]byte, error) {
 		started <- struct{}{}
 		<-release
@@ -74,6 +79,8 @@ func TestReconnectWakesEveryConfiguredWorker(t *testing.T) {
 			t.Fatalf("downloads started after reconnect = %d, want 3 concurrent workers", workers-1)
 		}
 	}
+	close(release)
+	released = true
 	stop()
 }
 
