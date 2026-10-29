@@ -19,7 +19,10 @@ func TestRequestPassRechecksConnectionAfterLimiterWait(t *testing.T) {
 	connected.Store(true)
 	q := newTestQueue(t, st, d, config.MediaRules{Download: []string{"image"}, Workers: 1, RetryRequestsPerMinute: 10}, clock, nil).WithConnected(connected.Load)
 	for i := 0; i < 11; i++ {
-		enqueue(t, q, store.Media{ChatJID: "g@g.us", MessageID: fmt.Sprintf("E%02d", i), SenderJID: "s@lid", Source: "history", Type: "image", RawProto: []byte("raw")})
+		m := store.Media{ChatJID: "g@g.us", MessageID: fmt.Sprintf("E%02d", i), SenderJID: "s@lid", Source: "history", Type: "image", State: "expired", RawProto: []byte("raw")}
+		if err := testkit.InsertMedia(t.Context(), st, m); err != nil {
+			t.Fatal(err)
+		}
 	}
 	stop := start(t, q)
 	eventually(t, "initial request burst", func() bool { return len(d.requests()) == 10 })
