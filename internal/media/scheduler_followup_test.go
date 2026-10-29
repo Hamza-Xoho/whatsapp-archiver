@@ -2,6 +2,7 @@ package media
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"sync/atomic"
@@ -13,6 +14,68 @@ import (
 	"whatsapp-archiver/internal/testkit"
 	"whatsapp-archiver/internal/wa"
 )
+
+type failingClaimStore struct {
+	*store.Store
+	claims atomic.Int32
+}
+
+func (s *failingClaimStore) ClaimMedia(context.Context, time.Time) (*store.Media, error) {
+	s.claims.Add(1)
+	return nil, errors.New("temporary claim failure")
+}
+
+func TestClaimFailureWaitsBeforeRetryingDueMedia(t *testing.T) {
+	st := testkit.Store(t)
+	clock := newClock()
+	failed := &failingClaimStore{Store: st}
+	q := newTestQueue(t, st, &fakeDown{}, config.MediaRules{Download: []string{"image"}, Workers: 1}, clock, nil)
+	q.store = failed
+	enqueue(t, q, store.Media{ChatJID: "g@g.us", MessageID: "DUE", Source: "live", Type: "image", RawProto: []byte("raw")})
+	stop := start(t, q)
+	eventually(t, "first failed claim", func() bool { return failed.claims.Load() >= 1 })
+	time.Sleep(50 * time.Millisecond)
+	if got := failed.claims.Load(); got != 1 {
+		t.Fatalf("claims before retry delay = %d, want 1", got)
+	}
+	clock.Advance(time.Minute)
+	eventually(t, "claim after retry delay", func() bool { return failed.claims.Load() == 2 })
+	stop()
+}
+
+func TestReconnectWakesEveryConfiguredWorker(t *testing.T) {
+	st := testkit.Store(t)
+	var connected atomic.Bool
+	var gateChecks atomic.Int32
+	started := make(chan struct{}, 3)
+	release := make(chan struct{})
+	defer close(release)
+	d := &fakeDown{download: func([]byte, string) ([]byte, error) {
+		started <- struct{}{}
+		<-release
+		return []byte("ok"), nil
+	}}
+	q := newTestQueue(t, st, d, config.MediaRules{Download: []string{"image"}, Workers: 3}, newClock(), nil).
+		WithConnected(func() bool {
+			gateChecks.Add(1)
+			return connected.Load()
+		})
+	for _, id := range []string{"A", "B", "C"} {
+		enqueue(t, q, store.Media{ChatJID: "g@g.us", MessageID: id, Source: "live", Type: "image", RawProto: []byte(id)})
+	}
+	stop := start(t, q)
+	eventually(t, "all workers to reach the disconnected gate", func() bool { return gateChecks.Load() >= 3 })
+	connected.Store(true)
+	q.Wake()
+	for workers := 1; workers <= 3; workers++ {
+		select {
+		case <-started:
+		case <-time.After(250 * time.Millisecond):
+			t.Fatalf("downloads started after reconnect = %d, want 3 concurrent workers", workers-1)
+		}
+	}
+	stop()
+}
 
 type cancelOnSecondClaimStore struct {
 	*store.Store
