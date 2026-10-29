@@ -31,6 +31,14 @@ Single status record for V1 (max 150 lines, update in place; history lives in gi
 - Every new media state write goes through a store method that calls `mediaMoved` in the same transaction, and the equivalence `workload` (derived_test.go) gets one case per new transition.
 - W3 and W4 both edit `cmd/archiver/main.go`, `internal/store/kinds.go` and `docs/v1/STATE.md`: agree the merge order up front (one merges first, the other rebases and re-runs `make check`).
 
+## W3 connection reliability
+
+- Items 1-7 complete on `v1/w3-connection` (red/green pairs e87d606..b0d07ab): silent keepalive outages enter reconnecting and alert after the 5-minute default; websocket/media/ntfy use system DNS, configured fallback resolvers and a persisted last-known-good address; outage rows retain cause/errors and reconnect backlog evidence, and gaps opened within 2 minutes are `post_outage`.
+- Alerts and recoveries use the durable ordered outbox with exponential retry capped at 1 hour and late-delivery text. Optional 5-minute off-host heartbeat requires connected state and a fresh event. The systemd unit uses pure-Go readiness/watchdog notification and only pings while the writer and event handler progress; nothing was deployed or connected to WhatsApp.
+- Whatsmeow repeats emit the first line and a five-minute count summary. Known media shutdown `context canceled` writes are Info. Dashboard Logging statistics and `archiver status` show the last 7 configured-local calendar days with outage minutes and the longest ledger period; `not_running` is included. No golden file changed.
+- Reliability regressions passed explicitly: `TestKeepAliveDisconnectWithoutDisconnectedEventAlerts`, `TestDialFallsBackFromSystemDNSAndPersistsLastKnownGood`, and `TestNtfyDownTwoHoursDeliversAlertThenRecoveryInOrder`. Full `make check` passed at b0d07ab.
+- Open integration step: W4 must merge to main first; when Hamza confirms that, rebase this branch on `origin/main` and rerun `make check` before merge.
+
 ## Known divergences (W2(f), accepted)
 
 - `ChatList` had no N+1 `Aliases` calls (it used `canonicalOf`, now deleted); the `Aliases` calls in the POST handlers are per selected chat and stay.
