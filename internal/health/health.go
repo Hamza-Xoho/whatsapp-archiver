@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -67,6 +68,7 @@ type Monitor struct {
 	ledger    ConnectionLedger
 	outbox    AlertStore
 	wakeAlert chan struct{}
+	heartbeat *http.Client
 }
 type alert struct{ title, body string }
 
@@ -143,6 +145,17 @@ func (m *Monitor) WithAlertStore(outbox AlertStore) *Monitor {
 	m.gate.durable = true
 	m.gate.send = m.enqueueAlert
 	m.gate.mu.Unlock()
+	return m
+}
+
+// WithHeartbeatClient applies the resilient shared HTTP transport to the
+// optional off-host heartbeat.
+func (m *Monitor) WithHeartbeatClient(client *http.Client) *Monitor {
+	clone := *client
+	if clone.Timeout == 0 {
+		clone.Timeout = 15 * time.Second
+	}
+	m.heartbeat = &clone
 	return m
 }
 func (m *Monitor) Seen(t time.Time, fromMe bool) {
@@ -355,6 +368,8 @@ func (m *Monitor) enqueueAlert(key, kind, title, body string) bool {
 func (m *Monitor) runAlertOutbox(ctx context.Context) {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
+	heartbeat := time.NewTicker(5 * time.Minute)
+	defer heartbeat.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -363,8 +378,41 @@ func (m *Monitor) runAlertOutbox(ctx context.Context) {
 			_ = m.sendDueAlerts(ctx)
 		case <-ticker.C:
 			_ = m.sendDueAlerts(ctx)
+		case <-heartbeat.C:
+			if err := m.pingHeartbeat(ctx); err != nil {
+				m.log.Error("heartbeat ping failed", "err", logsafe.RedactURLs(err.Error()))
+			}
 		}
 	}
+}
+
+func (m *Monitor) pingHeartbeat(ctx context.Context) error {
+	if m.cfg.Alerts.HeartbeatURL == "" || m.heartbeat == nil {
+		return nil
+	}
+	m.mu.Lock()
+	state, lastEvent := m.snapshot.State, m.snapshot.LastEvent
+	m.mu.Unlock()
+	limits := m.cfg.Alerts
+	if m.limits != nil {
+		limits = m.limits()
+	}
+	if state != "connected" || lastEvent.IsZero() || limits.NoEventsAfter <= 0 || m.clock.Now().Sub(lastEvent) > limits.NoEventsAfter {
+		return nil
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, m.cfg.Alerts.HeartbeatURL, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := m.heartbeat.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("heartbeat status %s", resp.Status)
+	}
+	return nil
 }
 
 // sendDueAlerts drains queued rows in id order. A failed oldest row stops the

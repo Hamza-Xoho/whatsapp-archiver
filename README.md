@@ -261,6 +261,7 @@ media:
 alerts:
   # CHANGE the topic to yours from section 5 (default: no alerts at all)
   ntfy: {url: "https://ntfy.sh/CHANGE-TO-A-PRIVATE-TOPIC", token: ""}
+  heartbeat_url: ""          # optional off-host healthchecks-style ping URL; empty is off
   no_events_after: 6h        # "No WhatsApp events" alert
   disconnected_after: 5m     # "WhatsApp disconnected" alert
   phone_quiet_after: 240h    # "Phone inactive" alert
