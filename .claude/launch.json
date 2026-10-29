@@ -1,0 +1,13 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Seeded UI (8090)",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/cmd/archiver",
+      "args": ["run", "--data", "${workspaceFolder}/data/devseed"]
+    }
+  ]
+}
