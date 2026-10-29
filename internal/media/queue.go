@@ -33,6 +33,8 @@ const (
 	requeueAfter  = 15 * time.Minute
 )
 
+var errMediaDisconnected = errors.New("media paused while disconnected")
+
 type Downloader interface {
 	Download(context.Context, []byte, string) ([]byte, error)
 	RequestMediaRetry(context.Context, wa.MediaRef, []byte) error
@@ -147,6 +149,7 @@ func (q *Queue) Run(ctx context.Context) {
 					q.onPanic("media")
 				}
 			}
+			immediate := false
 			for ctx.Err() == nil {
 				resumed := false
 				if !q.connected() {
@@ -160,15 +163,16 @@ func (q *Queue) Run(ctx context.Context) {
 						resumed = true
 					}
 				}
-				if !resumed && !q.waitForWork(ctx) {
+				if !resumed && !immediate && !q.waitForWork(ctx) {
 					return
 				}
+				immediate = false
 				guard.Run(q.log, "media worker", onPanic, func() {
 					if !q.connected() {
 						return
 					}
 					q.work(ctx, &current)
-					q.requestPass(ctx, &current)
+					immediate = q.requestPass(ctx, &current)
 				})
 			}
 		}()
@@ -193,15 +197,15 @@ func (q *Queue) work(ctx context.Context, current **store.Media) {
 
 // requestPass fails re-upload requests unanswered for 24 hours, then handles expired rows until none remain or the
 // limiter waits. A wake interrupts that wait so newly arrived live downloads take priority over history re-uploads.
-func (q *Queue) requestPass(ctx context.Context, current **store.Media) {
+func (q *Queue) requestPass(ctx context.Context, current **store.Media) (immediate bool) {
 	if !q.pass.TryLock() {
-		return
+		return false
 	}
 	defer q.pass.Unlock()
 	for ctx.Err() == nil && q.connected() {
 		now := q.clock.Now()
 		if retryAt := q.nextRequest.Load(); retryAt > now.UnixNano() {
-			return
+			return false
 		}
 		q.nextRequest.Store(0)
 		if now.Unix() >= q.nextStale.Load() {
@@ -213,28 +217,40 @@ func (q *Queue) requestPass(ctx context.Context, current **store.Media) {
 		m, err := q.store.NextExpiredMedia(ctx)
 		if err != nil {
 			q.log.Error("expired media not read", "err", err)
-			return
+			return false
 		}
 		if m == nil {
-			return
+			return false
 		}
 		if reason := noMoreRequests(m); reason != "" {
 			m.State, m.Reason, m.UpdatedAt = "failed", reason, now.Unix()
 			if !q.save(ctx, *m) {
-				return
+				return false
 			}
 			continue
 		}
 		reservation := q.limiter.ReserveN(now, 1)
 		if !reservation.OK() {
-			return
+			return false
 		}
-		if delay := reservation.DelayFrom(now); delay > 0 && !q.waitDelayOrWake(ctx, delay) {
-			reservation.CancelAt(q.clock.Now())
-			return
+		if delay := reservation.DelayFrom(now); delay > 0 {
+			pendingFirst := false
+			if due, ok, err := q.store.NextMediaDue(ctx); err != nil {
+				q.log.Error("next media due time not read", "err", err)
+			} else if ok && !due.After(now.Add(delay)) {
+				delay, pendingFirst = due.Sub(now), true
+			}
+			if delay > 0 && !q.waitDelayOrWake(ctx, delay) {
+				reservation.CancelAt(q.clock.Now())
+				return ctx.Err() == nil
+			}
+			if pendingFirst {
+				reservation.CancelAt(q.clock.Now())
+				return true
+			}
 		}
 		if !q.connected() {
-			return
+			return false
 		}
 		now = q.clock.Now()
 		*current = m
@@ -243,9 +259,10 @@ func (q *Queue) requestPass(ctx context.Context, current **store.Media) {
 		if !sent {
 			q.nextRequest.Store(now.Add(q.requestRetry).UnixNano())
 			q.Wake()
-			return
+			return false
 		}
 	}
+	return false
 }
 
 // noMoreRequests says why m must not be asked for a (further) re-upload, or "" when it may: a re-upload was
@@ -295,11 +312,19 @@ func (q *Queue) save(ctx context.Context, m store.Media) bool {
 }
 func (q *Queue) download(ctx context.Context, m *store.Media) {
 	var data []byte
-	policy := retry.Policy{Max: roundAttempts, Base: time.Second, Sleep: q.sleep, Permanent: func(e error) bool { return errors.Is(e, wa.ErrMediaExpired) }}
+	policy := retry.Policy{Max: roundAttempts, Base: time.Second, Sleep: q.sleep, Permanent: func(e error) bool {
+		return errors.Is(e, wa.ErrMediaExpired) || errors.Is(e, errMediaDisconnected)
+	}}
 	charged := 0
 	_, err := retry.Do(ctx, policy, func() error {
+		if !q.connected() {
+			return errMediaDisconnected
+		}
 		var e error
 		data, e = q.down.Download(ctx, m.RawProto, m.RetryDirectPath)
+		if e != nil && !q.connected() {
+			return errMediaDisconnected
+		}
 		_, class, _ := wa.DescribeDownloadError(e)
 		if class != "network" {
 			charged++
@@ -310,6 +335,12 @@ func (q *Queue) download(ctx context.Context, m *store.Media) {
 	m.UpdatedAt = now.Unix()
 	reason, class, status := wa.DescribeDownloadError(err)
 	m.Attempts += charged
+	if errors.Is(err, errMediaDisconnected) {
+		m.State, m.Reason, m.ErrorClass, m.HTTPStatus = "pending", "", "", 0
+		m.NextAttemptAt = now.Unix()
+		q.save(ctx, *m)
+		return
+	}
 	if errors.Is(err, wa.ErrMediaExpired) {
 		m.State = "expired" // the next request pass asks for a re-upload
 		m.Reason, m.ErrorClass, m.HTTPStatus = reason, class, status
