@@ -148,15 +148,19 @@ func (q *Queue) Run(ctx context.Context) {
 				}
 			}
 			for ctx.Err() == nil {
+				resumed := false
 				if !q.connected() {
 					select {
 					case <-ctx.Done():
 						return
 					case <-q.wake:
-						continue
+						if !q.connected() {
+							continue
+						}
+						resumed = true
 					}
 				}
-				if !q.waitForWork(ctx) {
+				if !resumed && !q.waitForWork(ctx) {
 					return
 				}
 				guard.Run(q.log, "media worker", onPanic, func() {
