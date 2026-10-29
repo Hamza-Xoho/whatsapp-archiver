@@ -2,6 +2,8 @@ package health
 
 import (
 	"context"
+	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -38,6 +40,69 @@ func TestConnectionStatesWriteOutageLedgerAndBacklogCounts(t *testing.T) {
 	if ledger.preview != 17 || ledger.completed != 15 {
 		t.Fatalf("preview=%d completed=%d", ledger.preview, ledger.completed)
 	}
+}
+
+func TestConcurrentConnectionTransitionsKeepLedgerOrder(t *testing.T) {
+	c := &clock{time.Unix(100, 0).UTC()}
+	ledger := &blockingConnectionLedger{
+		opened:  make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	m := NewMonitor(&config.Config{DataDir: t.TempDir()}, nil, c, nil, func() string { return "v" }).WithConnectionLedger(ledger)
+	m.SetState("connected", "")
+
+	reconnectingDone := make(chan struct{})
+	go func() {
+		m.SetState("reconnecting", "reconnect_failed{class=tcp,count=1}")
+		close(reconnectingDone)
+	}()
+	<-ledger.opened
+	connectedDone := make(chan struct{})
+	go func() {
+		m.SetState("connected", "")
+		close(connectedDone)
+	}()
+	select {
+	case <-connectedDone:
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(ledger.release)
+	<-reconnectingDone
+	<-connectedDone
+
+	ledger.mu.Lock()
+	defer ledger.mu.Unlock()
+	if !slices.Equal(ledger.operations, []string{"open", "close"}) {
+		t.Fatalf("ledger operations=%v, want transition order [open close]", ledger.operations)
+	}
+}
+
+type blockingConnectionLedger struct {
+	mu         sync.Mutex
+	opened     chan struct{}
+	release    chan struct{}
+	operations []string
+}
+
+func (f *blockingConnectionLedger) OpenConnectionPeriod(context.Context, store.ConnectionPeriod) (int64, error) {
+	close(f.opened)
+	<-f.release
+	f.mu.Lock()
+	f.operations = append(f.operations, "open")
+	f.mu.Unlock()
+	return 1, nil
+}
+
+func (f *blockingConnectionLedger) CloseConnectionPeriod(context.Context, int64) (bool, error) {
+	f.mu.Lock()
+	f.operations = append(f.operations, "close")
+	f.mu.Unlock()
+	return true, nil
+}
+
+func (f *blockingConnectionLedger) NoteConnectionError(context.Context, string) error { return nil }
+func (f *blockingConnectionLedger) NoteOfflineSync(context.Context, *int64, *int64) error {
+	return nil
 }
 
 type connectionLedgerFake struct {
