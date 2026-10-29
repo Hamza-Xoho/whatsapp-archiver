@@ -24,6 +24,11 @@
       <li>Media done within 5 min (24 hours): <strong>{{.Media24Hours}}</strong></li>
       <li>Media done within 5 min (7 days): <strong>{{.Media7Days}}</strong></li>
     </ul>
+    {{if .HasOutages}}
+    <h3>Outage minutes by day</h3>
+    <ul class="counts">{{range .Outages}}{{if .Minutes}}<li>{{.Date}}: <strong>{{.Minutes}}</strong> minutes</li>{{end}}{{end}}</ul>
+    <p>Longest outage: <strong>{{.LongestOutageMinutes}}</strong> minutes</p>
+    {{end}}
   </section>
   {{end}}
   <section class="panel">
