@@ -186,8 +186,12 @@ func TestDashboardShowsLiveMediaDoneWithinFiveMinutes(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if err := testkit.InsertMedia(t.Context(), d.st, store.Media{ChatJID: "g@g.us", MessageID: "week", Source: "live", Type: "image",
+		State: "done", EnqueuedAt: dashNow.Add(-48 * time.Hour).Unix(), DoneAt: dashNow.Add(-48*time.Hour + 4*time.Minute).Unix()}); err != nil {
+		t.Fatal(err)
+	}
 	got := d.page(t, "/")
-	for _, want := range []string{"Media done within 5 min (24 hours): 33.3% (1/3)", "Media done within 5 min (7 days): 33.3% (1/3)"} {
+	for _, want := range []string{"Media done within 5 min (24 hours): 33.3% (1/3)", "Media done within 5 min (7 days): 50.0% (2/4)"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("dashboard lacks %q: %s", want, got)
 		}
