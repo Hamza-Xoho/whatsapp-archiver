@@ -28,6 +28,11 @@ func (s *Store) RecordProcessStart(ctx context.Context, now int64) error {
 		if parseErr != nil {
 			return fmt.Errorf("parse last alive: %w", parseErr)
 		}
+		if last > 0 && last <= now {
+			if _, err = tx.ExecContext(ctx, `UPDATE connection_periods SET ended_at=? WHERE ended_at IS NULL`, last); err != nil {
+				return fmt.Errorf("close connection period at last heartbeat: %w", err)
+			}
+		}
 		if last > 0 && last < now {
 			if _, err = tx.ExecContext(ctx, `INSERT INTO connection_periods(state,started_at,ended_at,cause_class) VALUES('not_running',?,?,'not_running')`, last, now); err != nil {
 				return fmt.Errorf("record process downtime: %w", err)
