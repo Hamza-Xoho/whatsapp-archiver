@@ -60,9 +60,9 @@ func (d *fakeDown) requests() []wa.MediaRef {
 
 // testClock is a goroutine-safe fake clock that counts reads, so a test can wait for later worker passes.
 type testClock struct {
-	mu    sync.Mutex
-	now   time.Time
-	reads int
+	mu     sync.Mutex
+	now    time.Time
+	reads  int
 	timers []fakeTimer
 }
 
