@@ -136,7 +136,10 @@ CREATE VIRTUAL TABLE search_tri USING fts5(body, content='', contentless_delete=
 
 -- Aliases ga/gm/gs are distinct on purpose: the status report's query plan test counts scans of "messages m".
 CREATE VIEW open_gaps AS
-SELECT e.*, c.canonical AS canonical_jid
+SELECT e.*, c.canonical AS canonical_jid,
+  EXISTS (SELECT 1 FROM connection_periods p
+          WHERE p.ended_at IS NOT NULL
+            AND e.received_at BETWEEN p.ended_at AND p.ended_at + 120) AS post_outage
 FROM message_events e JOIN chat_canonical c ON c.alias = e.chat_jid
 WHERE e.kind = 'undecryptable'
   AND NOT EXISTS (SELECT 1 FROM chat_canonical ga JOIN messages gm ON gm.chat_jid = ga.alias
