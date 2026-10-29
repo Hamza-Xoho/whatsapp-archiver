@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
@@ -53,6 +54,13 @@ type Socket interface {
 // UseSocket replaces the WhatsApp connection with s. Tests outside this package use it so that nothing reaches
 // WhatsApp; the service never calls it.
 func (c *Client) UseSocket(s Socket) { c.sock = s }
+
+// UseHTTPClient applies the resilient transport to logged-in websocket dials
+// and media downloads. The two whatsmeow setters are receive-only plumbing.
+func (c *Client) UseHTTPClient(h *http.Client) {
+	c.client.SetWebsocketHTTPClient(h)
+	c.client.SetMediaHTTPClient(h)
+}
 
 // WithConnectionHealth enables keepalive state reporting and the independent
 // socket watchdog. Call it before Run.
