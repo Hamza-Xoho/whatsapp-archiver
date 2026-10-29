@@ -25,6 +25,14 @@ type ConnectionLedger interface {
 	NoteConnectionError(context.Context, string) error
 	NoteOfflineSync(context.Context, *int64, *int64) error
 }
+type AlertStore interface {
+	EnqueueAlert(context.Context, store.Alert) (int64, error)
+	OldestQueuedAlert(context.Context) (store.Alert, bool, error)
+	ActiveAlertKeys(context.Context) ([]string, error)
+	AlertSent(context.Context, int64, int64) error
+	AlertSkipped(context.Context, int64) error
+	AlertFailed(context.Context, int64, string, int64) error
+}
 type Snapshot struct {
 	State           string    `json:"state"`
 	Detail          string    `json:"detail"`
@@ -57,6 +65,8 @@ type Monitor struct {
 	log       *slog.Logger
 	bus       *activity.Bus // nil: nothing is published
 	ledger    ConnectionLedger
+	outbox    AlertStore
+	wakeAlert chan struct{}
 }
 type alert struct{ title, body string }
 
@@ -71,8 +81,8 @@ var stateTitles = map[string]string{
 
 func NewMonitor(cfg *config.Config, n Notifier, c Clock, disk func(string) (uint64, error), version func() string) *Monitor {
 	now := c.Now()
-	m := &Monitor{cfg: cfg, n: n, clock: c, diskFree: disk, version: version, started: now, downSince: now, queue: make(chan alert, 16), log: slog.Default()}
-	m.gate = &alertGate{now: c.Now, send: m.notify, fired: map[string]time.Time{}}
+	m := &Monitor{cfg: cfg, n: n, clock: c, diskFree: disk, version: version, started: now, downSince: now, queue: make(chan alert, 16), wakeAlert: make(chan struct{}, 1), log: slog.Default()}
+	m.gate = &alertGate{now: c.Now, send: func(_, _, title, body string) bool { return m.notify(title, body) }, fired: map[string]time.Time{}}
 	m.learnActiveAlerts()
 	return m
 }
@@ -115,6 +125,26 @@ func (m *Monitor) WithActivity(b *activity.Bus) *Monitor { m.bus = b; return m }
 
 // WithConnectionLedger records every non-connected period and its reconnect backlog evidence.
 func (m *Monitor) WithConnectionLedger(ledger ConnectionLedger) *Monitor { m.ledger = ledger; return m }
+
+// WithAlertStore switches the production monitor from its compatibility
+// in-memory queue to the durable alerts table and restores the active gate.
+func (m *Monitor) WithAlertStore(outbox AlertStore) *Monitor {
+	m.outbox = outbox
+	keys, err := outbox.ActiveAlertKeys(context.Background())
+	if err != nil {
+		m.log.Error("active alerts could not be restored", "err", err)
+		keys = nil
+	}
+	m.gate.mu.Lock()
+	m.gate.fired = make(map[string]time.Time, len(keys))
+	for _, key := range keys {
+		m.gate.fired[key] = m.clock.Now()
+	}
+	m.gate.durable = true
+	m.gate.send = m.enqueueAlert
+	m.gate.mu.Unlock()
+	return m
+}
 func (m *Monitor) Seen(t time.Time, fromMe bool) {
 	m.mu.Lock()
 	m.snapshot.LastEvent = t
@@ -287,6 +317,10 @@ func (m *Monitor) Status() Snapshot { m.mu.Lock(); defer m.mu.Unlock(); return m
 
 // Run checks the rules every minute and owns the goroutine that sends alerts; it returns after that goroutine has.
 func (m *Monitor) Run(ctx context.Context) {
+	if m.outbox != nil {
+		m.runAlertOutbox(ctx)
+		return
+	}
 	sent := make(chan struct{})
 	go func() { defer close(sent); m.sendAlerts(ctx) }()
 	defer func() { <-sent }()
@@ -300,6 +334,79 @@ func (m *Monitor) Run(ctx context.Context) {
 			m.check()
 		}
 	}
+}
+
+func (m *Monitor) enqueueAlert(key, kind, title, body string) bool {
+	now := m.clock.Now().Unix()
+	_, err := m.outbox.EnqueueAlert(context.Background(), store.Alert{
+		Key: key, Kind: kind, Title: title, Body: body, RaisedAt: now, NextAttemptAt: now,
+	})
+	if err != nil {
+		m.log.Error("alert not stored", "title", title, "err", err)
+		return false
+	}
+	select {
+	case m.wakeAlert <- struct{}{}:
+	default:
+	}
+	return true
+}
+
+func (m *Monitor) runAlertOutbox(ctx context.Context) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-m.wakeAlert:
+			_ = m.sendDueAlerts(ctx)
+		case <-ticker.C:
+			_ = m.sendDueAlerts(ctx)
+		}
+	}
+}
+
+// sendDueAlerts drains queued rows in id order. A failed oldest row stops the
+// pass, so its recovery can never overtake it.
+func (m *Monitor) sendDueAlerts(ctx context.Context) error {
+	for {
+		a, ok, err := m.outbox.OldestQueuedAlert(ctx)
+		if err != nil || !ok {
+			return err
+		}
+		now := m.clock.Now()
+		if a.NextAttemptAt > now.Unix() {
+			return nil
+		}
+		if m.n == nil {
+			if err = m.outbox.AlertSkipped(ctx, a.ID); err != nil {
+				return err
+			}
+			continue
+		}
+		body := a.Body
+		if now.Unix()-a.RaisedAt >= 60 {
+			body += fmt.Sprintf("\nraised %s, delivered late", time.Unix(a.RaisedAt, 0).UTC().Format("15:04"))
+		}
+		if err = m.n.Notify(ctx, a.Title, body); err != nil {
+			safe := logsafe.RedactNtfy(logsafe.RedactURLs(err.Error()), m.ntfyURL())
+			next := now.Add(alertRetryBackoff(a.Attempts)).Unix()
+			if storeErr := m.outbox.AlertFailed(context.WithoutCancel(ctx), a.ID, safe, next); storeErr != nil {
+				return storeErr
+			}
+			m.log.Error("alert not sent", "title", a.Title, "err", safe)
+			return err
+		}
+		if err = m.outbox.AlertSent(context.WithoutCancel(ctx), a.ID, now.Unix()); err != nil {
+			return err
+		}
+	}
+}
+
+func alertRetryBackoff(attempts int) time.Duration {
+	backoff := time.Minute << min(attempts, 6)
+	return min(backoff, time.Hour)
 }
 func (m *Monitor) check() {
 	m.mu.Lock()
@@ -395,21 +502,22 @@ const alertEvery = 6 * time.Hour
 
 // alertGate sends each alert at most once per alertEvery while it is active and one "recovered" message when it clears.
 type alertGate struct {
-	mu    sync.Mutex
-	now   func() time.Time
-	send  func(title, body string) bool // false when the alert was dropped
-	fired map[string]time.Time
+	mu      sync.Mutex
+	now     func() time.Time
+	send    func(key, kind, title, body string) bool // false when the alert was not stored/queued
+	fired   map[string]time.Time
+	durable bool
 }
 
 func (g *alertGate) fire(key, title, body string) {
 	g.mu.Lock()
 	now := g.now()
 	last, ok := g.fired[key]
-	if ok && now.Sub(last) < alertEvery {
+	if ok && (g.durable || now.Sub(last) < alertEvery) {
 		g.mu.Unlock()
 		return
 	}
-	if g.send(title, body) { // only a queued alert counts as fired, so a dropped one fires again
+	if g.send(key, "raised", title, body) { // only a stored/queued alert counts as fired
 		g.fired[key] = now
 	}
 	g.mu.Unlock()
@@ -420,7 +528,7 @@ func (g *alertGate) clear(key, title string) {
 	delete(g.fired, key)
 	g.mu.Unlock()
 	if ok {
-		g.send(title+": recovered", "Recovered: "+title)
+		g.send(key, "recovered", title+": recovered", "Recovered: "+title)
 	}
 }
 func (m *Monitor) writeLocked() {
