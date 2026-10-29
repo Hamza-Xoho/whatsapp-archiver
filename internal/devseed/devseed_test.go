@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	_ "modernc.org/sqlite"
+	"whatsapp-archiver/internal/activity"
 	"whatsapp-archiver/internal/devseed"
 	"whatsapp-archiver/internal/store"
 )
@@ -84,6 +86,43 @@ func TestSmallSeedHasExpectedKindsAndCounts(t *testing.T) {
 	defer afterDB.Close()
 	if after := derivedState(t, afterDB); after != before {
 		t.Fatalf("RebuildDerived differs from incremental state\n--- incremental\n%s\n--- rebuilt\n%s", before, after)
+	}
+}
+
+func TestSimulateLivePublishesToActivityBus(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	bus := activity.NewBus(100)
+	events, unsubscribe := bus.Subscribe(100)
+	defer unsubscribe()
+	done := make(chan error, 1)
+	data := filepath.Join(t.TempDir(), "live")
+	go func() {
+		_, err := devseed.Seed(ctx, devseed.Options{
+			DataDir: data, Chats: 2, Messages: 16, Seed: 4,
+			SimulateLive: 100, Activity: bus,
+		})
+		done <- err
+	}()
+
+	// Sixteen static messages and two synthetic gaps are followed by the first simulated live message.
+	for i := 0; i < 19; i++ {
+		select {
+		case event := <-events:
+			if i == 18 && event.Kind != "message" {
+				t.Fatalf("first simulated event = %+v, want a message", event)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("timed out after %d activity events", i)
+		}
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("simulator did not stop after cancellation")
 	}
 }
 
