@@ -45,6 +45,12 @@ func (q *Queue) waitForWork(ctx context.Context) bool {
 			due, ok = stale, true
 		}
 	}
+	if requestAt := q.nextRequest.Load(); requestAt > 0 {
+		retry := time.Unix(0, requestAt)
+		if !ok || retry.Before(due) {
+			due, ok = retry, true
+		}
+	}
 	if ok {
 		delay := due.Sub(q.clock.Now())
 		if delay <= 0 {
@@ -73,6 +79,21 @@ func (q *Queue) waitDelay(ctx context.Context, delay time.Duration) bool {
 	}
 	select {
 	case <-ctx.Done():
+		return false
+	case <-q.after(delay):
+		return true
+	}
+}
+
+// waitDelayOrWake lets newly queued live media and connection-state changes preempt a limiter reservation.
+func (q *Queue) waitDelayOrWake(ctx context.Context, delay time.Duration) bool {
+	if delay <= 0 {
+		return true
+	}
+	select {
+	case <-ctx.Done():
+		return false
+	case <-q.wake:
 		return false
 	case <-q.after(delay):
 		return true

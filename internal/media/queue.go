@@ -40,23 +40,25 @@ type Downloader interface {
 }
 type Clock interface{ Now() time.Time }
 type Queue struct {
-	dir       string
-	global    func() (config.MediaRules, error)                // the global media rules, read at each Decide
-	perChat   func(chatJID string) (*config.MediaRules, error) // a chat's own rules or nil; may itself be nil
-	workers   int
-	store     mediaStore
-	down      Downloader
-	clock     Clock
-	log       *slog.Logger
-	wake      chan struct{}
-	limiter   *rate.Limiter
-	onPanic   func(string)
-	connected func() bool         // supplied by serve; false pauses downloads and re-upload requests
-	bus       *activity.Bus       // nil: nothing is published
-	sleep     func(time.Duration) // backoff wait; nil waits on a timer that stops with the context
-	pass      sync.Mutex          // one request pass at a time
-	nextStale atomic.Int64        // unix time; retry_requested cleanup is hourly, not on every pass
-	wg        sync.WaitGroup
+	dir          string
+	global       func() (config.MediaRules, error)                // the global media rules, read at each Decide
+	perChat      func(chatJID string) (*config.MediaRules, error) // a chat's own rules or nil; may itself be nil
+	workers      int
+	store        mediaStore
+	down         Downloader
+	clock        Clock
+	log          *slog.Logger
+	wake         chan struct{}
+	limiter      *rate.Limiter
+	onPanic      func(string)
+	connected    func() bool         // supplied by serve; false pauses downloads and re-upload requests
+	bus          *activity.Bus       // nil: nothing is published
+	sleep        func(time.Duration) // backoff wait; nil waits on a timer that stops with the context
+	pass         sync.Mutex          // one request pass at a time
+	nextStale    atomic.Int64        // unix time; retry_requested cleanup is hourly, not on every pass
+	nextRequest  atomic.Int64        // unix nanoseconds; a failed re-upload request is retried on this due timer
+	requestRetry time.Duration       // delay after a transient re-upload request failure
+	wg           sync.WaitGroup
 }
 
 // NewQueue builds the queue. global and perChat are read at each Decide, so a rule change applies to the next media
@@ -77,7 +79,8 @@ func NewQueue(dir string, global func() (config.MediaRules, error), perChat func
 	if rpm < 1 {
 		rpm = 10
 	}
-	return &Queue{dir: dir, global: global, perChat: perChat, workers: workers, store: st, down: d, clock: c, log: l, wake: make(chan struct{}, 1), limiter: rate.NewLimiter(rate.Every(time.Minute/time.Duration(rpm)), rpm), onPanic: onPanic, connected: func() bool { return true }}
+	requestRetry := time.Minute / time.Duration(rpm)
+	return &Queue{dir: dir, global: global, perChat: perChat, workers: workers, store: st, down: d, clock: c, log: l, wake: make(chan struct{}, 1), limiter: rate.NewLimiter(rate.Every(requestRetry), rpm), onPanic: onPanic, connected: func() bool { return true }, requestRetry: requestRetry}
 }
 
 // WithConnected supplies the connection gate. While it reports false, the queue leaves every row untouched.
@@ -144,7 +147,18 @@ func (q *Queue) Run(ctx context.Context) {
 					q.onPanic("media")
 				}
 			}
-			for q.waitForWork(ctx) {
+			for ctx.Err() == nil {
+				if !q.connected() {
+					select {
+					case <-ctx.Done():
+						return
+					case <-q.wake:
+						continue
+					}
+				}
+				if !q.waitForWork(ctx) {
+					return
+				}
 				guard.Run(q.log, "media worker", onPanic, func() {
 					if !q.connected() {
 						return
@@ -160,6 +174,9 @@ func (q *Queue) Run(ctx context.Context) {
 }
 func (q *Queue) work(ctx context.Context, current **store.Media) {
 	for {
+		if !q.connected() {
+			return
+		}
 		job, err := q.store.ClaimMedia(ctx, q.clock.Now())
 		if err != nil || job == nil {
 			return
@@ -170,15 +187,19 @@ func (q *Queue) work(ctx context.Context, current **store.Media) {
 	}
 }
 
-// requestPass fails re-upload requests unanswered for 24 hours, then asks for re-uploads of expired rows while the
-// limiter (driven by the queue's clock) allows; the rest stay expired for a later pass, also after a restart.
+// requestPass fails re-upload requests unanswered for 24 hours, then handles expired rows until none remain or the
+// limiter waits. A wake interrupts that wait so newly arrived live downloads take priority over history re-uploads.
 func (q *Queue) requestPass(ctx context.Context, current **store.Media) {
 	if !q.pass.TryLock() {
 		return
 	}
 	defer q.pass.Unlock()
-	for ctx.Err() == nil {
+	for ctx.Err() == nil && q.connected() {
 		now := q.clock.Now()
+		if retryAt := q.nextRequest.Load(); retryAt > now.UnixNano() {
+			return
+		}
+		q.nextRequest.Store(0)
 		if now.Unix() >= q.nextStale.Load() {
 			if err := q.store.FailStaleRetries(ctx, now); err != nil {
 				q.log.Error("stale re-upload requests not failed", "err", err)
@@ -196,7 +217,7 @@ func (q *Queue) requestPass(ctx context.Context, current **store.Media) {
 		if reason := noMoreRequests(m); reason != "" {
 			m.State, m.Reason, m.UpdatedAt = "failed", reason, now.Unix()
 			if !q.save(ctx, *m) {
-				return // the row is still expired; the next pass tries again
+				return
 			}
 			continue
 		}
@@ -204,8 +225,11 @@ func (q *Queue) requestPass(ctx context.Context, current **store.Media) {
 		if !reservation.OK() {
 			return
 		}
-		if delay := reservation.DelayFrom(now); delay > 0 && !q.waitDelay(ctx, delay) {
+		if delay := reservation.DelayFrom(now); delay > 0 && !q.waitDelayOrWake(ctx, delay) {
 			reservation.CancelAt(q.clock.Now())
+			return
+		}
+		if !q.connected() {
 			return
 		}
 		now = q.clock.Now()
@@ -213,7 +237,9 @@ func (q *Queue) requestPass(ctx context.Context, current **store.Media) {
 		sent := q.request(ctx, m, now)
 		*current = nil
 		if !sent {
-			return // likely not connected; the next pass tries again
+			q.nextRequest.Store(now.Add(q.requestRetry).UnixNano())
+			q.Wake()
+			return
 		}
 	}
 }
@@ -266,13 +292,20 @@ func (q *Queue) save(ctx context.Context, m store.Media) bool {
 func (q *Queue) download(ctx context.Context, m *store.Media) {
 	var data []byte
 	policy := retry.Policy{Max: roundAttempts, Base: time.Second, Sleep: q.sleep, Permanent: func(e error) bool { return errors.Is(e, wa.ErrMediaExpired) }}
-	attempts, err := retry.Do(ctx, policy, func() error { var e error; data, e = q.down.Download(ctx, m.RawProto, m.RetryDirectPath); return e })
+	charged := 0
+	_, err := retry.Do(ctx, policy, func() error {
+		var e error
+		data, e = q.down.Download(ctx, m.RawProto, m.RetryDirectPath)
+		_, class, _ := wa.DescribeDownloadError(e)
+		if class != "network" {
+			charged++
+		}
+		return e
+	})
 	now := q.clock.Now()
 	m.UpdatedAt = now.Unix()
 	reason, class, status := wa.DescribeDownloadError(err)
-	if class != "network" {
-		m.Attempts += attempts
-	}
+	m.Attempts += charged
 	if errors.Is(err, wa.ErrMediaExpired) {
 		m.State = "expired" // the next request pass asks for a re-upload
 		m.Reason, m.ErrorClass, m.HTTPStatus = reason, class, status
