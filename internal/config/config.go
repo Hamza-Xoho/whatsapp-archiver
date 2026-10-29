@@ -54,6 +54,7 @@ type BackupConfig struct {
 }
 type AlertConfig struct {
 	Ntfy              *NtfyConfig   `yaml:"ntfy"`
+	HeartbeatURL      string        `yaml:"heartbeat_url" json:"-"`
 	NoEventsAfter     time.Duration `yaml:"no_events_after"`
 	DisconnectedAfter time.Duration `yaml:"disconnected_after"`
 	PhoneQuietAfter   time.Duration `yaml:"phone_quiet_after"`

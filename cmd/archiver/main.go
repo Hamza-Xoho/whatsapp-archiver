@@ -164,7 +164,7 @@ func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) er
 	if cfg.Alerts.Ntfy != nil {
 		notifier = health.NewNtfyWithClient(cfg.Alerts.Ntfy, httpClient)
 	}
-	mon := health.NewMonitor(cfg, notifier, systemClock{}, health.DiskFree, client.VersionInUse).WithVersionReason(client.VersionReason).WithLogger(log).WithThresholds(live.alerts).WithActivity(bus).WithConnectionLedger(st).WithAlertStore(st)
+	mon := health.NewMonitor(cfg, notifier, systemClock{}, health.DiskFree, client.VersionInUse).WithVersionReason(client.VersionReason).WithLogger(log).WithThresholds(live.alerts).WithActivity(bus).WithConnectionLedger(st).WithAlertStore(st).WithHeartbeatClient(httpClient)
 	client.WithConnectionHealth(mon)
 	queue := media.NewQueue(cfg.DataDir, live.media, live.chatMedia, st, client, systemClock{}, log, mon.Panic).WithActivity(bus)
 	filter := ingest.NewFilter(rules, aliases)
