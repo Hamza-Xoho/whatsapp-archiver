@@ -53,6 +53,7 @@ type dashboardData struct {
 	History                     string
 	Logging, NotLogging, Gaps   int
 	LoggingNoun, NotLoggingNoun string
+	Media24Hours, Media7Days    string
 	Events                      []feedItem
 }
 
@@ -72,6 +73,13 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "the archive could not be read", http.StatusInternalServerError)
 			return
 		}
+		media, err := s.d.Store.MediaTimeliness(ctx, s.d.Now())
+		if err != nil {
+			http.Error(w, "the archive could not be read", http.StatusInternalServerError)
+			return
+		}
+		data.Media24Hours = view.PercentageCount(media.DayDone, media.DayTotal)
+		data.Media7Days = view.PercentageCount(media.WeekDone, media.WeekTotal)
 		filter := ingest.NewFilter(s.d.Rules, func(jid string) ([]string, error) { return s.d.Store.Aliases(ctx, jid) })
 		for _, c := range report.Chats {
 			names[c.CanonicalJID] = c.Name

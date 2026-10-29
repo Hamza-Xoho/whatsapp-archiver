@@ -212,18 +212,25 @@ func (p *Pipeline) Handle(evt any) (ack bool) {
 			p.queue.OnRetry(ctx, e)
 		case *events.Connected:
 			p.health.SetState("connected", "")
+			p.queue.Wake()
 		case *events.Disconnected:
 			p.health.SetState("disconnected", "")
+			p.queue.Wake()
 		case *events.LoggedOut:
 			p.health.SetState("logged_out", fmt.Sprint(e.Reason))
+			p.queue.Wake()
 		case *events.ClientOutdated:
 			p.health.SetState("client_outdated", "")
+			p.queue.Wake()
 		case *events.TemporaryBan:
 			p.health.SetState("temp_banned", fmt.Sprint(e.Expire))
+			p.queue.Wake()
 		case *events.StreamReplaced:
 			p.health.SetState("stream_replaced", "")
+			p.queue.Wake()
 		case *events.ConnectFailure:
 			p.health.SetState("disconnected", fmt.Sprintf("%v %s", e.Reason, e.Message))
+			p.queue.Wake()
 		default:
 			p.log.Debug("ignored event", "type", fmt.Sprintf("%T", evt))
 		}

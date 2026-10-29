@@ -2,9 +2,13 @@ package wa
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -130,14 +134,47 @@ func TestHistoryPropsUseConfiguredLimits(t *testing.T) {
 	}
 }
 func TestClassifyDownloadErr(t *testing.T) {
-	for _, err := range []error{whatsmeow.ErrMediaDownloadFailedWith404, whatsmeow.ErrMediaDownloadFailedWith410} {
-		if !errors.Is(classifyDownloadErr(err), ErrMediaExpired) {
-			t.Fatalf("err=%v", err)
+	for _, tt := range []struct {
+		err    error
+		status int
+	}{
+		{whatsmeow.ErrMediaDownloadFailedWith403, 403},
+		{whatsmeow.ErrMediaDownloadFailedWith404, 404},
+		{whatsmeow.ErrMediaDownloadFailedWith410, 410},
+	} {
+		got := classifyDownloadErr(tt.err)
+		if !errors.Is(got, ErrMediaExpired) {
+			t.Fatalf("err=%v", tt.err)
+		}
+		reason, class, status := DescribeDownloadError(got)
+		if class != "expired" || status != tt.status || !strings.Contains(reason, fmt.Sprint(tt.status)) {
+			t.Fatalf("DescribeDownloadError(%v) = %q, %q, %d", tt.err, reason, class, status)
 		}
 	}
 	other := errors.New("network")
 	if !errors.Is(classifyDownloadErr(other), other) {
 		t.Fatal("other error lost")
+	}
+}
+
+func TestClassifyNetworkDownloadErr(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		err    error
+		status int
+	}{
+		{"dns", &net.DNSError{Err: "no such host", Name: "mmg.whatsapp.net"}, 0},
+		{"timeout", context.DeadlineExceeded, 0},
+		{"server", whatsmeow.DownloadHTTPError{Response: &http.Response{StatusCode: 503}}, 503},
+		{"media conn", errors.New("failed to refresh media connections: temporarily unavailable"), 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := classifyDownloadErr(tt.err)
+			_, class, status := DescribeDownloadError(got)
+			if class != "network" || status != tt.status {
+				t.Fatalf("classification = %q/%d, want network/%d", class, status, tt.status)
+			}
+		})
 	}
 }
 

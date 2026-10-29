@@ -21,6 +21,8 @@
       <li>Logging: <strong>{{.Logging}}</strong> {{.LoggingNoun}}</li>
       <li>Not logging: <strong>{{.NotLogging}}</strong> {{.NotLoggingNoun}}</li>
       <li class="{{if .Gaps}}warn{{end}}">Open gaps: <strong>{{.Gaps}}</strong></li>
+      <li>Media done within 5 min (24 hours): <strong>{{.Media24Hours}}</strong></li>
+      <li>Media done within 5 min (7 days): <strong>{{.Media7Days}}</strong></li>
     </ul>
   </section>
   {{end}}

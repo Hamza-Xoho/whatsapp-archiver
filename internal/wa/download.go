@@ -4,23 +4,77 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"strings"
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
+	"whatsapp-archiver/internal/logsafe"
 )
 
 var ErrMediaExpired = errors.New("media expired")
 
+type downloadError struct {
+	err        error
+	class      string
+	httpStatus int
+	expired    bool
+}
+
+func (e *downloadError) Error() string { return fmt.Sprintf("download media: %v", e.err) }
+func (e *downloadError) Unwrap() error { return e.err }
+func (e *downloadError) Is(target error) bool {
+	return e.expired && target == ErrMediaExpired
+}
+
 func classifyDownloadErr(err error) error {
-	if errors.Is(err, whatsmeow.ErrMediaDownloadFailedWith404) || errors.Is(err, whatsmeow.ErrMediaDownloadFailedWith410) {
-		return ErrMediaExpired
+	if err == nil {
+		return nil
 	}
-	if err != nil {
-		return fmt.Errorf("download media: %w", err)
+	classified := &downloadError{err: err, class: "other"}
+	var httpErr whatsmeow.DownloadHTTPError
+	if errors.As(err, &httpErr) {
+		classified.httpStatus = httpErr.StatusCode
 	}
-	return nil
+	if errors.Is(err, whatsmeow.ErrMediaDownloadFailedWith403) ||
+		errors.Is(err, whatsmeow.ErrMediaDownloadFailedWith404) ||
+		errors.Is(err, whatsmeow.ErrMediaDownloadFailedWith410) {
+		classified.class = "expired"
+		classified.expired = true
+	} else if isNetworkDownloadError(err, classified.httpStatus) {
+		classified.class = "network"
+	}
+	return classified
+}
+
+func isNetworkDownloadError(err error, status int) bool {
+	if status >= 500 && status <= 599 || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var networkErr net.Error
+	if errors.As(err, &networkErr) {
+		return true
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "failed to refresh media connection")
+}
+
+// DescribeDownloadError returns the complete safe reason and the fields persisted with a failed media row.
+func DescribeDownloadError(err error) (reason, class string, httpStatus int) {
+	if err == nil {
+		return "", "", 0
+	}
+	reason, class = logsafe.RedactURLs(err.Error()), "other"
+	var classified *downloadError
+	if errors.As(err, &classified) {
+		class, httpStatus = classified.class, classified.httpStatus
+	} else if errors.Is(err, ErrMediaExpired) {
+		class = "expired"
+	} else if isNetworkDownloadError(err, 0) {
+		class = "network"
+	}
+	return reason, class, httpStatus
 }
 
 func (c *Client) Download(ctx context.Context, raw []byte, directPathOverride string) ([]byte, error) {

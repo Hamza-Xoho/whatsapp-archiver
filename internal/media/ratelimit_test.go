@@ -15,13 +15,12 @@ func expiredDown() *fakeDown {
 	return &fakeDown{download: func([]byte, string) ([]byte, error) { return nil, wa.ErrMediaExpired }}
 }
 
-// waitRequests waits until n re-upload requests were sent, then lets 20 more clock reads (later worker passes at
-// the same fake time) happen and checks that no further request was sent.
-func waitRequests(t *testing.T, d *fakeDown, c *testClock, n int) {
+// waitRequests waits until n re-upload requests were sent, then checks that the scheduled queue sends no more until
+// the fake clock advances to the reservation time.
+func waitRequests(t *testing.T, d *fakeDown, _ *testClock, n int) {
 	t.Helper()
 	eventually(t, fmt.Sprintf("%d re-upload requests", n), func() bool { return len(d.requests()) >= n })
-	reads := c.Reads()
-	eventually(t, "later worker passes", func() bool { return c.Reads() >= reads+20 })
+	time.Sleep(250 * time.Millisecond)
 	if got := len(d.requests()); got != n {
 		t.Fatalf("re-upload requests = %d, want %d", got, n)
 	}

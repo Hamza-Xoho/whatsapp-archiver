@@ -32,6 +32,28 @@ const (
 	mediaByIDQuery   = `SELECT ` + withRawProto + ` FROM media WHERE chat_jid=? AND message_id=?`
 )
 
+// MediaTimeliness is SC-3 for enabled live media in the trailing day and week.
+type MediaTimeliness struct {
+	DayDone, DayTotal   int
+	WeekDone, WeekTotal int
+}
+
+// MediaTimeliness counts non-skipped live rows and those completed no more than five minutes after enqueue.
+func (s *Store) MediaTimeliness(ctx context.Context, now time.Time) (MediaTimeliness, error) {
+	var m MediaTimeliness
+	day := now.Add(-24 * time.Hour).Unix()
+	week := now.Add(-7 * 24 * time.Hour).Unix()
+	err := s.read.QueryRowContext(ctx, `SELECT
+ COALESCE(SUM(CASE WHEN enqueued_at>=?1 AND state='done' AND done_at>=enqueued_at AND done_at-enqueued_at<=300 THEN 1 ELSE 0 END),0),
+ COALESCE(SUM(CASE WHEN enqueued_at>=?1 THEN 1 ELSE 0 END),0),
+ COALESCE(SUM(CASE WHEN state='done' AND done_at>=enqueued_at AND done_at-enqueued_at<=300 THEN 1 ELSE 0 END),0),
+ COUNT(*)
+ FROM media INDEXED BY media_live_enqueued
+ WHERE source='live' AND state<>'skipped' AND enqueued_at>=?2`, day, week).
+		Scan(&m.DayDone, &m.DayTotal, &m.WeekDone, &m.WeekTotal)
+	return m, err
+}
+
 // MediaByID reads one media row with its raw proto.
 func (s *Store) MediaByID(ctx context.Context, chat, id string) (Media, error) {
 	var m Media
@@ -46,6 +68,18 @@ func (s *Store) MediaThumb(ctx context.Context, chat, id string) ([]byte, error)
 		return nil, fmt.Errorf("thumbnail of %s: %w", id, err)
 	}
 	return thumb, nil
+}
+
+// NextMediaDue returns the earliest pending download time. The media_due index makes this one index seek.
+func (s *Store) NextMediaDue(ctx context.Context) (time.Time, bool, error) {
+	var due sql.NullInt64
+	if err := s.read.QueryRowContext(ctx, `SELECT MIN(next_attempt_at) FROM media WHERE state='pending'`).Scan(&due); err != nil {
+		return time.Time{}, false, err
+	}
+	if !due.Valid {
+		return time.Time{}, false, nil
+	}
+	return time.Unix(due.Int64, 0), true, nil
 }
 
 // ClaimMedia marks the next pending row that is due at now as downloading and returns it with its raw proto, or nil.

@@ -172,6 +172,32 @@ func TestDashboardShowsOpenGapsCount(t *testing.T) {
 	}
 }
 
+func TestDashboardShowsLiveMediaDoneWithinFiveMinutes(t *testing.T) {
+	d := newDash(t)
+	for i, elapsed := range []time.Duration{4 * time.Minute, 6 * time.Minute, 0} {
+		state, doneAt := "done", int64(0)
+		if elapsed == 0 {
+			state = "pending"
+		} else {
+			doneAt = dashNow.Add(-time.Hour).Add(elapsed).Unix()
+		}
+		if err := testkit.InsertMedia(t.Context(), d.st, store.Media{ChatJID: "g@g.us", MessageID: fmt.Sprint("m", i), Source: "live", Type: "image",
+			State: state, EnqueuedAt: dashNow.Add(-time.Hour).Unix(), DoneAt: doneAt}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := testkit.InsertMedia(t.Context(), d.st, store.Media{ChatJID: "g@g.us", MessageID: "week", Source: "live", Type: "image",
+		State: "done", EnqueuedAt: dashNow.Add(-48 * time.Hour).Unix(), DoneAt: dashNow.Add(-48*time.Hour + 4*time.Minute).Unix()}); err != nil {
+		t.Fatal(err)
+	}
+	got := d.page(t, "/")
+	for _, want := range []string{"Media done within 5 min (24 hours): 33.3% (1/3)", "Media done within 5 min (7 days): 50.0% (2/4)"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("dashboard lacks %q: %s", want, got)
+		}
+	}
+}
+
 // The panel alone is what a health event swaps in; the page includes the same panel and listens for the event.
 func TestHealthPartialIsThePanelOnly(t *testing.T) {
 	d := newDash(t)

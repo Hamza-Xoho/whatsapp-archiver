@@ -50,8 +50,7 @@ func TestReuploadedMediaThatExpiresAgainFailsAfterOneRequest(t *testing.T) {
 	})
 	for i := 0; i < 3; i++ { // later passes, minutes apart: the limiter refills but nothing may be requested
 		clock.Advance(2 * time.Minute)
-		reads := clock.Reads()
-		eventually(t, "later worker passes", func() bool { return clock.Reads() >= reads+20 })
+		time.Sleep(50 * time.Millisecond)
 	}
 	stop()
 	if n := len(d.requests()); n != 1 {
@@ -76,8 +75,7 @@ func TestExpiredRowAtAttemptCapFailsWithoutRequest(t *testing.T) {
 	eventually(t, "row failed or requested", func() bool {
 		return row(t, st, "123@g.us", "CAP").State == "failed" || len(d.requests()) > 0
 	})
-	reads := clock.Reads()
-	eventually(t, "later worker passes", func() bool { return clock.Reads() >= reads+20 })
+	time.Sleep(250 * time.Millisecond)
 	stop()
 	if n := len(d.requests()); n != 0 {
 		t.Fatalf("re-upload requests = %d, want 0", n)

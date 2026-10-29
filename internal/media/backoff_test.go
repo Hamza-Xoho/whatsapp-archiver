@@ -73,8 +73,7 @@ func TestTransientFailureIsRetriedAfterBackoff(t *testing.T) {
 	if w := waits.waits(); !equalDurations(w, []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second}) {
 		t.Fatalf("backoff waits = %v", w)
 	}
-	reads := clock.Reads()
-	eventually(t, "later worker passes", func() bool { return clock.Reads() >= reads+20 })
+	time.Sleep(250 * time.Millisecond)
 	if n := len(d.calls()); n != 5 {
 		t.Fatalf("downloads before the re-queue time = %d, want 5", n)
 	}
@@ -123,8 +122,7 @@ func TestAlwaysFailingDownloadFailsAfterTwentyAttempts(t *testing.T) {
 		clock.Advance(15 * time.Minute)
 	}
 	eventually(t, "row failed", func() bool { return row(t, st, "123@g.us", "BAD").State == "failed" })
-	reads := clock.Reads()
-	eventually(t, "later worker passes", func() bool { return clock.Reads() >= reads+20 })
+	time.Sleep(250 * time.Millisecond)
 	stop()
 	m := row(t, st, "123@g.us", "BAD")
 	if m.Attempts != 20 || !strings.Contains(m.Reason, "connection reset") || len(d.calls()) != 20 {

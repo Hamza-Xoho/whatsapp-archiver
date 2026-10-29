@@ -53,6 +53,20 @@ func TestRepoHasNoViolations(t *testing.T) {
 	}
 }
 
+func TestServePassesWhatsAppConnectionGateToMediaQueue(t *testing.T) {
+	_, file, _, _ := runtime.Caller(0)
+	root := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	src, err := os.ReadFile(filepath.Join(root, "cmd", "archiver", "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(src)
+	if !strings.Contains(text, `mediaConnected := func() bool { return mon.Status().State == "connected" }`) ||
+		!strings.Contains(text, ".WithConnected(mediaConnected).WithActivity(bus)") {
+		t.Fatal("serve must pass the health monitor's connected-state gate to the media queue")
+	}
+}
+
 func scanFixture(t *testing.T, name string) []archtest.Violation {
 	t.Helper()
 	root := t.TempDir()
