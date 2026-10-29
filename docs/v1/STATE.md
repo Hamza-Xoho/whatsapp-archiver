@@ -84,6 +84,7 @@ Single status record for V1 (max 150 lines, update in place; history lives in gi
 ## W6 UI specification
 
 - W6.0 done 29 Oct 2026: Hamza accepted all seven recommended product decisions. `docs/v1/ui.md` specifies text wireframes, states, copy, accessibility, 375 px mobile, dark mode, RTL Arabic and performance budgets for W6(a)-(g). No Go code changed.
+- W6.0 review 29 Oct 2026: no Critical findings; one Important fixed through red `3788cfd` and green `77b972f`. `TestUIHistoryStallCopyUsesPlanThreshold` pins the W5.2 48-hour stalled-history threshold. Full `make check` passed; no deviations or open questions.
 
 ## Rulings
 
