@@ -246,13 +246,13 @@ func (q *Queue) download(ctx context.Context, m *store.Media) {
 	m.UpdatedAt = now.Unix()
 	if errors.Is(err, wa.ErrMediaExpired) {
 		m.State = "expired" // the next request pass asks for a re-upload
-		m.Reason = err.Error()
+		m.Reason, m.ErrorClass, m.HTTPStatus = wa.DescribeDownloadError(err)
 		q.save(ctx, *m)
 		return
 	}
 	if err != nil {
 		m.State = "failed"
-		m.Reason = err.Error()
+		m.Reason, m.ErrorClass, m.HTTPStatus = wa.DescribeDownloadError(err)
 		if m.Attempts < maxAttempts {
 			m.State = "pending" // a later round, after the network had time to come back
 			m.NextAttemptAt = now.Add(requeueAfter).Unix()
@@ -278,6 +278,8 @@ func (q *Queue) download(ctx context.Context, m *store.Media) {
 		m.Path = path
 		m.SHA256 = hex.EncodeToString(sum[:])
 		m.Reason = ""
+		m.ErrorClass = ""
+		m.HTTPStatus = 0
 	}
 	q.save(ctx, *m)
 }

@@ -52,7 +52,7 @@ All rows refer to `v0.0.0-20261013142727-4cf8bc8e0aeb`.
 | History LID mappings | `HistorySync.GetPhoneNumberToLidMappings() []*waHistorySync.PhoneNumberToLIDMapping`; conversation IDs remain in `Conversation.ID` | `proto/waHistorySync/...pb.go`, `message.go` | pinned |
 | Parse a history message | `(*whatsmeow.Client).ParseWebMessage(chatJID types.JID, webMsg *waWeb.WebMessageInfo) (*events.Message, error)` | `client.go` | pinned |
 | Download media | `(*whatsmeow.Client).Download(ctx context.Context, msg whatsmeow.DownloadableMessage) ([]byte, error)` | `download.go` | pinned |
-| Expired-media errors | `whatsmeow.ErrMediaDownloadFailedWith404`, `whatsmeow.ErrMediaDownloadFailedWith410` | `errors.go` | pinned |
+| Expired-media errors | `whatsmeow.ErrMediaDownloadFailedWith403`, `whatsmeow.ErrMediaDownloadFailedWith404`, `whatsmeow.ErrMediaDownloadFailedWith410`; each is a `whatsmeow.DownloadHTTPError` whose `Response.StatusCode` carries the status. `DownloadMediaWithPath` returns all three without trying another host (`download.go:279-286`) | `errors.go:117-134`, `download.go:279-286` | pinned |
 | Request media re-upload | `(*whatsmeow.Client).SendMediaRetryReceipt(ctx context.Context, message *types.MessageInfo, mediaKey []byte) error` | `mediaretry.go` | pinned |
 | Decrypt media retry | `whatsmeow.DecryptMediaRetryNotification(evt *events.MediaRetry, mediaKey []byte) (*waMmsRetry.MediaRetryNotification, error)` | `mediaretry.go` | pinned |
 | Session SQL store | `sqlstore.New(ctx context.Context, dialect, address string, log waLog.Logger) (*Container, error)`; modernc dialect `sqlite`, DSN `file:<path>?_pragma=foreign_keys(1)&_pragma=busy_timeout(5000)&_txlock=immediate` (`internal/wa/session.go`) | `store/sqlstore/container.go` | pinned |
