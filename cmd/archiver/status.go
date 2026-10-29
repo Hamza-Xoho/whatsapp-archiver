@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"time"
 	"whatsapp-archiver/internal/config"
 	"whatsapp-archiver/internal/health"
 	"whatsapp-archiver/internal/ingest"
@@ -54,6 +55,10 @@ func printStatus(cfg *config.Config, out io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("read status: %w", err)
 	}
+	media, err := st.MediaTimeliness(ctx, time.Now())
+	if err != nil {
+		return fmt.Errorf("read media timeliness: %w", err)
+	}
 	coverage, stats := report.Coverage, report.Chats
 	size, err := view.DirSize(cfg.DataDir)
 	if err != nil {
@@ -73,6 +78,8 @@ func printStatus(cfg *config.Config, out io.Writer) error {
 	p("last event: %s", view.FormatTime(loc, snap.LastEvent))
 	p("phone last active: %s", view.FormatTime(loc, snap.PhoneLastActive))
 	p("%s", view.HistoryLine(loc, coverage))
+	p("media done within 5 min (24 hours): %s", view.PercentageCount(media.DayDone, media.DayTotal))
+	p("media done within 5 min (7 days): %s", view.PercentageCount(media.WeekDone, media.WeekTotal))
 	p("name\tcanonical JID\tmessages\toldest\tnewest\tmedia failed\tmedia expired\tmedia pending\topen gaps")
 	var messages, failed, expired, pending, gaps int
 	for _, s := range stats {

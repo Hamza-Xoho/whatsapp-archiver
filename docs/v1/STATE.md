@@ -79,6 +79,7 @@ Single status record for V1 (max 150 lines, update in place; history lives in gi
 ## W4 media
 
 - W4.3 scheduler store-call budget: N = 45 calls in the first fake minute with 10,000 expired rows (up to 20 rate-limited requests require one read and one state write each; five calls cover startup and due scheduling). Workers otherwise block on wake or the indexed next-due timer; stale retries run hourly.
+- W4.5 CLI golden review, 29 Oct: `cmd/archiver/testdata/status.golden` was edited by hand (no `-update`); exactly two lines were added after history: the 24-hour and 7-day “media done within 5 min” figures. Both are `n/a (0/0)` because the legacy synthetic seed rows deliberately have `enqueued_at=0`; every prior line is unchanged.
 
 ## In flight
 
