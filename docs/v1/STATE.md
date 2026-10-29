@@ -76,6 +76,10 @@ Single status record for V1 (max 150 lines, update in place; history lives in gi
 
 - I2 and I3 done 26 Oct (f3e8484, 879da76, aefb18c + docs; fix round 1 adds I4, ruling (g)): `Aliases` reads `chat_canonical`; history blobs are stripped of secrets before they are spooled; see Rulings (e), (f). The `Aliases` divergence is gone.
 
+## W4 media
+
+- W4.3 scheduler store-call budget: N = 45 calls in the first fake minute with 10,000 expired rows (up to 20 rate-limited requests require one read and one state write each; five calls cover startup and due scheduling). Workers otherwise block on wake or the indexed next-due timer; stale retries run hourly.
+
 ## In flight
 
 - W0 step 3 (Hamza): done 26 Oct: practice instance unlinked on the phone and its process stopped (PID 288900); only the `SaudiSpyWithMyWifi` Wi-Fi profile left; stale DNS 192.168.68.1 gone. Reboot test still open (optional).

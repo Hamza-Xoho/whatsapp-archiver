@@ -48,6 +48,18 @@ func (s *Store) MediaThumb(ctx context.Context, chat, id string) ([]byte, error)
 	return thumb, nil
 }
 
+// NextMediaDue returns the earliest pending download time. The media_due index makes this one index seek.
+func (s *Store) NextMediaDue(ctx context.Context) (time.Time, bool, error) {
+	var due sql.NullInt64
+	if err := s.read.QueryRowContext(ctx, `SELECT MIN(next_attempt_at) FROM media WHERE state='pending'`).Scan(&due); err != nil {
+		return time.Time{}, false, err
+	}
+	if !due.Valid {
+		return time.Time{}, false, nil
+	}
+	return time.Unix(due.Int64, 0), true, nil
+}
+
 // ClaimMedia marks the next pending row that is due at now as downloading and returns it with its raw proto, or nil.
 func (s *Store) ClaimMedia(ctx context.Context, now time.Time) (*Media, error) {
 	tx, err := s.write.BeginTx(ctx, nil)

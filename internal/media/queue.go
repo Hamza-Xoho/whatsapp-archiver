@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sync"
+	"sync/atomic"
 	"time"
 	"whatsapp-archiver/internal/activity"
 	"whatsapp-archiver/internal/config"
@@ -43,7 +44,7 @@ type Queue struct {
 	global    func() (config.MediaRules, error)                // the global media rules, read at each Decide
 	perChat   func(chatJID string) (*config.MediaRules, error) // a chat's own rules or nil; may itself be nil
 	workers   int
-	store     *store.Store
+	store     mediaStore
 	down      Downloader
 	clock     Clock
 	log       *slog.Logger
@@ -54,6 +55,7 @@ type Queue struct {
 	bus       *activity.Bus       // nil: nothing is published
 	sleep     func(time.Duration) // backoff wait; nil waits on a timer that stops with the context
 	pass      sync.Mutex          // one request pass at a time
+	nextStale atomic.Int64        // unix time; retry_requested cleanup is hourly, not on every pass
 	wg        sync.WaitGroup
 }
 
@@ -115,9 +117,12 @@ func (q *Queue) Wake() {
 	}
 }
 func (q *Queue) Run(ctx context.Context) {
-	if err := q.store.ResetMediaOnStart(ctx, q.clock.Now()); err != nil {
+	now := q.clock.Now()
+	if err := q.store.ResetMediaOnStart(ctx, now); err != nil {
 		q.log.Error("stuck media rows not reset at start", "err", err)
 	}
+	q.nextStale.Store(now.Add(time.Hour).Unix())
+	q.Wake() // inspect rows already present before this process started
 	for i := 0; i < q.workers; i++ {
 		q.wg.Add(1)
 		go func() {
@@ -133,13 +138,7 @@ func (q *Queue) Run(ctx context.Context) {
 					q.onPanic("media")
 				}
 			}
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-q.wake:
-				case <-time.After(100 * time.Millisecond):
-				}
+			for q.waitForWork(ctx) {
 				guard.Run(q.log, "media worker", onPanic, func() {
 					if !q.connected() {
 						return
@@ -172,11 +171,14 @@ func (q *Queue) requestPass(ctx context.Context, current **store.Media) {
 		return
 	}
 	defer q.pass.Unlock()
-	now := q.clock.Now()
-	if err := q.store.FailStaleRetries(ctx, now); err != nil {
-		q.log.Error("stale re-upload requests not failed", "err", err)
-	}
 	for ctx.Err() == nil {
+		now := q.clock.Now()
+		if now.Unix() >= q.nextStale.Load() {
+			if err := q.store.FailStaleRetries(ctx, now); err != nil {
+				q.log.Error("stale re-upload requests not failed", "err", err)
+			}
+			q.nextStale.Store(now.Add(time.Hour).Unix())
+		}
 		m, err := q.store.NextExpiredMedia(ctx)
 		if err != nil {
 			q.log.Error("expired media not read", "err", err)
@@ -192,9 +194,15 @@ func (q *Queue) requestPass(ctx context.Context, current **store.Media) {
 			}
 			continue
 		}
-		if !q.limiter.AllowN(now, 1) {
+		reservation := q.limiter.ReserveN(now, 1)
+		if !reservation.OK() {
 			return
 		}
+		if delay := reservation.DelayFrom(now); delay > 0 && !q.waitDelay(ctx, delay) {
+			reservation.CancelAt(q.clock.Now())
+			return
+		}
+		now = q.clock.Now()
 		*current = m
 		sent := q.request(ctx, m, now)
 		*current = nil

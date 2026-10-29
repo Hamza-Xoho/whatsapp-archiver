@@ -25,7 +25,9 @@ func Message(chat, id string, ts time.Time) store.Message {
 // InsertMedia puts a media row in the archive the way a test needs it, without going through the pipeline. A row with a
 // RawProto also gets the message row the downloader reads it from (R4: the raw proto is not a media column); a row
 // without one is queued alone, which Apply allows.
-func InsertMedia(ctx context.Context, st *store.Store, m store.Media) error {
+func InsertMedia(ctx context.Context, st interface {
+	Apply(context.Context, store.Batch) (store.Applied, error)
+}, m store.Media) error {
 	b := store.Batch{Media: &m}
 	if len(m.RawProto) > 0 {
 		b.Message = &store.Message{ChatJID: m.ChatJID, ID: m.MessageID, SenderJID: m.SenderJID, FromMe: m.FromMe, Kind: m.Type, Source: m.Source,
