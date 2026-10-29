@@ -26,7 +26,12 @@ func TestRequestPassRechecksConnectionAfterLimiterWait(t *testing.T) {
 	eventually(t, "limiter timer", func() bool {
 		clock.mu.Lock()
 		defer clock.mu.Unlock()
-		return len(clock.timers) > 0
+		for _, timer := range clock.timers {
+			if !timer.at.After(clock.now.Add(time.Minute)) {
+				return true
+			}
+		}
+		return false
 	})
 
 	connected.Store(false)
