@@ -104,6 +104,12 @@ func (q *Queue) Decide(_ context.Context, m *store.Media) error {
 		return fmt.Errorf("media rules of %s: %w", m.ChatJID, err)
 	}
 	m.State, m.Reason = decide(*m, rules)
+	if m.SourceRank == 0 {
+		m.SourceRank = 2
+		if m.Source == "live" || m.Source == "" {
+			m.SourceRank = 1
+		}
+	}
 	now := q.clock.Now().Unix()
 	m.UpdatedAt, m.EnqueuedAt = now, now
 	return nil
