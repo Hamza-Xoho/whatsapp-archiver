@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"whatsapp-archiver/internal/config"
 )
@@ -38,6 +39,32 @@ func TestWhatsmeowLogsReachSlog(t *testing.T) {
 		if rec["level"] != w.level || rec["msg"] != w.msg || module != w.module {
 			t.Fatalf("line %d = %s, want %+v", i, lines[i], w)
 		}
+	}
+}
+
+func TestWhatsmeowRepeatedLinesAreCollapsedIntoFiveMinuteSummaries(t *testing.T) {
+	var buf bytes.Buffer
+	now := time.Date(2026, 10, 29, 12, 0, 0, 0, time.UTC)
+	l := newWALoggerAt(slog.New(slog.NewJSONHandler(&buf, nil)), func() time.Time { return now }).Sub("Socket")
+	l.Warnf("keepalive timed out")
+	l.Warnf("keepalive timed out")
+	l.Warnf("keepalive timed out")
+	now = now.Add(5 * time.Minute)
+	l.Warnf("keepalive timed out")
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("got %d lines, want first plus summary:\n%s", len(lines), buf.String())
+	}
+	var first, summary map[string]any
+	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal([]byte(lines[1]), &summary); err != nil {
+		t.Fatal(err)
+	}
+	if first["msg"] != "keepalive timed out" || summary["msg"] != "repeated 3 times in 5 m" || summary["module"] != "Socket" || summary["level"] != "WARN" {
+		t.Fatalf("unexpected collapsed lines:\n%s", buf.String())
 	}
 }
 

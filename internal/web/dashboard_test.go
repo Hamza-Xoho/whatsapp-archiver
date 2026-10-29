@@ -172,6 +172,22 @@ func TestDashboardShowsOpenGapsCount(t *testing.T) {
 	}
 }
 
+func TestDashboardShowsOutageMinutesAndLongestOutage(t *testing.T) {
+	d := newDash(t)
+	if err := d.st.InsertClosedConnectionPeriod(t.Context(), store.ConnectionPeriod{
+		State: "not_running", CauseClass: "not_running",
+		StartedAt: dashNow.Add(-90 * time.Minute).Unix(), EndedAt: dashNow.Add(-30 * time.Minute).Unix(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got := d.page(t, "/")
+	for _, want := range []string{"Outage minutes by day", "2026-10-20: 60 minutes", "Longest outage: 60 minutes"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("dashboard lacks %q:\n%s", want, got)
+		}
+	}
+}
+
 // The panel alone is what a health event swaps in; the page includes the same panel and listens for the event.
 func TestHealthPartialIsThePanelOnly(t *testing.T) {
 	d := newDash(t)
