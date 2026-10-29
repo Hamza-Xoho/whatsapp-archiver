@@ -351,6 +351,8 @@ systemctl status archiver --no-pager
 
 Expected: `Created symlink … archiver.service …`, then in the status the line `Active: active (running) since …` and `Main PID: … (archiver)`. To see the program's log:
 
+The unit uses `Type=notify`, checks the process every 120 seconds, and restarts it after 5 seconds if the archive writer or an in-flight WhatsApp event handler stops making progress. The archiver sends readiness and watchdog datagrams directly with the Go standard library; no helper package or daemon is installed.
+
 ```sh
 journalctl -u archiver -n 20 --no-pager
 ```
