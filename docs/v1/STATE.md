@@ -1,5 +1,11 @@
 Single status record for V1 (max 150 lines, update in place; history lives in git and the archived phase log).
 
+## W6(h) synthetic seed and simulator
+
+- Done 29 Oct: `archiver devseed` creates deterministic Arabic/English data through `ingest.Pipeline.Ingest`, with all 16 message kinds, LID/phone aliases, gaps, outages and seven small media fixtures; `--simulate-live <rate>` serves the seeded UI and appends through the UI's activity bus until SIGINT, so SSE receives every event. The 5-chat/2k test pins exact kind counts and incremental-vs-RebuildDerived state. `.claude/launch.json` has static and live-5/s entries for `data/devseed` on 127.0.0.1:8090.
+- Measured clean 300k seed (250 chats, seed 42, no race): 5m53.6s, 143 MiB after close; 18,750 of each kind, 250 open gaps, two outages. Synthetic-only SQLite tuning uses `synchronous=OFF` with bounded 10k-page WAL checkpoints; normal capture is unchanged.
+- Review fixes 29 Oct (red `df2cdb4`, corrected concurrency assertion `b93a6e6`, green `69d2f3e`): media rows now carry absolute paths accepted by the media server; the fixtures are real PNG, Ogg/Opus and MP4 files (verified with `ffprobe`); simulator runs use collision-free message IDs, so the 16-message live launch stores immediately on an existing 300k seed. Race tests cover path/signature validity and the existing-seed restart. Full `make check` passed.
+
 ## Done
 
 - Phases 0-2 finished and deployed: a87a30f on ryzen since 2026-10-20 (old log: `docs/reviews/2026-10-26-progress-phase0-2-archive.md`).

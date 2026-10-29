@@ -1,0 +1,21 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Seeded UI (8090)",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/cmd/archiver",
+      "args": ["run", "--data", "${workspaceFolder}/data/devseed"]
+    },
+    {
+      "name": "Seeded UI + live 5/s (8090)",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/cmd/archiver",
+      "args": ["devseed", "--data", "${workspaceFolder}/data/devseed", "--chats", "250", "--messages", "16", "--seed", "42", "--simulate-live", "5/s"]
+    }
+  ]
+}

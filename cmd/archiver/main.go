@@ -52,6 +52,9 @@ func run(args []string, out, errOut io.Writer) int {
 		return 2
 	}
 	cmd := args[0]
+	if cmd == "devseed" {
+		return runDevSeed(args[1:], out, errOut)
+	}
 	if cmd == "version" {
 		_, _ = fmt.Fprintf(out, "whatsapp-archiver %s\nwhatsmeow %s\n", version, whatsmeowVersion)
 		return 0
