@@ -73,6 +73,19 @@ func (s *Store) NoteConnectionError(ctx context.Context, lastError string) error
 	return nil
 }
 
+// NoteOfflineSync attaches reconnect backlog evidence to the most recently
+// closed outage. A nil value leaves that count unchanged.
+func (s *Store) NoteOfflineSync(ctx context.Context, preview, completed *int64) error {
+	_, err := s.write.ExecContext(ctx, `UPDATE connection_periods
+ SET offline_preview_msgs=COALESCE(?,offline_preview_msgs),
+     offline_completed_count=COALESCE(?,offline_completed_count)
+ WHERE id=(SELECT id FROM connection_periods WHERE ended_at IS NOT NULL ORDER BY ended_at DESC,id DESC LIMIT 1)`, preview, completed)
+	if err != nil {
+		return fmt.Errorf("note offline sync: %w", err)
+	}
+	return nil
+}
+
 // InsertClosedConnectionPeriod stores a period that is already over (R17: the time the process was not running).
 func (s *Store) InsertClosedConnectionPeriod(ctx context.Context, p ConnectionPeriod) error {
 	if err := p.validate(); err != nil {

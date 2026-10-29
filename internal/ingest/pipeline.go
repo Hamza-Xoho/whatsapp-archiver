@@ -219,6 +219,14 @@ func (p *Pipeline) Handle(evt any) (ack bool) {
 		case *events.KeepAliveRestored:
 			p.health.SetState("connected", "")
 			p.queue.Wake()
+		case *events.OfflineSyncPreview:
+			if sink, ok := p.health.(interface{ OfflineSyncPreview(int) }); ok {
+				sink.OfflineSyncPreview(e.Messages)
+			}
+		case *events.OfflineSyncCompleted:
+			if sink, ok := p.health.(interface{ OfflineSyncCompleted(int) }); ok {
+				sink.OfflineSyncCompleted(e.Count)
+			}
 		case *events.Disconnected:
 			p.health.SetState("disconnected", "")
 			p.queue.Wake()

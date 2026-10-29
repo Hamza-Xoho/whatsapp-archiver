@@ -8,15 +8,23 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 	"whatsapp-archiver/internal/activity"
 	"whatsapp-archiver/internal/backup"
 	"whatsapp-archiver/internal/config"
 	"whatsapp-archiver/internal/logsafe"
+	"whatsapp-archiver/internal/store"
 )
 
 type Clock interface{ Now() time.Time }
+type ConnectionLedger interface {
+	OpenConnectionPeriod(context.Context, store.ConnectionPeriod) (int64, error)
+	CloseConnectionPeriod(context.Context, int64) (bool, error)
+	NoteConnectionError(context.Context, string) error
+	NoteOfflineSync(context.Context, *int64, *int64) error
+}
 type Snapshot struct {
 	State           string    `json:"state"`
 	Detail          string    `json:"detail"`
@@ -48,6 +56,7 @@ type Monitor struct {
 	queue     chan alert
 	log       *slog.Logger
 	bus       *activity.Bus // nil: nothing is published
+	ledger    ConnectionLedger
 }
 type alert struct{ title, body string }
 
@@ -103,6 +112,9 @@ func (m *Monitor) WithLogger(l *slog.Logger) *Monitor { m.log = l; return m }
 // WithActivity makes the monitor publish each connection state change to the live feed. Publish never blocks, so it
 // cannot hold up the event handler that reports the state.
 func (m *Monitor) WithActivity(b *activity.Bus) *Monitor { m.bus = b; return m }
+
+// WithConnectionLedger records every non-connected period and its reconnect backlog evidence.
+func (m *Monitor) WithConnectionLedger(ledger ConnectionLedger) *Monitor { m.ledger = ledger; return m }
 func (m *Monitor) Seen(t time.Time, fromMe bool) {
 	m.mu.Lock()
 	m.snapshot.LastEvent = t
@@ -119,6 +131,7 @@ func (m *Monitor) Seen(t time.Time, fromMe bool) {
 func (m *Monitor) SetState(state, detail string) {
 	m.mu.Lock()
 	prev := m.snapshot.State
+	at := m.clock.Now()
 	m.snapshot.State = state
 	m.snapshot.Detail = detail
 	m.logTransitionLocked(prev, state, detail)
@@ -130,6 +143,7 @@ func (m *Monitor) SetState(state, detail string) {
 	}
 	m.writeLocked()
 	m.mu.Unlock()
+	m.recordConnectionState(prev, state, detail, at)
 	if prev != state {
 		m.bus.Publish(activity.Event{At: m.clock.Now(), Kind: "state", Detail: state})
 	}
@@ -144,6 +158,66 @@ func (m *Monitor) SetState(state, detail string) {
 		m.gate.fire(state, stateTitles[state], m.banBody(detail))
 	case "client_outdated":
 		m.gate.fire(state, stateTitles[state], "Version "+m.version()+" was rejected; update the archiver")
+	}
+}
+
+func (m *Monitor) recordConnectionState(prev, state, detail string, at time.Time) {
+	if m.ledger == nil {
+		return
+	}
+	ctx := context.Background()
+	var err error
+	switch {
+	case prev == state && connectionDown(state) && detail != "":
+		err = m.ledger.NoteConnectionError(ctx, logsafe.RedactURLs(detail))
+	case prev == state:
+		return
+	case state == "connected" && prev != "":
+		_, err = m.ledger.CloseConnectionPeriod(ctx, at.Unix())
+	case connectionDown(state) || state == "logged_out" || state == "temp_banned" || state == "stream_replaced" || state == "client_outdated":
+		_, err = m.ledger.OpenConnectionPeriod(ctx, store.ConnectionPeriod{
+			State: state, StartedAt: at.Unix(), CauseClass: connectionCause(state, detail), LastError: logsafe.RedactURLs(detail),
+		})
+	}
+	if err != nil {
+		m.log.Error("connection ledger write failed", "state", state, "err", err)
+	}
+}
+
+func connectionCause(state, detail string) string {
+	lower := strings.ToLower(detail)
+	for _, class := range []string{"dns", "tcp", "tls", "ws"} {
+		if strings.Contains(lower, "class="+class) || strings.Contains(lower, class) {
+			return class
+		}
+	}
+	switch state {
+	case "degraded":
+		return "keepalive"
+	case "logged_out":
+		return "logout"
+	case "temp_banned", "stream_replaced", "client_outdated", "disconnected":
+		return "server"
+	default:
+		return "other"
+	}
+}
+
+func (m *Monitor) OfflineSyncPreview(messages int) {
+	value := int64(messages)
+	m.noteOfflineSync(&value, nil)
+}
+
+func (m *Monitor) OfflineSyncCompleted(count int) {
+	value := int64(count)
+	m.noteOfflineSync(nil, &value)
+}
+
+func (m *Monitor) noteOfflineSync(preview, completed *int64) {
+	if m.ledger != nil {
+		if err := m.ledger.NoteOfflineSync(context.Background(), preview, completed); err != nil {
+			m.log.Error("offline sync ledger write failed", "err", err)
+		}
 	}
 }
 
