@@ -36,3 +36,21 @@ func TestNtfyPostsToTopicPath(t *testing.T) {
 		t.Fatalf("path=%q", path)
 	}
 }
+
+func TestNtfyUsesProvidedHTTPClient(t *testing.T) {
+	used := false
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		used = true
+		return &http.Response{StatusCode: http.StatusNoContent, Status: "204 No Content", Body: http.NoBody}, nil
+	})}
+	if err := NewNtfyWithClient(&config.NtfyConfig{URL: "https://ntfy.invalid/topic"}, client).Notify(t.Context(), "t", "b"); err != nil {
+		t.Fatal(err)
+	}
+	if !used {
+		t.Fatal("provided HTTP client was not used")
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
