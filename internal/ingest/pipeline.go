@@ -213,6 +213,12 @@ func (p *Pipeline) Handle(evt any) (ack bool) {
 		case *events.Connected:
 			p.health.SetState("connected", "")
 			p.queue.Wake()
+		case *events.KeepAliveTimeout:
+			p.health.SetState("degraded", fmt.Sprintf("keepalive timeout (failures=%d)", e.ErrorCount))
+			p.queue.Wake()
+		case *events.KeepAliveRestored:
+			p.health.SetState("connected", "")
+			p.queue.Wake()
 		case *events.Disconnected:
 			p.health.SetState("disconnected", "")
 			p.queue.Wake()

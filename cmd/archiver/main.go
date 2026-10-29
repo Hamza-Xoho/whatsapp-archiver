@@ -158,6 +158,7 @@ func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) er
 		notifier = health.NewNtfy(cfg.Alerts.Ntfy)
 	}
 	mon := health.NewMonitor(cfg, notifier, systemClock{}, health.DiskFree, client.VersionInUse).WithVersionReason(client.VersionReason).WithLogger(log).WithThresholds(live.alerts).WithActivity(bus)
+	client.WithConnectionHealth(mon)
 	mediaConnected := func() bool { return mon.Status().State == "connected" }
 	queue := media.NewQueue(cfg.DataDir, live.media, live.chatMedia, st, client, systemClock{}, log, mon.Panic).WithConnected(mediaConnected).WithActivity(bus)
 	filter := ingest.NewFilter(rules, aliases)

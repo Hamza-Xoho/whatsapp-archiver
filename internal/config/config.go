@@ -79,7 +79,7 @@ func defaults() Config {
 		History: HistoryRules{DaysLimit: 3650, SizeMBLimit: 4096},
 		Media:   MediaRules{Download: []string{"document", "image", "audio", "video"}, VideoMaxMB: 100, Skip: []string{"sticker", "gif"}, Workers: 2, RetryRequestsPerMinute: 10},
 		Backup:  BackupConfig{Time: "03:30", Keep: 7},
-		Alerts:  AlertConfig{NoEventsAfter: 6 * time.Hour, DisconnectedAfter: 15 * time.Minute, PhoneQuietAfter: 240 * time.Hour, DiskFreeMinGB: 5},
+		Alerts:  AlertConfig{NoEventsAfter: 6 * time.Hour, DisconnectedAfter: 5 * time.Minute, PhoneQuietAfter: 240 * time.Hour, DiskFreeMinGB: 5},
 		WA:      WAConfig{CheckLatestVersion: true},
 		Web:     Web{Listen: "127.0.0.1:8080"},
 	}
