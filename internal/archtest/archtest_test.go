@@ -60,8 +60,10 @@ func TestServePassesWhatsAppConnectionGateToMediaQueue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(src), ".WithConnected(client.IsConnected).WithActivity(bus)") {
-		t.Fatal("serve must pass the WhatsApp connection gate to the media queue")
+	text := string(src)
+	if !strings.Contains(text, `mediaConnected := func() bool { return mon.Status().State == "connected" }`) ||
+		!strings.Contains(text, ".WithConnected(mediaConnected).WithActivity(bus)") {
+		t.Fatal("serve must pass the health monitor's connected-state gate to the media queue")
 	}
 }
 
