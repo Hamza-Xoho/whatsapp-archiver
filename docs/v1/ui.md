@@ -381,7 +381,7 @@ Only the health values that changed swap on `health` SSE. The panel itself is no
 - **Gaps & media:** open gaps grouped by cause and post-outage status, with
   links to trace/chat. Media shows counts by state, error class and redacted reason, plus live media completed within five minutes over 24 hours and seven days. Never expose media URLs or encryption material.
 - **History:** ledger per sync type with received/imported chunks, progress,
-  oldest/newest dates, spool backlog and error count. Stalled copy is “Stalled at 99% — no new chunk for 2 hours.” Per-chat rows link to viewers and say “History complete back to …”, “History received back to …”, or “No history messages archived”.
+  oldest/newest dates, spool backlog and error count. Stalled copy is “Stalled at 99% — no new chunk for 48 hours.” Per-chat rows link to viewers and say “History complete back to …”, “History received back to …”, or “No history messages archived”.
 - **Alerts:** durable outbox rows with kind, safe title, raised, delivered,
   attempts and state. A late delivery says “Delivered 2h 14m late”. Do not render sink URLs, topics, or raw last errors.
 - **Storage & backups:** reuse cached database/media/backup/free-space figures,
