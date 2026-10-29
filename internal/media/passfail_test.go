@@ -1,8 +1,11 @@
 package media
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +13,15 @@ import (
 	"whatsapp-archiver/internal/store"
 	"whatsapp-archiver/internal/testkit"
 )
+
+func TestShutdownContextCanceledIsInfo(t *testing.T) {
+	var out bytes.Buffer
+	q := &Queue{log: slog.New(slog.NewTextHandler(&out, nil))}
+	q.logError("media row not saved", context.Canceled, "id", "M1")
+	if got := out.String(); !strings.Contains(got, "level=INFO") || strings.Contains(got, "level=ERROR") {
+		t.Fatalf("shutdown log = %q, want Info", got)
+	}
+}
 
 // If the write that fails an exhausted row keeps failing (disk full, read-only database), the request pass ends
 // instead of reading the same expired row again and again; a later wake or tick tries it once more.
