@@ -53,9 +53,9 @@ Review work list: `docs/reviews/2026-10-14-phase0-review.md`. Prompts: `docs/pro
 
 - `.claude/skills/add-message-kind/SKILL.md`: use when adding a message or message-event kind to the V1 normaliser.
 - `.claude/skills/bump-whatsmeow/SKILL.md`: use when updating the pinned whatsmeow version.
-- `.claude/skills/deploy-ryzen/SKILL.md`: use for an approved build, install, verification, or rollback on ryzen.
-- `.claude/skills/record-fixtures/SKILL.md`: use when recording, scrubbing, reviewing, and committing replay fixtures.
-- `.claude/skills/ryzen-evidence/SKILL.md`: use for read-only operational evidence from ryzen.
+- `.claude/skills/deploy-ryzen/SKILL.md`: Hamza's Mac only; never run on this machine. Use there for an approved build, install, verification, or rollback on ryzen.
+- `.claude/skills/record-fixtures/SKILL.md`: Hamza's Mac only; never run on this machine. Use there when recording, scrubbing, reviewing, and committing replay fixtures.
+- `.claude/skills/ryzen-evidence/SKILL.md`: Hamza's Mac only; never run on this machine. Use there for read-only operational evidence from ryzen.
 
 ## Parallel work
 
