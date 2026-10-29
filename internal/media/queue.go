@@ -202,6 +202,8 @@ func (q *Queue) requestPass(ctx context.Context, current **store.Media) (immedia
 		return false
 	}
 	defer q.pass.Unlock()
+	var pendingDue time.Time
+	pendingChecked, pendingKnown := false, false
 	for ctx.Err() == nil && q.connected() {
 		now := q.clock.Now()
 		if retryAt := q.nextRequest.Load(); retryAt > now.UnixNano() {
@@ -235,10 +237,17 @@ func (q *Queue) requestPass(ctx context.Context, current **store.Media) (immedia
 		}
 		if delay := reservation.DelayFrom(now); delay > 0 {
 			pendingFirst := false
-			if due, ok, err := q.store.NextMediaDue(ctx); err != nil {
-				q.log.Error("next media due time not read", "err", err)
-			} else if ok && !due.After(now.Add(delay)) {
-				delay, pendingFirst = due.Sub(now), true
+			if !pendingChecked {
+				var err error
+				pendingDue, pendingKnown, err = q.store.NextMediaDue(ctx)
+				if err != nil {
+					q.log.Error("next media due time not read", "err", err)
+				} else {
+					pendingChecked = true
+				}
+			}
+			if pendingKnown && !pendingDue.After(now.Add(delay)) {
+				delay, pendingFirst = pendingDue.Sub(now), true
 			}
 			if delay > 0 && !q.waitDelayOrWake(ctx, delay) {
 				reservation.CancelAt(q.clock.Now())
