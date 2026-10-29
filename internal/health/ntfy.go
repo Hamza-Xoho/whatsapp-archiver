@@ -21,6 +21,14 @@ type ntfy struct {
 func NewNtfy(cfg *config.NtfyConfig) Notifier {
 	return &ntfy{cfg: cfg, client: &http.Client{Timeout: 15 * time.Second}}
 }
+
+func NewNtfyWithClient(cfg *config.NtfyConfig, client *http.Client) Notifier {
+	clone := *client
+	if clone.Timeout == 0 {
+		clone.Timeout = 15 * time.Second
+	}
+	return &ntfy{cfg: cfg, client: &clone}
+}
 func (n *ntfy) Notify(ctx context.Context, title, body string) error {
 	_, err := retry.Do(ctx, retry.Policy{Max: 5, Base: time.Second}, func() error {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, n.cfg.URL, bytes.NewBufferString(body))

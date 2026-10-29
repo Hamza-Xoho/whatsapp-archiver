@@ -3,6 +3,7 @@ package config_test
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -30,6 +31,9 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if c.Backup.Keep != 7 || c.Alerts.NoEventsAfter != 6*time.Hour || c.Alerts.PhoneQuietAfter != 240*time.Hour || !c.WA.CheckLatestVersion {
 		t.Errorf("unexpected defaults: %+v", c)
+	}
+	if !slices.Equal(c.Network.FallbackDNS, []string{"1.1.1.1:53", "8.8.8.8:53"}) {
+		t.Errorf("network fallback DNS = %v", c.Network.FallbackDNS)
 	}
 }
 

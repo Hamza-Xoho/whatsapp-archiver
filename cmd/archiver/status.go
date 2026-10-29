@@ -59,6 +59,10 @@ func printStatus(cfg *config.Config, out io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("read media timeliness: %w", err)
 	}
+	outages, err := st.OutageSummary(ctx, time.Now(), loc, 7)
+	if err != nil {
+		return fmt.Errorf("read outage statistics: %w", err)
+	}
 	coverage, stats := report.Coverage, report.Chats
 	size, err := view.DirSize(cfg.DataDir)
 	if err != nil {
@@ -91,9 +95,24 @@ func printStatus(cfg *config.Config, out io.Writer) error {
 		gaps += s.OpenGaps
 	}
 	p("total\t%d chats\t%d\t-\t-\t%d\t%d\t%d\t%d", len(stats), messages, failed, expired, pending, gaps)
+	if outages.HasOutages {
+		for _, day := range outages.Days {
+			if day.Minutes > 0 {
+				p("outage minutes %s: %d", day.Date, day.Minutes)
+			}
+		}
+		p("longest outage: %d minutes", roundedStatusMinutes(outages.Longest))
+	}
 	p("recovered panics: %d", snap.Panics)
 	p("data folder: %s", view.HumanSize(size))
 	return nil
+}
+
+func roundedStatusMinutes(d time.Duration) int {
+	if d <= 0 {
+		return 0
+	}
+	return int((d + time.Minute - 1) / time.Minute)
 }
 
 func printChats(cfg *config.Config, out io.Writer) error {

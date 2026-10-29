@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 )
 
@@ -69,6 +70,19 @@ func (s *Store) NoteConnectionError(ctx context.Context, lastError string) error
 	_, err := s.write.ExecContext(ctx, `UPDATE connection_periods SET error_count=error_count+1,last_error=? WHERE ended_at IS NULL`, lastError)
 	if err != nil {
 		return fmt.Errorf("note connection error: %w", err)
+	}
+	return nil
+}
+
+// NoteOfflineSync attaches reconnect backlog evidence to the most recently
+// closed outage. A nil value leaves that count unchanged.
+func (s *Store) NoteOfflineSync(ctx context.Context, preview, completed *int64) error {
+	_, err := s.write.ExecContext(ctx, `UPDATE connection_periods
+ SET offline_preview_msgs=COALESCE(?,offline_preview_msgs),
+     offline_completed_count=COALESCE(?,offline_completed_count)
+ WHERE id=(SELECT id FROM connection_periods WHERE ended_at IS NOT NULL ORDER BY ended_at DESC,id DESC LIMIT 1)`, preview, completed)
+	if err != nil {
+		return fmt.Errorf("note offline sync: %w", err)
 	}
 	return nil
 }
@@ -150,6 +164,43 @@ func (s *Store) DueAlerts(ctx context.Context, now int64, limit int) ([]Alert, e
 		out = append(out, a)
 	}
 	return out, rows.Err()
+}
+
+// OldestQueuedAlert returns the oldest unsent alert, even when its retry time
+// is still in the future. Senders use it to prevent a recovery overtaking the
+// raised alert it follows.
+func (s *Store) OldestQueuedAlert(ctx context.Context) (Alert, bool, error) {
+	var a Alert
+	err := s.read.QueryRowContext(ctx, `SELECT id,key,kind,title,body,raised_at,state,attempts,next_attempt_at,COALESCE(sent_at,0),last_error
+ FROM alerts WHERE state='queued' ORDER BY id LIMIT 1`).
+		Scan(&a.ID, &a.Key, &a.Kind, &a.Title, &a.Body, &a.RaisedAt, &a.State, &a.Attempts, &a.NextAttemptAt, &a.SentAt, &a.LastError)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Alert{}, false, nil
+	}
+	if err != nil {
+		return Alert{}, false, fmt.Errorf("read oldest queued alert: %w", err)
+	}
+	return a, true, nil
+}
+
+// ActiveAlertKeys returns keys whose latest durable row is a raise rather than
+// a recovery. This rebuilds the alert gate after a process restart.
+func (s *Store) ActiveAlertKeys(ctx context.Context) ([]string, error) {
+	rows, err := s.read.QueryContext(ctx, `SELECT a.key FROM alerts a
+ WHERE a.id=(SELECT MAX(b.id) FROM alerts b WHERE b.key=a.key) AND a.kind='raised' ORDER BY a.key`)
+	if err != nil {
+		return nil, fmt.Errorf("read active alerts: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var keys []string
+	for rows.Next() {
+		var key string
+		if err = rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+	return keys, rows.Err()
 }
 
 // AlertSent marks an alert sent at the given time.

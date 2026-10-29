@@ -175,6 +175,23 @@ func TestStatusChatRowsAndTotals(t *testing.T) {
 	}
 }
 
+func TestStatusShowsOutageMinutesAndLongestOutage(t *testing.T) {
+	dir := seedFolder(t)
+	st, err := store.Open(filepath.Join(dir, "archive.db"))
+	mustDo(t, err)
+	now := time.Now()
+	mustDo(t, st.InsertClosedConnectionPeriod(t.Context(), store.ConnectionPeriod{
+		State: "not_running", CauseClass: "not_running",
+		StartedAt: now.Add(-75 * time.Minute).Unix(), EndedAt: now.Add(-15 * time.Minute).Unix(),
+	}))
+	mustDo(t, st.Close())
+
+	code, out, errOut := runCmd(t, "status", "--data", dir)
+	if code != 0 || errOut != "" || !strings.Contains(out, "outage minutes ") || !strings.Contains(out, ": 60") || !strings.Contains(out, "longest outage: 60 minutes") {
+		t.Fatalf("code=%d stderr=%q out=\n%s", code, errOut, out)
+	}
+}
+
 func TestStatusWithoutHealthJSON(t *testing.T) {
 	dir := seedFolder(t)
 	mustDo(t, os.Remove(filepath.Join(dir, "health.json")))

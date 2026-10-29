@@ -261,8 +261,9 @@ media:
 alerts:
   # CHANGE the topic to yours from section 5 (default: no alerts at all)
   ntfy: {url: "https://ntfy.sh/CHANGE-TO-A-PRIVATE-TOPIC", token: ""}
+  heartbeat_url: ""          # optional off-host healthchecks-style ping URL; empty is off
   no_events_after: 6h        # "No WhatsApp events" alert
-  disconnected_after: 15m    # "WhatsApp disconnected" alert
+  disconnected_after: 5m     # "WhatsApp disconnected" alert
   phone_quiet_after: 240h    # "Phone inactive" alert
   disk_free_min_gb: 5        # "Disk space low" alert
 
@@ -270,6 +271,10 @@ alerts:
 # `time` is in the server's time zone; `keep` is how many snapshots to keep. `destination` stays here;
 # `time` and `keep` are first-start values (the Settings page owns them afterwards).
 backup: {destination: "/srv/backups/whatsapp-archiver", time: "03:30", keep: 7}
+
+# If the host resolver fails, try these DNS servers, then each host's persisted last-known-good IP.
+network:
+  fallback_dns: ["1.1.1.1:53", "8.8.8.8:53"]
 
 wa:
   check_latest_version: true   # ask WhatsApp for its newest client version at start and after a rejection
@@ -288,7 +293,7 @@ Notes:
   | `media.retry_requests_per_minute` | a whole number from 1 to 600 |
   | `media.video_max_mb` | a whole number from 0 (no cap) to 100000 |
   | `media.download`, `media.skip` | only `image`, `video`, `audio`, `document`, `sticker`, `gif`; an empty `download` list means text only |
-  | `alerts.no_events_after`, `alerts.disconnected_after`, `alerts.phone_quiet_after` | a duration above zero, such as `6h` or `15m` |
+  | `alerts.no_events_after`, `alerts.disconnected_after`, `alerts.phone_quiet_after` | a duration above zero, such as `6h` or `5m` |
   | `alerts.disk_free_min_gb` | a whole number of GB, 0 or more |
   | `backup.time` | `HH:MM` on a 24-hour clock, such as `03:30` |
   | `backup.keep` | a whole number of snapshots from 1 to 3650 |
@@ -346,6 +351,8 @@ systemctl status archiver --no-pager
 
 Expected: `Created symlink … archiver.service …`, then in the status the line `Active: active (running) since …` and `Main PID: … (archiver)`. To see the program's log:
 
+The unit uses `Type=notify`, checks the process every 120 seconds, and restarts it after 5 seconds if the archive writer or an in-flight WhatsApp event handler stops making progress. The archiver sends readiness and watchdog datagrams directly with the Go standard library; no helper package or daemon is installed.
+
 ```sh
 journalctl -u archiver -n 20 --no-pager
 ```
@@ -389,7 +396,7 @@ Each alert is sent at most once every 6 hours while the problem lasts, and a `<t
 | Title on the phone | Meaning and what to do |
 | --- | --- |
 | WhatsApp Archiver is not paired | The service started without a login. It stays up: pair in the browser through the SSH tunnel (section 7). |
-| WhatsApp disconnected | No connection for more than `disconnected_after` (15 minutes). Check the server's network, then `systemctl status archiver`. |
+| WhatsApp disconnected | No connection for more than `disconnected_after` (5 minutes by default), including degraded and reconnecting states. Check the server's network, then `systemctl status archiver`. |
 | WhatsApp logged out | The phone removed this linked device (or WhatsApp did). The service stays up but captures nothing. Re-pair: `sudo systemctl stop archiver`, run `pair`, Ctrl-C, `sudo systemctl start archiver`. Stored messages are kept. |
 | WhatsApp temporarily banned | WhatsApp paused the account for the time in the alert. Capture resumes by itself; do not restart repeatedly. |
 | WhatsApp session replaced | Another program is using the same login (a second copy of the archiver, or a copied `session.db`). Stop the other one. |

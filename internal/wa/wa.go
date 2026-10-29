@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
@@ -19,6 +20,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"whatsapp-archiver/internal/config"
+	"whatsapp-archiver/internal/ingest"
 )
 
 type clientVersion struct{ version, reason string }
@@ -40,6 +42,7 @@ type Client struct {
 	pairedOnce     sync.Once
 	// qrChannel is GetQRChannel; tests replace it with a fake channel.
 	qrChannel func(context.Context) (<-chan whatsmeow.QRChannelItem, error)
+	conn      *connectionMonitor
 }
 
 // Socket is the connection boundary the reconnect loop drives; *whatsmeow.Client satisfies it.
@@ -51,6 +54,20 @@ type Socket interface {
 // UseSocket replaces the WhatsApp connection with s. Tests outside this package use it so that nothing reaches
 // WhatsApp; the service never calls it.
 func (c *Client) UseSocket(s Socket) { c.sock = s }
+
+// UseHTTPClient applies the resilient transport to logged-in websocket dials
+// and media downloads. The two whatsmeow setters are receive-only plumbing.
+func (c *Client) UseHTTPClient(h *http.Client) {
+	c.client.SetWebsocketHTTPClient(h)
+	c.client.SetMediaHTTPClient(h)
+}
+
+// WithConnectionHealth enables keepalive state reporting and the independent
+// socket watchdog. Call it before Run.
+func (c *Client) WithConnectionHealth(h ingest.ConnectionStateSink) *Client {
+	c.conn = newConnectionMonitor(c.client, h, time.Now)
+	return c
+}
 
 func Open(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Client, error) {
 	if log == nil {
@@ -91,6 +108,15 @@ func Open(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Client, e
 	c.ver.Store(&clientVersion{version, reason})
 	c.refresh = c.refreshVersion
 	c.qrChannel = inner.GetQRChannel
+	inner.AutoReconnectHook = func(err error) bool {
+		if c.conn != nil {
+			count := inner.AutoReconnectErrors
+			class := reconnectErrorClass(err)
+			c.conn.reconnectFailed(err, count)
+			c.log.Warn("reconnect_failed", "class", class, "count", count)
+		}
+		return true
+	}
 	return c, nil
 }
 
@@ -168,7 +194,18 @@ func (c *Client) run(ctx context.Context, h func(any) bool, pairing bool, show f
 		go show(ctx, qr)
 	}
 	ctl := make(chan any, 8)
-	id := c.client.AddEventHandlerWithSuccessStatus(c.trackPairing(eventHandler(c.historyHandler(ctx, h), pairing, os.Stdout, ctl)))
+	handler := c.trackPairing(eventHandler(c.historyHandler(ctx, h), pairing, os.Stdout, ctl))
+	if c.conn != nil {
+		next := handler
+		handler = func(evt any) bool {
+			c.conn.handle(evt)
+			return next(evt)
+		}
+		done := make(chan struct{})
+		go func() { defer close(done); c.conn.run(ctx) }()
+		defer func() { <-done }()
+	}
+	id := c.client.AddEventHandlerWithSuccessStatus(handler)
 	err := c.reconnect(ctx, ctl)
 	if pairing && !c.Paired() {
 		c.client.RemoveEventHandler(id)

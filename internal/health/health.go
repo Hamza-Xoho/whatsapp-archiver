@@ -6,17 +6,34 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 	"whatsapp-archiver/internal/activity"
 	"whatsapp-archiver/internal/backup"
 	"whatsapp-archiver/internal/config"
 	"whatsapp-archiver/internal/logsafe"
+	"whatsapp-archiver/internal/store"
 )
 
 type Clock interface{ Now() time.Time }
+type ConnectionLedger interface {
+	OpenConnectionPeriod(context.Context, store.ConnectionPeriod) (int64, error)
+	CloseConnectionPeriod(context.Context, int64) (bool, error)
+	NoteConnectionError(context.Context, string) error
+	NoteOfflineSync(context.Context, *int64, *int64) error
+}
+type AlertStore interface {
+	EnqueueAlert(context.Context, store.Alert) (int64, error)
+	OldestQueuedAlert(context.Context) (store.Alert, bool, error)
+	ActiveAlertKeys(context.Context) ([]string, error)
+	AlertSent(context.Context, int64, int64) error
+	AlertSkipped(context.Context, int64) error
+	AlertFailed(context.Context, int64, string, int64) error
+}
 type Snapshot struct {
 	State           string    `json:"state"`
 	Detail          string    `json:"detail"`
@@ -32,22 +49,27 @@ type Snapshot struct {
 	LastBackupPath string    `json:"last_backup_path"`
 }
 type Monitor struct {
-	mu        sync.Mutex
-	cfg       *config.Config
-	limits    func() config.AlertConfig // live thresholds; nil: cfg.Alerts
-	n         Notifier
-	clock     Clock
-	diskFree  func(string) (uint64, error)
-	version   func() string
-	reason    func() string
-	snapshot  Snapshot
-	gate      *alertGate
-	started   time.Time // baseline for rules whose event has not been seen yet
-	downSince time.Time // when the connection was last lost; zero while connected
-	lostAt    time.Time // when this process logged "connection lost"; zero until it has
-	queue     chan alert
-	log       *slog.Logger
-	bus       *activity.Bus // nil: nothing is published
+	mu         sync.Mutex
+	transition sync.Mutex // serializes state changes with their durable ledger writes
+	cfg        *config.Config
+	limits     func() config.AlertConfig // live thresholds; nil: cfg.Alerts
+	n          Notifier
+	clock      Clock
+	diskFree   func(string) (uint64, error)
+	version    func() string
+	reason     func() string
+	snapshot   Snapshot
+	gate       *alertGate
+	started    time.Time // baseline for rules whose event has not been seen yet
+	downSince  time.Time // when the connection was last lost; zero while connected
+	lostAt     time.Time // when this process logged "connection lost"; zero until it has
+	queue      chan alert
+	log        *slog.Logger
+	bus        *activity.Bus // nil: nothing is published
+	ledger     ConnectionLedger
+	outbox     AlertStore
+	wakeAlert  chan struct{}
+	heartbeat  *http.Client
 }
 type alert struct{ title, body string }
 
@@ -62,8 +84,8 @@ var stateTitles = map[string]string{
 
 func NewMonitor(cfg *config.Config, n Notifier, c Clock, disk func(string) (uint64, error), version func() string) *Monitor {
 	now := c.Now()
-	m := &Monitor{cfg: cfg, n: n, clock: c, diskFree: disk, version: version, started: now, downSince: now, queue: make(chan alert, 16), log: slog.Default()}
-	m.gate = &alertGate{now: c.Now, send: m.notify, fired: map[string]time.Time{}}
+	m := &Monitor{cfg: cfg, n: n, clock: c, diskFree: disk, version: version, started: now, downSince: now, queue: make(chan alert, 16), wakeAlert: make(chan struct{}, 1), log: slog.Default()}
+	m.gate = &alertGate{now: c.Now, send: func(_, _, title, body string) bool { return m.notify(title, body) }, fired: map[string]time.Time{}}
 	m.learnActiveAlerts()
 	return m
 }
@@ -103,6 +125,40 @@ func (m *Monitor) WithLogger(l *slog.Logger) *Monitor { m.log = l; return m }
 // WithActivity makes the monitor publish each connection state change to the live feed. Publish never blocks, so it
 // cannot hold up the event handler that reports the state.
 func (m *Monitor) WithActivity(b *activity.Bus) *Monitor { m.bus = b; return m }
+
+// WithConnectionLedger records every non-connected period and its reconnect backlog evidence.
+func (m *Monitor) WithConnectionLedger(ledger ConnectionLedger) *Monitor { m.ledger = ledger; return m }
+
+// WithAlertStore switches the production monitor from its compatibility
+// in-memory queue to the durable alerts table and restores the active gate.
+func (m *Monitor) WithAlertStore(outbox AlertStore) *Monitor {
+	m.outbox = outbox
+	keys, err := outbox.ActiveAlertKeys(context.Background())
+	if err != nil {
+		m.log.Error("active alerts could not be restored", "err", err)
+		keys = nil
+	}
+	m.gate.mu.Lock()
+	m.gate.fired = make(map[string]time.Time, len(keys))
+	for _, key := range keys {
+		m.gate.fired[key] = m.clock.Now()
+	}
+	m.gate.durable = true
+	m.gate.send = m.enqueueAlert
+	m.gate.mu.Unlock()
+	return m
+}
+
+// WithHeartbeatClient applies the resilient shared HTTP transport to the
+// optional off-host heartbeat.
+func (m *Monitor) WithHeartbeatClient(client *http.Client) *Monitor {
+	clone := *client
+	if clone.Timeout == 0 {
+		clone.Timeout = 15 * time.Second
+	}
+	m.heartbeat = &clone
+	return m
+}
 func (m *Monitor) Seen(t time.Time, fromMe bool) {
 	m.mu.Lock()
 	m.snapshot.LastEvent = t
@@ -117,19 +173,23 @@ func (m *Monitor) Seen(t time.Time, fromMe bool) {
 	}
 }
 func (m *Monitor) SetState(state, detail string) {
+	m.transition.Lock()
+	defer m.transition.Unlock()
 	m.mu.Lock()
 	prev := m.snapshot.State
+	at := m.clock.Now()
 	m.snapshot.State = state
 	m.snapshot.Detail = detail
 	m.logTransitionLocked(prev, state, detail)
 	switch {
 	case state == "connected":
 		m.downSince = time.Time{}
-	case state == "disconnected" && m.downSince.IsZero():
+	case connectionDown(state) && m.downSince.IsZero():
 		m.downSince = m.clock.Now()
 	}
 	m.writeLocked()
 	m.mu.Unlock()
+	m.recordConnectionState(prev, state, detail, at)
 	if prev != state {
 		m.bus.Publish(activity.Event{At: m.clock.Now(), Kind: "state", Detail: state})
 	}
@@ -144,6 +204,66 @@ func (m *Monitor) SetState(state, detail string) {
 		m.gate.fire(state, stateTitles[state], m.banBody(detail))
 	case "client_outdated":
 		m.gate.fire(state, stateTitles[state], "Version "+m.version()+" was rejected; update the archiver")
+	}
+}
+
+func (m *Monitor) recordConnectionState(prev, state, detail string, at time.Time) {
+	if m.ledger == nil {
+		return
+	}
+	ctx := context.Background()
+	var err error
+	switch {
+	case prev == state && connectionDown(state) && detail != "":
+		err = m.ledger.NoteConnectionError(ctx, logsafe.RedactURLs(detail))
+	case prev == state:
+		return
+	case state == "connected" && prev != "":
+		_, err = m.ledger.CloseConnectionPeriod(ctx, at.Unix())
+	case connectionDown(state) || state == "logged_out" || state == "temp_banned" || state == "stream_replaced" || state == "client_outdated":
+		_, err = m.ledger.OpenConnectionPeriod(ctx, store.ConnectionPeriod{
+			State: state, StartedAt: at.Unix(), CauseClass: connectionCause(state, detail), LastError: logsafe.RedactURLs(detail),
+		})
+	}
+	if err != nil {
+		m.log.Error("connection ledger write failed", "state", state, "err", err)
+	}
+}
+
+func connectionCause(state, detail string) string {
+	lower := strings.ToLower(detail)
+	for _, class := range []string{"dns", "tcp", "tls", "ws"} {
+		if strings.Contains(lower, "class="+class) || strings.Contains(lower, class) {
+			return class
+		}
+	}
+	switch state {
+	case "degraded":
+		return "keepalive"
+	case "logged_out":
+		return "logout"
+	case "temp_banned", "stream_replaced", "client_outdated", "disconnected":
+		return "server"
+	default:
+		return "other"
+	}
+}
+
+func (m *Monitor) OfflineSyncPreview(messages int) {
+	value := int64(messages)
+	m.noteOfflineSync(&value, nil)
+}
+
+func (m *Monitor) OfflineSyncCompleted(count int) {
+	value := int64(count)
+	m.noteOfflineSync(nil, &value)
+}
+
+func (m *Monitor) noteOfflineSync(preview, completed *int64) {
+	if m.ledger != nil {
+		if err := m.ledger.NoteOfflineSync(context.Background(), preview, completed); err != nil {
+			m.log.Error("offline sync ledger write failed", "err", err)
+		}
 	}
 }
 
@@ -213,6 +333,10 @@ func (m *Monitor) Status() Snapshot { m.mu.Lock(); defer m.mu.Unlock(); return m
 
 // Run checks the rules every minute and owns the goroutine that sends alerts; it returns after that goroutine has.
 func (m *Monitor) Run(ctx context.Context) {
+	if m.outbox != nil {
+		m.runAlertOutbox(ctx)
+		return
+	}
 	sent := make(chan struct{})
 	go func() { defer close(sent); m.sendAlerts(ctx) }()
 	defer func() { <-sent }()
@@ -227,6 +351,114 @@ func (m *Monitor) Run(ctx context.Context) {
 		}
 	}
 }
+
+func (m *Monitor) enqueueAlert(key, kind, title, body string) bool {
+	now := m.clock.Now().Unix()
+	_, err := m.outbox.EnqueueAlert(context.Background(), store.Alert{
+		Key: key, Kind: kind, Title: title, Body: body, RaisedAt: now, NextAttemptAt: now,
+	})
+	if err != nil {
+		m.log.Error("alert not stored", "title", title, "err", err)
+		return false
+	}
+	select {
+	case m.wakeAlert <- struct{}{}:
+	default:
+	}
+	return true
+}
+
+func (m *Monitor) runAlertOutbox(ctx context.Context) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	heartbeat := time.NewTicker(5 * time.Minute)
+	defer heartbeat.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-m.wakeAlert:
+			_ = m.sendDueAlerts(ctx)
+		case <-ticker.C:
+			_ = m.sendDueAlerts(ctx)
+		case <-heartbeat.C:
+			if err := m.pingHeartbeat(ctx); err != nil {
+				m.log.Error("heartbeat ping failed", "err", logsafe.RedactURLs(err.Error()))
+			}
+		}
+	}
+}
+
+func (m *Monitor) pingHeartbeat(ctx context.Context) error {
+	if m.cfg.Alerts.HeartbeatURL == "" || m.heartbeat == nil {
+		return nil
+	}
+	m.mu.Lock()
+	state, lastEvent := m.snapshot.State, m.snapshot.LastEvent
+	m.mu.Unlock()
+	limits := m.cfg.Alerts
+	if m.limits != nil {
+		limits = m.limits()
+	}
+	if state != "connected" || lastEvent.IsZero() || limits.NoEventsAfter <= 0 || m.clock.Now().Sub(lastEvent) > limits.NoEventsAfter {
+		return nil
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, m.cfg.Alerts.HeartbeatURL, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := m.heartbeat.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("heartbeat status %s", resp.Status)
+	}
+	return nil
+}
+
+// sendDueAlerts drains queued rows in id order. A failed oldest row stops the
+// pass, so its recovery can never overtake it.
+func (m *Monitor) sendDueAlerts(ctx context.Context) error {
+	for {
+		a, ok, err := m.outbox.OldestQueuedAlert(ctx)
+		if err != nil || !ok {
+			return err
+		}
+		now := m.clock.Now()
+		if a.NextAttemptAt > now.Unix() {
+			return nil
+		}
+		if m.n == nil {
+			if err = m.outbox.AlertSkipped(ctx, a.ID); err != nil {
+				return err
+			}
+			continue
+		}
+		body := a.Body
+		if now.Unix()-a.RaisedAt >= 60 {
+			body += fmt.Sprintf("\nraised %s, delivered late", time.Unix(a.RaisedAt, 0).UTC().Format("15:04"))
+		}
+		if err = m.n.Notify(ctx, a.Title, body); err != nil {
+			safe := logsafe.RedactNtfy(logsafe.RedactURLs(err.Error()), m.ntfyURL())
+			next := now.Add(alertRetryBackoff(a.Attempts)).Unix()
+			if storeErr := m.outbox.AlertFailed(context.WithoutCancel(ctx), a.ID, safe, next); storeErr != nil {
+				return storeErr
+			}
+			m.log.Error("alert not sent", "title", a.Title, "err", safe)
+			return err
+		}
+		if err = m.outbox.AlertSent(context.WithoutCancel(ctx), a.ID, now.Unix()); err != nil {
+			return err
+		}
+	}
+}
+
+func alertRetryBackoff(attempts int) time.Duration {
+	backoff := time.Minute << min(attempts, 6)
+	return min(backoff, time.Hour)
+}
 func (m *Monitor) check() {
 	m.mu.Lock()
 	now := m.clock.Now()
@@ -240,7 +472,7 @@ func (m *Monitor) check() {
 		a = m.limits()
 		a.Ntfy = m.cfg.Alerts.Ntfy
 	}
-	if d := now.Sub(down); a.DisconnectedAfter > 0 && (s.State == "disconnected" || s.State == "") && d > a.DisconnectedAfter { // "" = never connected yet
+	if d := now.Sub(down); a.DisconnectedAfter > 0 && (connectionDown(s.State) || s.State == "") && d > a.DisconnectedAfter { // "" = never connected yet
 		m.gate.fire("disconnected", stateTitles["disconnected"], fmt.Sprintf("Disconnected for %s %s", d.Round(time.Minute), s.Detail))
 	}
 	if d := now.Sub(orStart(s.LastEvent, m.started)); a.NoEventsAfter > 0 && s.State == "connected" {
@@ -256,6 +488,10 @@ func (m *Monitor) check() {
 			m.condition(free < uint64(a.DiskFreeMinGB)<<30, "disk", "Disk space low", fmt.Sprintf("%d bytes free", free))
 		}
 	}
+}
+
+func connectionDown(state string) bool {
+	return state == "disconnected" || state == "degraded" || state == "reconnecting"
 }
 
 // condition fires key while holds is true and clears it once it is not.
@@ -317,21 +553,22 @@ const alertEvery = 6 * time.Hour
 
 // alertGate sends each alert at most once per alertEvery while it is active and one "recovered" message when it clears.
 type alertGate struct {
-	mu    sync.Mutex
-	now   func() time.Time
-	send  func(title, body string) bool // false when the alert was dropped
-	fired map[string]time.Time
+	mu      sync.Mutex
+	now     func() time.Time
+	send    func(key, kind, title, body string) bool // false when the alert was not stored/queued
+	fired   map[string]time.Time
+	durable bool
 }
 
 func (g *alertGate) fire(key, title, body string) {
 	g.mu.Lock()
 	now := g.now()
 	last, ok := g.fired[key]
-	if ok && now.Sub(last) < alertEvery {
+	if ok && (g.durable || now.Sub(last) < alertEvery) {
 		g.mu.Unlock()
 		return
 	}
-	if g.send(title, body) { // only a queued alert counts as fired, so a dropped one fires again
+	if g.send(key, "raised", title, body) { // only a stored/queued alert counts as fired
 		g.fired[key] = now
 	}
 	g.mu.Unlock()
@@ -342,7 +579,7 @@ func (g *alertGate) clear(key, title string) {
 	delete(g.fired, key)
 	g.mu.Unlock()
 	if ok {
-		g.send(title+": recovered", "Recovered: "+title)
+		g.send(key, "recovered", title+": recovered", "Recovered: "+title)
 	}
 }
 func (m *Monitor) writeLocked() {
