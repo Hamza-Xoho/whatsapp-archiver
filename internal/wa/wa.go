@@ -134,6 +134,10 @@ func (c *Client) VersionReason() string {
 	}
 	return ""
 }
+
+// IsConnected reports the websocket state without changing it.
+func (c *Client) IsConnected() bool { return c.client.IsConnected() }
+
 func (c *Client) Close() error {
 	var err error
 	c.closeOnce.Do(func() { c.client.Disconnect(); err = c.container.Close() })

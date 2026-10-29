@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"strings"
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/proto/waE2E"
@@ -41,8 +43,21 @@ func classifyDownloadErr(err error) error {
 		errors.Is(err, whatsmeow.ErrMediaDownloadFailedWith410) {
 		classified.class = "expired"
 		classified.expired = true
+	} else if isNetworkDownloadError(err, classified.httpStatus) {
+		classified.class = "network"
 	}
 	return classified
+}
+
+func isNetworkDownloadError(err error, status int) bool {
+	if status >= 500 && status <= 599 || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var networkErr net.Error
+	if errors.As(err, &networkErr) {
+		return true
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "failed to refresh media connection")
 }
 
 // DescribeDownloadError returns the complete safe reason and the fields persisted with a failed media row.
@@ -56,6 +71,8 @@ func DescribeDownloadError(err error) (reason, class string, httpStatus int) {
 		class, httpStatus = classified.class, classified.httpStatus
 	} else if errors.Is(err, ErrMediaExpired) {
 		class = "expired"
+	} else if isNetworkDownloadError(err, 0) {
+		class = "network"
 	}
 	return reason, class, httpStatus
 }
