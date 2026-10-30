@@ -108,16 +108,36 @@ func (s *Store) historyCoverage(ctx context.Context) (Coverage, error) {
 
 func summarizeSync(typ string, rows []historyStatusRow) SyncCoverage {
 	out := SyncCoverage{SyncType: typ}
-	minOrder := 0
-	lastOrder := 0
-	haveOrder := false
+	received := make(map[string]historyStatusRow, len(rows))
+	for _, r := range rows {
+		if r.stage == StageReceived {
+			received[r.id] = r
+		}
+	}
+	arrivals := make([]historyStatusRow, 0, len(rows))
+	imported := make([]historyStatusRow, 0, len(rows))
 	for _, r := range rows {
 		switch r.stage {
 		case StageReceived:
 			out.ReceivedChunks++
+			arrivals = append(arrivals, r)
 		case StageImported:
 			out.ImportedChunks++
+			if authoritative, ok := received[r.id]; ok {
+				// The received row is the durable arrival fact. Import may happen much later after a restart;
+				// its row proves completion but must not move the stall clock or reorder syncs.
+				imported = append(imported, authoritative)
+			} else {
+				// InsertHistoryChunk predates the two-stage spool and remains a supported direct/legacy path.
+				arrivals = append(arrivals, r)
+				imported = append(imported, r)
+			}
 		}
+	}
+	minOrder := 0
+	lastOrder := 0
+	haveOrder := false
+	for _, r := range arrivals {
 		if r.receivedAt > out.LastChunkTime || r.receivedAt == out.LastChunkTime && r.order > lastOrder {
 			out.LastChunkTime, out.LastProgress = r.receivedAt, r.progress
 			lastOrder = r.order
@@ -133,13 +153,13 @@ func summarizeSync(typ string, rows []historyStatusRow) SyncCoverage {
 		}
 	}
 	var start int64
-	for _, r := range rows {
+	for _, r := range arrivals {
 		if r.order == minOrder && r.receivedAt > start {
 			start = r.receivedAt
 		}
 	}
-	for _, r := range rows {
-		if r.stage == StageImported && r.receivedAt >= start && r.progress >= 100 {
+	for _, r := range imported {
+		if r.receivedAt >= start && r.progress >= 100 {
 			out.Complete = true
 		}
 	}
