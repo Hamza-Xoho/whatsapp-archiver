@@ -113,7 +113,7 @@ func TestW6IDevPairerHTTPScenarioCoversEverySafeStateWithoutArchiveWrites(t *tes
 		t.Fatal(err)
 	}
 	defer st.Close()
-	if _, err = st.Apply(t.Context(), store.Batch{Message: &store.Message{ChatJID: "safe@g.us", ID: "kept", Kind: "text", Text: "unchanged", Timestamp: 1, ReceivedAt: 1}}); err != nil {
+	if _, err = st.Apply(t.Context(), store.Batch{Message: &store.Message{ChatJID: "safe@g.us", ID: "kept", Kind: "text", Text: "unchanged", Source: "live", Timestamp: 1, ReceivedAt: 1}}); err != nil {
 		t.Fatal(err)
 	}
 	before := archiveShape(t, filepath.Join(data, "archive.db"))
