@@ -7,6 +7,11 @@ import (
 	"strings"
 )
 
+type chatListQuerier interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
 // ChatListFilter is the complete SQL-side predicate for the Chats screen.
 type ChatListFilter struct {
 	Query, Type, Logging string
@@ -20,15 +25,30 @@ type ChatListAfter struct {
 	Messages int
 }
 
+// ChatListView is one consistent read snapshot for a Chats response.
+type ChatListView struct {
+	Rows  []ChatRow
+	JIDs  []string
+	Total int
+	More  bool
+}
+
 // ChatListPage reads at most limit+1 derived rows so callers can expose a next-page link without loading the archive's
 // complete chat list. Total is the number matching the same predicate.
 func (s *Store) ChatListPage(ctx context.Context, f ChatListFilter, after ChatListAfter, limit int) (rows []ChatRow, total int, more bool, err error) {
+	return chatListPage(ctx, s.read, f, after, limit, nil)
+}
+
+func chatListPage(ctx context.Context, q chatListQuerier, f ChatListFilter, after ChatListAfter, limit int, afterCount func()) (rows []ChatRow, total int, more bool, err error) {
 	if limit < 1 || limit > 10000 {
 		return nil, 0, false, fmt.Errorf("chat list page limit out of range")
 	}
 	where, args := chatListWhere(f)
-	if err = s.read.QueryRowContext(ctx, `SELECT COUNT(*) FROM (`+chatListPageBase+where+`)`, args...).Scan(&total); err != nil {
+	if err = q.QueryRowContext(ctx, `SELECT COUNT(*) FROM (`+chatListPageBase+where+`)`, args...).Scan(&total); err != nil {
 		return nil, 0, false, fmt.Errorf("count chat list page: %w", err)
+	}
+	if afterCount != nil {
+		afterCount()
 	}
 	if after.JID != "" {
 		where += ` AND (s.last_ts<? OR (s.last_ts=? AND (s.messages=0)>?) OR (s.last_ts=? AND (s.messages=0)=? AND s.canonical>?))`
@@ -40,21 +60,25 @@ func (s *Store) ChatListPage(ctx context.Context, f ChatListFilter, after ChatLi
 	}
 	base := chatListPageBase + where
 	queryArgs := append(append([]any{}, args...), limit+1)
-	err = s.scanRows(ctx, base+` ORDER BY s.last_ts DESC,s.messages=0,s.canonical LIMIT ?`, queryArgs, func(dbRows *sql.Rows) error {
+	dbRows, err := q.QueryContext(ctx, base+` ORDER BY s.last_ts DESC,s.messages=0,s.canonical LIMIT ?`, queryArgs...)
+	if err != nil {
+		return nil, 0, false, fmt.Errorf("query chat list page: %w", err)
+	}
+	defer func() { _ = dbRows.Close() }()
+	for dbRows.Next() {
 		var row ChatRow
 		c := &row.ChatStat
 		if scanErr := dbRows.Scan(&c.CanonicalJID, &c.Name, &c.MessageCount, &c.Oldest, &c.Newest, &row.OldestHistory,
 			&c.MediaFailed, &c.MediaExpired, &c.MediaPending, &c.OpenGaps, &row.Logging, &row.HasMediaRule, &row.New); scanErr != nil {
-			return scanErr
+			return nil, 0, false, scanErr
 		}
 		row.DisplayName = c.Name
 		if row.DisplayName == "" {
 			row.DisplayName = c.CanonicalJID
 		}
 		rows = append(rows, row)
-		return nil
-	})
-	if err != nil {
+	}
+	if err = dbRows.Err(); err != nil {
 		return nil, 0, false, fmt.Errorf("chat list page: %w", err)
 	}
 	if len(rows) > limit {
@@ -63,11 +87,40 @@ func (s *Store) ChatListPage(ctx context.Context, f ChatListFilter, after ChatLi
 	return rows, total, more, nil
 }
 
+// ChatListView reads page rows, total and exact membership in one SQLite read transaction.
+func (s *Store) ChatListView(ctx context.Context, f ChatListFilter, after ChatListAfter, limit int) (ChatListView, error) {
+	return s.chatListView(ctx, f, after, limit, nil)
+}
+
+func (s *Store) chatListView(ctx context.Context, f ChatListFilter, after ChatListAfter, limit int, afterCount func()) (ChatListView, error) {
+	tx, err := s.read.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return ChatListView{}, fmt.Errorf("begin chat list snapshot: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	rows, total, more, err := chatListPage(ctx, tx, f, after, limit, afterCount)
+	if err != nil {
+		return ChatListView{}, err
+	}
+	jids, err := chatListJIDs(ctx, tx, f)
+	if err != nil {
+		return ChatListView{}, err
+	}
+	if err = tx.Commit(); err != nil {
+		return ChatListView{}, fmt.Errorf("commit chat list snapshot: %w", err)
+	}
+	return ChatListView{Rows: rows, JIDs: jids, Total: total, More: more}, nil
+}
+
 // ChatListJIDs returns the complete matching membership in the same stable order as ChatListPage. It selects only the
 // identifier column and is used to bind an all-filtered confirmation to the exact server-side set.
 func (s *Store) ChatListJIDs(ctx context.Context, f ChatListFilter) ([]string, error) {
+	return chatListJIDs(ctx, s.read, f)
+}
+
+func chatListJIDs(ctx context.Context, q chatListQuerier, f ChatListFilter) ([]string, error) {
 	where, args := chatListWhere(f)
-	rows, err := s.read.QueryContext(ctx, `SELECT canonical FROM (`+chatListPageBase+where+`) ORDER BY last_ts DESC,messages=0,canonical`, args...)
+	rows, err := q.QueryContext(ctx, `SELECT canonical FROM (`+chatListPageBase+where+`) ORDER BY last_ts DESC,messages=0,canonical`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query chat list membership: %w", err)
 	}

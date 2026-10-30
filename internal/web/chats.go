@@ -54,24 +54,18 @@ func (s *Server) chats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var list []store.ChatRow
+	var membership []string
 	var total int
 	var more bool
 	if s.d.Store != nil {
-		list, total, more, err = s.d.Store.ChatListPage(r.Context(), filters.storeFilter(), store.ChatListAfter{
+		view, readErr := s.d.Store.ChatListView(r.Context(), filters.storeFilter(), store.ChatListAfter{
 			JID: cursor.After, Last: cursor.Last, Messages: cursor.Messages,
 		}, chatsPageSize)
-		if err != nil {
+		if readErr != nil {
 			http.Error(w, "the archive could not be read", http.StatusInternalServerError)
 			return
 		}
-	}
-	membership := []string{}
-	if s.d.Store != nil {
-		membership, err = s.d.Store.ChatListJIDs(r.Context(), filters.storeFilter())
-		if err != nil {
-			http.Error(w, "the archive could not be read", http.StatusInternalServerError)
-			return
-		}
+		list, membership, total, more = view.Rows, view.JIDs, view.Total, view.More
 	}
 	rows, err := s.chatRowViews(r.Context(), list, nil, false)
 	if err != nil {

@@ -21,6 +21,10 @@ type Writer interface {
 	InsertIDMapping(context.Context, store.IDMapping) (bool, error)
 }
 
+type chatDirectoryWriter interface {
+	UpsertChat(context.Context, store.Chat) error
+}
+
 // MediaQueue is the media workers as ingest sees them. Decide applies the media rules to a row about to be stored
 // (state, reason, queue time); a failed rule read is an error and decides nothing. The row is then stored by Apply in
 // the same transaction as its message, and Wake tells the workers it exists.
@@ -268,6 +272,11 @@ func (p *Pipeline) ingest(ctx context.Context, r Result, publish bool) error {
 		p.filter.DiscoverCommunityChild(r.Chat.JID, r.Chat.ParentJID)
 	}
 	if keep, excluded, err := p.decide(ctx, r.Chat.JID, r.Kind); err != nil || !keep {
+		if err == nil && excluded && r.Chat.ParentJID != "" {
+			if directory, ok := p.writer.(chatDirectoryWriter); ok {
+				err = p.persist(ctx, "store excluded community child metadata", func() error { return directory.UpsertChat(ctx, r.Chat) })
+			}
+		}
 		if err == nil && excluded && publish { // status posts and never-stored kinds are refused silently
 			p.publish(r, false)
 		}
