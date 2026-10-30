@@ -178,6 +178,8 @@ func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) er
 	queue := media.NewQueue(cfg.DataDir, live.media, live.chatMedia, st, client, systemClock{}, log, mon.Panic).WithConnected(mediaConnected).WithActivity(bus)
 	filter := ingest.NewFilter(rules, aliases)
 	pipeline := ingest.NewPipeline(st, filter, queue, mon, log).WithHistoryParser(client.HistoryParser()).WithVoteDecryptor(client.VoteDecryptor()).WithContext(ctx).WithSeen(seen).WithActivity(bus)
+	history := ingest.NewHistorySpool(st, pipeline, log)
+	client.WithHistorySpool(history.Receive)
 	handler := pipeline.Handle
 	if recordDir != "" {
 		handler = ingest.NewRecorder(recordDir).WithFilter(filter).Wrap(handler)
@@ -206,6 +208,7 @@ func serve(cfg *config.Config, pairing bool, recordDir string, out io.Writer) er
 	loops := []func(context.Context){
 		watchdog.run,
 		afterPaired(ready, queue.Run),
+		history.Run,
 		mon.Run,
 		contacts.Run, // idle until a connect or contact event asks for a sync
 		afterPaired(ready, func(ctx context.Context) {

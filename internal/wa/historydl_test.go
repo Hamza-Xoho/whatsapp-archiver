@@ -90,6 +90,43 @@ func TestHistoryNotificationIsNotAckedUntilItsChunkIsStored(t *testing.T) {
 	}
 }
 
+// ADR-37: once a spool receiver is configured, the history chunk no longer enters the synchronous event handler.
+// The notification is acknowledged only after Receive durably spooled it and the marker message was archived.
+func TestHistoryNotificationIsAckedAfterSpoolAndDoesNotEnterTheLiveHandler(t *testing.T) {
+	hs := &waHistorySync.HistorySync{SyncType: waHistorySync.HistorySync_FULL.Enum(), ChunkOrder: proto.Uint32(3)}
+	notif := historyNotification(true)
+	order := []string{}
+	c := historyClient(nil, time.Minute, func(context.Context, *waE2E.HistorySyncNotification) (*waHistorySync.HistorySync, error) {
+		order = append(order, "download")
+		return hs, nil
+	}).WithHistorySpool(func(_ context.Context, n *waE2E.HistorySyncNotification, got *waHistorySync.HistorySync) error {
+		order = append(order, "spool")
+		if n != notif.Message.GetProtocolMessage().GetHistorySyncNotification() || got != hs {
+			t.Fatal("spool receiver did not get the downloaded notification and chunk")
+		}
+		return nil
+	})
+	acked := c.historyHandler(t.Context(), func(evt any) bool {
+		if _, ok := evt.(*events.HistorySync); ok {
+			t.Fatal("history import still runs inside the live event handler")
+		}
+		order = append(order, "marker")
+		return true
+	})(notif)
+	if !acked || strings.Join(order, ",") != "download,spool,marker" {
+		t.Fatalf("acked=%v order=%v, want download, spool, marker, ack", acked, order)
+	}
+
+	spoolErr := errors.New("archive write failed")
+	c.WithHistorySpool(func(context.Context, *waE2E.HistorySyncNotification, *waHistorySync.HistorySync) error {
+		return spoolErr
+	})
+	called := false
+	if c.historyHandler(t.Context(), func(any) bool { called = true; return true })(notif) || called {
+		t.Fatal("failed spool was acknowledged or passed to the live handler")
+	}
+}
+
 // Only our own phone sends history; a notification from anyone else is not downloaded (whatsmeow ignores it too), and
 // every other event reaches the handler unchanged.
 func TestOnlyOwnHistoryNotificationIsDownloaded(t *testing.T) {
@@ -128,6 +165,35 @@ func TestHistoryDownloadIsBoundedAndNotAckedOnTimeout(t *testing.T) {
 		cancel()
 		<-done
 		t.Fatal("history download is not bounded")
+	}
+}
+
+// A notification that declares an impossible chunk size is rejected before any allocation or network request. The
+// live downloader additionally enforces the same bound while writing, so a dishonest Content-Length cannot bypass it.
+func TestOversizeHistoryIsNotDownloadedSpooledOrAcked(t *testing.T) {
+	notif := historyNotification(true)
+	n := notif.Message.GetProtocolMessage().GetHistorySyncNotification()
+	n.FileLength = proto.Uint64(uint64(historyMaxBlobBytes + 1))
+	downloaded, spooled, handled := false, false, false
+	c := historyClient(nil, time.Minute, func(context.Context, *waE2E.HistorySyncNotification) (*waHistorySync.HistorySync, error) {
+		downloaded = true
+		return &waHistorySync.HistorySync{}, nil
+	}).WithHistorySpool(func(context.Context, *waE2E.HistorySyncNotification, *waHistorySync.HistorySync) error {
+		spooled = true
+		return nil
+	})
+	if acked := c.historyHandler(t.Context(), func(any) bool { handled = true; return true })(notif); acked || downloaded || spooled || handled {
+		t.Fatalf("acked=%v downloaded=%v spooled=%v handled=%v, want bounded rejection before all work", acked, downloaded, spooled, handled)
+	}
+}
+
+func TestInlineHistoryPayloadHasItsOwnByteCap(t *testing.T) {
+	n := &waE2E.HistorySyncNotification{
+		FileLength:                        proto.Uint64(1), // a dishonest declaration must not disable the inline cap
+		InitialHistBootstrapInlinePayload: make([]byte, historyMaxBlobBytes+1),
+	}
+	if _, err := boundedHistoryBlob(t.Context(), nil, n); !errors.Is(err, errHistoryTooLarge) {
+		t.Fatalf("boundedHistoryBlob error=%v, want errHistoryTooLarge", err)
 	}
 }
 

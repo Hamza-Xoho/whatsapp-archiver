@@ -151,7 +151,7 @@ func TestStatusPrintsHealthFieldsInTheConfiguredZone(t *testing.T) {
 		"client version: 2.3000.1031 (latest)",
 		"last event: 2026-10-12 12:15 +03",
 		"phone last active: 2026-10-12 09:00 +03",
-		"history: complete back to 2024-03-02, chunks 3, last chunk 2026-10-10 12:00 +03",
+		"history FULL: complete, received 0, imported 3, last chunk 2026-10-10 12:00 +03",
 		"recovered panics: 2",
 	} {
 		if !slices.Contains(got, want) {
@@ -239,8 +239,8 @@ func TestStatusHistoryLines(t *testing.T) {
 		want     string
 	}{
 		{"none", nil, "history: none received yet"},
-		{"in progress", []int{30, 55}, "history: in progress (55%), chunks 2, last chunk 2026-10-10 08:10 UTC"},
-		{"complete", []int{100, 40}, "history: complete back to 2024-03-01, chunks 2, last chunk 2026-10-10 08:10 UTC"},
+		{"in progress", []int{30, 55}, "history FULL: stalled at 55% (no chunk for 48 h), received 0, imported 2, last chunk 2026-10-10 08:10 UTC"},
+		{"complete", []int{100, 40}, "history FULL: complete, received 0, imported 2, last chunk 2026-10-10 08:10 UTC"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

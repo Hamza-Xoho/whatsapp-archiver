@@ -111,7 +111,7 @@ type pairView struct {
 	HasQR      bool
 	Seq        int
 	Err        string
-	History    string
+	History    []string
 }
 
 type pairData struct {
@@ -140,7 +140,7 @@ func (s *Server) pairView(ctx context.Context) (pairView, error) {
 		if err != nil {
 			return v, err
 		}
-		v.History = view.HistoryLine(loc, cov)
+		v.History = view.HistoryLinesAt(loc, cov, s.d.Now())
 	}
 	return v, nil
 }

@@ -16,7 +16,7 @@
   {{if .HasArchive}}
   <section class="panel">
     <h2>Archive</h2>
-    <p>{{.History}}</p>
+    {{range .History}}<p>{{.}}</p>{{end}}
     <ul class="counts">
       <li>Logging: <strong>{{.Logging}}</strong> {{.LoggingNoun}}</li>
       <li>Not logging: <strong>{{.NotLogging}}</strong> {{.NotLoggingNoun}}</li>
@@ -24,6 +24,10 @@
       <li>Media done within 5 min (24 hours): <strong>{{.Media24Hours}}</strong></li>
       <li>Media done within 5 min (7 days): <strong>{{.Media7Days}}</strong></li>
     </ul>
+    {{if .GapGroups}}
+    <h3>Open gaps by cause</h3>
+    <ul class="counts">{{range .GapGroups}}<li>{{.Cause}}: <strong>{{.Count}}</strong> {{.GapNoun}}, oldest {{.Age}} ago{{if .PostOutage}}, after an outage{{end}}</li>{{end}}</ul>
+    {{else}}<p>No open gaps</p>{{end}}
     {{if .HasOutages}}
     <h3>Outage minutes by day</h3>
     <ul class="counts">{{range .Outages}}{{if .Minutes}}<li>{{.Date}}: <strong>{{.Minutes}}</strong> minutes</li>{{end}}{{end}}</ul>

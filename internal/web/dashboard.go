@@ -51,14 +51,21 @@ type dashboardData struct {
 	page
 	Health                      healthView
 	HasArchive                  bool
-	History                     string
+	History                     []string
 	Logging, NotLogging, Gaps   int
 	LoggingNoun, NotLoggingNoun string
+	GapGroups                   []gapSummaryView
 	Media24Hours, Media7Days    string
 	Events                      []feedItem
 	Outages                     []store.OutageDay
 	HasOutages                  bool
 	LongestOutageMinutes        int
+}
+
+type gapSummaryView struct {
+	Cause, GapNoun, Age string
+	Count               int
+	PostOutage          bool
 }
 
 // dashboard is GET /. Like every GET it only reads.
@@ -98,9 +105,15 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 				data.Logging++
 			}
 		}
-		if data.Gaps, err = s.d.Store.OpenGapCount(ctx); err != nil {
+		gaps, err := s.d.Store.OpenGapSummary(ctx)
+		if err != nil {
 			http.Error(w, "the archive could not be read", http.StatusInternalServerError)
 			return
+		}
+		for _, gap := range gaps {
+			data.Gaps += gap.Count
+			data.GapGroups = append(data.GapGroups, gapSummaryView{Cause: gapCauseWords(gap.Cause), Count: gap.Count,
+				GapNoun: gapNoun(gap.Count), Age: gapAge(s.d.Now(), gap.OldestReceivedAt), PostOutage: gap.PostOutage})
 		}
 		outages, err := s.d.Store.OutageSummary(ctx, s.d.Now(), loc, 7)
 		if err != nil {
@@ -110,7 +123,7 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 		data.Outages, data.HasOutages = outages.Days, outages.HasOutages
 		data.LongestOutageMinutes = roundedMinutes(outages.Longest)
 		data.HasArchive = true
-		data.History = view.HistoryLine(loc, report.Coverage)
+		data.History = view.HistoryLinesAt(loc, report.Coverage, s.d.Now())
 		data.LoggingNoun, data.NotLoggingNoun = chatNoun(data.Logging), chatNoun(data.NotLogging)
 	}
 	data.Events = s.recent(names, loc)
@@ -213,4 +226,37 @@ func chatNoun(n int) string {
 		return "chat"
 	}
 	return "chats"
+}
+
+func gapNoun(n int) string {
+	if n == 1 {
+		return "gap"
+	}
+	return "gaps"
+}
+
+func gapCauseWords(cause string) string {
+	switch cause {
+	case "no_sender_key":
+		return "No sender key"
+	case "untrusted_identity":
+		return "Untrusted identity"
+	case "view_once_unavailable":
+		return "View-once unavailable"
+	case "other":
+		return "Other"
+	default:
+		return "Unknown"
+	}
+}
+
+func gapAge(now time.Time, receivedAt int64) string {
+	age := now.Sub(time.Unix(receivedAt, 0))
+	if age < time.Hour {
+		return "less than an hour"
+	}
+	if age < 2*time.Hour {
+		return "1 hour"
+	}
+	return sinceWords(age)
 }

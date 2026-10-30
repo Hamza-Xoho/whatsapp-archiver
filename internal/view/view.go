@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"strings"
 	"time"
 	_ "time/tzdata" // zone names resolve on hosts without a zoneinfo database (Windows, minimal containers)
 	"whatsapp-archiver/internal/config"
@@ -72,25 +73,27 @@ func DirSize(dir string) (int64, error) {
 	return total, err
 }
 
-// HistoryLine describes the history sync coverage in one status line.
-func HistoryLine(loc *time.Location, c store.Coverage) string {
-	if c.Chunks == 0 {
-		return "history: none received yet"
+// HistoryLinesAt describes each durable history sync type. A stalled sync is incomplete and has received no chunk for
+// 48 hours; it is deliberately not described as in progress.
+func HistoryLinesAt(loc *time.Location, c store.Coverage, now time.Time) []string {
+	if len(c.Syncs) == 0 {
+		return []string{"history: none received yet"}
 	}
-	chunks := fmt.Sprintf("chunks %d, last chunk %s", c.Chunks, FormatUnix(loc, c.LastChunkTime))
-	if !c.Complete {
-		return fmt.Sprintf("history: in progress (%d%%), %s", c.LastProgress, chunks)
-	}
-	oldest := "-"
-	first := true
-	var min int64
-	for _, ts := range c.OldestByChat {
-		if first || ts < min {
-			min, first = ts, false
+	out := make([]string, 0, len(c.Syncs))
+	for _, sync := range c.Syncs {
+		state := "complete"
+		if !sync.Complete {
+			state = fmt.Sprintf("in progress (%d%%)", sync.LastProgress)
+			if sync.LastChunkTime > 0 && !now.Before(time.Unix(sync.LastChunkTime, 0).Add(48*time.Hour)) {
+				state = fmt.Sprintf("stalled at %d%% (no chunk for 48 h)", sync.LastProgress)
+			}
 		}
+		out = append(out, fmt.Sprintf("history %s: %s, received %d, imported %d, last chunk %s", sync.SyncType, state, sync.ReceivedChunks, sync.ImportedChunks, FormatUnix(loc, sync.LastChunkTime)))
 	}
-	if !first && min != 0 {
-		oldest = time.Unix(min, 0).In(loc).Format("2006-01-02")
-	}
-	return fmt.Sprintf("history: complete back to %s, %s", oldest, chunks)
+	return out
+}
+
+// HistoryLine is the plain-text form used by callers that need one string.
+func HistoryLine(loc *time.Location, c store.Coverage) string {
+	return strings.Join(HistoryLinesAt(loc, c, time.Now()), "\n")
 }

@@ -76,7 +76,7 @@ func TestDashboardShowsStateVersionAndHistoryLine(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := d.page(t, "/")
-	for _, want := range []string{"Connected", "2.3000.1050849967 (latest)", "history: in progress (40%)"} {
+	for _, want := range []string{"Connected", "2.3000.1050849967 (latest)", "history FULL: in progress (40%)"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("dashboard lacks %q:\n%s", want, got)
 		}

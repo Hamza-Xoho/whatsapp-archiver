@@ -14,6 +14,8 @@ import (
 
 	"github.com/mdp/qrterminal/v3"
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	wmstore "go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types/events"
@@ -38,6 +40,7 @@ type Client struct {
 	// download fetches a history chunk; historyTimeout bounds it. Tests replace both.
 	download       historyDownloader
 	historyTimeout time.Duration
+	historySpool   func(context.Context, *waE2E.HistorySyncNotification, *waHistorySync.HistorySync) error
 	paired         atomic.Bool
 	pairedOnce     sync.Once
 	// qrChannel is GetQRChannel; tests replace it with a fake channel.
@@ -66,6 +69,13 @@ func (c *Client) UseHTTPClient(h *http.Client) {
 // socket watchdog. Call it before Run.
 func (c *Client) WithConnectionHealth(h ingest.ConnectionStateSink) *Client {
 	c.conn = newConnectionMonitor(c.client, h, time.Now)
+	return c
+}
+
+// WithHistorySpool makes downloaded history durable before acknowledgement and moves its import out of the event
+// handler. The receiver must return only after its spool transaction commits.
+func (c *Client) WithHistorySpool(receive func(context.Context, *waE2E.HistorySyncNotification, *waHistorySync.HistorySync) error) *Client {
+	c.historySpool = receive
 	return c
 }
 

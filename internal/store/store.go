@@ -98,11 +98,19 @@ type ChatStat struct {
 	Oldest, Newest                                    int64
 	MediaFailed, MediaExpired, MediaPending, OpenGaps int
 }
+type SyncCoverage struct {
+	SyncType                       string
+	ReceivedChunks, ImportedChunks int
+	LastProgress                   int
+	LastChunkTime, Oldest, Newest  int64
+	Complete                       bool
+}
 type Coverage struct {
 	Chunks, LastProgress int
 	Complete             bool // a chunk of the latest FULL (else INITIAL_BOOTSTRAP) sync reported progress 100
 	LastChunkTime        int64
 	OldestByChat         map[string]int64
+	Syncs                []SyncCoverage
 }
 
 func Open(path string) (*Store, error) {
