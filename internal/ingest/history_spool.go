@@ -151,8 +151,9 @@ func (h *HistorySpool) ImportNext(ctx context.Context) (bool, error) {
 	}
 	sp := rows[0]
 	hs, err := decodeSpooledHistory(sp.Blob, sp.BlobFormat)
+	stored, skipped := 0, 0
 	if err == nil {
-		_, _, err = h.pipeline.importHistory(ctx, &events.HistorySync{Data: hs}, false)
+		stored, skipped, err = h.pipeline.importHistory(ctx, &events.HistorySync{Data: hs}, false)
 	}
 	if err != nil {
 		if markErr := h.store.SpoolFailed(context.WithoutCancel(ctx), sp.ID, err.Error()); markErr != nil {
@@ -160,11 +161,13 @@ func (h *HistorySpool) ImportNext(ctx context.Context) (bool, error) {
 		}
 		return false, fmt.Errorf("import history spool row %d: %w", sp.ID, err)
 	}
-	at := h.now().Unix()
+	now := h.now()
+	at := now.Unix()
 	chunk := describeHistory(hs, sp.ChunkID, store.StageImported, at)
 	if err = h.store.SpoolImported(ctx, sp.ID, at, chunk); err != nil {
 		return false, fmt.Errorf("mark history spool row %d imported: %w", sp.ID, err)
 	}
+	h.pipeline.historyImported(now, chunk, stored, skipped)
 	return true, nil
 }
 

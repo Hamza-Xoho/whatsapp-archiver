@@ -3,6 +3,7 @@ package ingest
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/proto/waWeb"
@@ -153,9 +154,15 @@ func (p *Pipeline) importHistory(ctx context.Context, evt *events.HistorySync, w
 			return stored, skipped, err
 		}
 	}
+	if writeLedger {
+		p.historyImported(now, chunk, stored, skipped)
+	}
+	return
+}
+
+func (p *Pipeline) historyImported(now time.Time, chunk store.HistoryChunk, stored, skipped int) {
 	p.bus.Publish(activity.Event{At: now, Kind: "history_chunk", Detail: fmt.Sprintf("chunk %s #%d · %d messages", chunk.SyncType, chunk.ChunkOrder, chunk.MessageCount)})
 	p.log.Info("history chunk imported", "progress", chunk.Progress, "stored", stored, "skipped", skipped)
-	return
 }
 
 func describeHistory(hs *waHistorySync.HistorySync, id, stage string, receivedAt int64) store.HistoryChunk {
