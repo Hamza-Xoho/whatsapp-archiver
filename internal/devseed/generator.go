@@ -27,15 +27,27 @@ func newGenerator(opts Options) *generator {
 }
 
 func (g *generator) message(i int) (ingest.Result, string, []byte) {
+	return g.messageForChat(i, -1)
+}
+
+func (g *generator) liveMessage(sequence, offset int) (ingest.Result, string, []byte) {
+	return g.messageForChat(offset+sequence, sequence%g.opts.Chats)
+}
+
+func (g *generator) messageForChat(i, forcedChat int) (ingest.Result, string, []byte) {
 	kind := store.MessageKinds[i%len(store.MessageKinds)]
 	chatIndex := i
-	if i >= g.opts.Chats {
+	if forcedChat >= 0 {
+		chatIndex = forcedChat
+	} else if i < g.opts.LargeChatMessages {
+		chatIndex = 0
+	} else if i >= g.opts.Chats {
 		chatIndex = g.rng.Intn(g.opts.Chats)
 	}
 	chatIndex %= g.opts.Chats
 	lid, phone := chatIDs(chatIndex)
 	chat := lid
-	if i%2 == 1 {
+	if forcedChat < 0 && i%2 == 1 {
 		chat = phone
 	}
 	ts := g.base + int64(i)
@@ -47,6 +59,10 @@ func (g *generator) message(i int) (ingest.Result, string, []byte) {
 		Kind: kind, Text: text, Caption: caption, Details: details, Source: source,
 		Timestamp: ts, ReceivedAt: ts + 1, RawProto: []byte("synthetic:" + id),
 		FromMe: i%11 == 0, Forwarded: i%17 == 0, ForwardScore: i % 4,
+	}
+	if g.opts.LargeChatMessages > 1 && i == 1 {
+		msg.QuotedID = fmt.Sprintf("SEED-%d-%09d", g.opts.Seed, 0)
+		msg.QuotedSender = "800000@lid"
 	}
 	result := ingest.Result{
 		Kind:    ingest.KindMessage,

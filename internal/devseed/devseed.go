@@ -23,13 +23,14 @@ import (
 )
 
 type Options struct {
-	DataDir      string
-	Chats        int
-	Messages     int
-	Seed         int64
-	SimulateLive float64
-	Activity     *activity.Bus
-	Serve        bool
+	DataDir           string
+	Chats             int
+	Messages          int
+	LargeChatMessages int
+	Seed              int64
+	SimulateLive      float64
+	Activity          *activity.Bus
+	Serve             bool
 }
 
 type Report struct {
@@ -80,6 +81,9 @@ func Seed(ctx context.Context, opts Options) (Report, error) {
 		}
 		report.KindCounts[kind]++
 	}
+	if err = addEvaluationScenarios(ctx, st, pipe, g); err != nil {
+		return Report{}, err
+	}
 	if err = g.addGaps(ctx, pipe); err != nil {
 		return Report{}, err
 	}
@@ -109,8 +113,43 @@ func validate(opts Options) error {
 		return fmt.Errorf("chats must be at least 1")
 	case opts.Messages < len(store.MessageKinds):
 		return fmt.Errorf("messages must be at least %d so every kind is present", len(store.MessageKinds))
+	case opts.LargeChatMessages < 0 || opts.LargeChatMessages > opts.Messages:
+		return fmt.Errorf("large-chat-messages must be between 0 and messages")
 	case opts.SimulateLive < 0 || opts.SimulateLive > 10000:
 		return fmt.Errorf("simulate-live rate must be between 0 and 10000 messages/s")
+	}
+	return nil
+}
+
+func addEvaluationScenarios(ctx context.Context, st *store.Store, pipe *ingest.Pipeline, g *generator) error {
+	if g.opts.LargeChatMessages < 3 {
+		return nil
+	}
+	chat, _ := chatIDs(0)
+	for i, event := range []struct {
+		kind ingest.Kind
+		row  store.MessageEvent
+	}{
+		{ingest.KindEdit, store.MessageEvent{Kind: "edit", TargetID: fmt.Sprintf("SEED-%d-%09d", g.opts.Seed, 0), NewText: "Edited synthetic message"}},
+		{ingest.KindRevoke, store.MessageEvent{Kind: "revoke", TargetID: fmt.Sprintf("SEED-%d-%09d", g.opts.Seed, 2)}},
+		{ingest.KindReaction, store.MessageEvent{Kind: "reaction", TargetID: fmt.Sprintf("SEED-%d-%09d", g.opts.Seed, 1), Value: "👍"}},
+	} {
+		ts := g.base + int64(g.opts.Messages+i+1)
+		event.row.ChatJID, event.row.EventID, event.row.Source = chat, fmt.Sprintf("SCENARIO-%d-%d", g.opts.Seed, i), "live"
+		event.row.SenderJID, event.row.Timestamp, event.row.ReceivedAt = "899999@lid", ts, ts
+		if err := pipe.Ingest(ctx, ingest.Result{Kind: event.kind, Chat: store.Chat{JID: chat}, Event: &event.row, Received: time.Unix(ts, 0)}); err != nil {
+			return fmt.Errorf("ingest evaluation event: %w", err)
+		}
+	}
+	if err := st.InsertHistoryChunk(ctx, store.HistoryChunk{ID: fmt.Sprintf("SCENARIO-HISTORY-%d", g.opts.Seed), SyncType: "FULL", Progress: 99, ReceivedAt: g.base - int64(72*time.Hour/time.Second)}); err != nil {
+		return fmt.Errorf("insert stalled history scenario: %w", err)
+	}
+	for i, state := range []string{"failed", "expired"} {
+		messageIndex := 17 + i*16
+		media := &store.Media{ChatJID: chat, MessageID: fmt.Sprintf("SEED-%d-%09d", g.opts.Seed, messageIndex), SenderJID: "800000@lid", Source: "live", Type: "image", State: state, ErrorClass: "other", Reason: "synthetic evaluation failure", MessageTimestamp: g.base + int64(messageIndex), EnqueuedAt: g.base, UpdatedAt: g.base + 1}
+		if _, err := st.Apply(ctx, store.Batch{Media: media}); err != nil {
+			return fmt.Errorf("insert %s media scenario: %w", state, err)
+		}
 	}
 	return nil
 }
@@ -178,7 +217,7 @@ func simulate(ctx context.Context, pipe *ingest.Pipeline, g *generator, offset i
 		case <-ctx.Done():
 			return nil
 		case <-ticker.C:
-			result, _, _ := g.message(i)
+			result, _, _ := g.liveMessage(i-offset, offset)
 			result.Message.ID = fmt.Sprintf("LIVE-%d-%d-%09d", g.opts.Seed, started, i-offset)
 			result.Message.RawProto = []byte("synthetic:" + result.Message.ID)
 			result.Message.Source = "live"
@@ -209,6 +248,7 @@ func serveAndSimulate(ctx context.Context, dataDir string, st *store.Store, rule
 	serverDone := make(chan error, 1)
 	ui := web.New(web.Deps{
 		Store: st, Rules: rules, Activity: bus, Config: cfg,
+		Pairer: newDevPairer(liveCtx),
 		Health: func() health.Snapshot {
 			return health.Snapshot{State: "connected", LastEvent: time.Now(), UpdatedAt: time.Now()}
 		},
