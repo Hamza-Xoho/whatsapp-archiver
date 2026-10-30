@@ -1,6 +1,8 @@
 package ingest
 
 import (
+	"bytes"
+	"compress/zlib"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,6 +14,7 @@ import (
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
 
+	"whatsapp-archiver/internal/guard"
 	"whatsapp-archiver/internal/store"
 )
 
@@ -61,9 +64,13 @@ func (h *HistorySpool) Receive(ctx context.Context, n *waE2E.HistorySyncNotifica
 		return fmt.Errorf("spool history: missing notification or chunk")
 	}
 	clean := StripHistorySync(hs)
-	blob, err := proto.MarshalOptions{Deterministic: true, AllowPartial: true}.Marshal(clean)
+	raw, err := proto.MarshalOptions{Deterministic: true, AllowPartial: true}.Marshal(clean)
 	if err != nil {
 		return fmt.Errorf("spool history: encode stripped chunk: %w", err)
+	}
+	blob, err := compressSpooledHistory(raw)
+	if err != nil {
+		return fmt.Errorf("spool history: %w", err)
 	}
 	meta, err := json.Marshal(historySpoolMeta{
 		SyncType:                 n.GetSyncType().String(),
@@ -79,8 +86,8 @@ func (h *HistorySpool) Receive(ctx context.Context, n *waE2E.HistorySyncNotifica
 		return fmt.Errorf("spool history: encode metadata: %w", err)
 	}
 	receivedAt := h.now().Unix()
-	chunkID := stableID(string(blob))
-	sp := store.Spool{ChunkID: chunkID, SyncType: clean.GetSyncType().String(), ChunkOrder: int(clean.GetChunkOrder()), Progress: int(clean.GetProgress()), Meta: string(meta), BlobFormat: store.BlobRaw, Blob: blob, ReceivedAt: receivedAt}
+	chunkID := stableID(string(raw))
+	sp := store.Spool{ChunkID: chunkID, SyncType: clean.GetSyncType().String(), ChunkOrder: int(clean.GetChunkOrder()), Progress: int(clean.GetProgress()), Meta: string(meta), BlobFormat: store.BlobZlib, Blob: blob, ReceivedAt: receivedAt}
 	chunk := describeHistory(clean, chunkID, store.StageReceived, receivedAt)
 	_, isNew, err := h.store.SpoolReceive(ctx, sp, chunk)
 	if err != nil {
@@ -93,6 +100,18 @@ func (h *HistorySpool) Receive(ctx context.Context, n *waE2E.HistorySyncNotifica
 		}
 	}
 	return nil
+}
+
+func compressSpooledHistory(raw []byte) ([]byte, error) {
+	var out bytes.Buffer
+	zw := zlib.NewWriter(&out)
+	if _, err := zw.Write(raw); err != nil {
+		return nil, fmt.Errorf("compress stripped chunk: %w", err)
+	}
+	if err := zw.Close(); err != nil {
+		return nil, fmt.Errorf("compress stripped chunk: %w", err)
+	}
+	return out.Bytes(), nil
 }
 
 // Run resumes pending rows at startup, processes them oldest first, and stops on context cancellation. A failed row
@@ -139,9 +158,20 @@ func waitHistory(ctx context.Context, wake <-chan struct{}, retry time.Duration)
 	}
 }
 
-// ImportNext imports the oldest pending row. It is public for deterministic lifecycle/crash tests; production uses Run.
-// It returns false,nil when there is no pending row.
-func (h *HistorySpool) ImportNext(ctx context.Context) (bool, error) {
+// ImportNext is the event boundary for one durable history chunk. Moving import out of whatsmeow's synchronous handler
+// must not move it outside the shared panic guard: a bad chunk is reported and retried instead of taking down capture.
+func (h *HistorySpool) ImportNext(ctx context.Context) (imported bool, err error) {
+	guard.Run(h.log, "handler", func(string, any) {
+		h.pipeline.health.Panic("handler")
+		err = fmt.Errorf("history importer panicked")
+	}, func() {
+		imported, err = h.importNext(ctx)
+	})
+	return
+}
+
+// importNext imports the oldest pending row. It returns false,nil when there is no pending row.
+func (h *HistorySpool) importNext(ctx context.Context) (bool, error) {
 	rows, err := h.store.SpoolTodo(ctx, 1)
 	if err != nil {
 		return false, fmt.Errorf("read history spool: %w", err)
