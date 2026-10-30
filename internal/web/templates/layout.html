@@ -26,14 +26,14 @@
 </header>
 <main id="main" tabindex="-1">
 {{if notPaired}}<p class="warn banner" role="alert">WhatsApp is not paired yet. <a href="/pair">Pair it now</a>. New messages are not being archived.</p>{{end}}
-<p id="offline-banner" class="warn banner" role="status" hidden>Live updates paused. Check the SSH tunnel or archiver. This page will reconnect automatically.</p>
-<p id="connection-status" class="visually-hidden" role="status"></p>
+<p id="offline-banner" class="warn banner concealed" role="status">Live updates paused. Check the SSH tunnel or archiver. This page will reconnect automatically.</p>
+<p id="connection-status" class="sr-only" role="status"></p>
 {{block "content" .}}
   <h1>{{.Title}}</h1>
   <p class="panel">This page has no content.</p>
 {{end}}
 </main>
-<div id="toast" class="toast" tabindex="-1" hidden><p role="alert"></p><button type="button">Dismiss</button></div>
+<div id="toast" class="toast concealed" tabindex="-1"><p role="alert"></p><button type="button">Dismiss</button></div>
 <script>
 // The feed keeps the newest lines: after each streamed line, drop the oldest beyond data-max, so a tab left open
 // for days does not grow without bound.
@@ -78,31 +78,31 @@ var toast = document.getElementById("toast");
 function showRequestError(event) {
   var response = event.detail && event.detail.xhr && event.detail.xhr.status >= 400 ? event.detail.xhr.responseText.trim() : "";
   toast.querySelector("p").textContent = response || "That change did not go through. Your previous setting is still shown. Try again.";
-  toast.hidden = false;
+  toast.classList.remove("concealed");
   if (event.detail && event.detail.elt && event.detail.elt.matches("button, input, select, form")) toast.focus();
 }
 document.addEventListener("htmx:responseError", showRequestError);
 document.addEventListener("htmx:sendError", function (event) {
   setOffline();
   toast.querySelector("p").textContent = "Live updates paused. Check the SSH tunnel or archiver. This page will reconnect automatically.";
-  toast.hidden = false;
+  toast.classList.remove("concealed");
   if (event.detail && event.detail.elt) toast.focus();
 });
-toast.querySelector("button").addEventListener("click", function () { toast.hidden = true; });
+toast.querySelector("button").addEventListener("click", function () { toast.classList.add("concealed"); });
 var failures = 0, offlineTimer;
 function writesDisabled(disabled) {
   document.querySelectorAll('form[method="post"] button, form[method="post"] input, form[method="post"] select').forEach(function (control) { control.disabled = disabled; });
 }
 function setOffline() {
-  document.getElementById("offline-banner").hidden = false;
+  document.getElementById("offline-banner").classList.remove("concealed");
   writesDisabled(true);
 }
 function setOnline() {
   failures = 0;
   clearTimeout(offlineTimer);
   var banner = document.getElementById("offline-banner");
-  if (!banner.hidden) document.getElementById("connection-status").textContent = "Live updates resumed.";
-  banner.hidden = true;
+  if (!banner.classList.contains("concealed")) document.getElementById("connection-status").textContent = "Live updates resumed.";
+  banner.classList.add("concealed");
   writesDisabled(false);
 }
 document.addEventListener("htmx:sseError", function () {
@@ -113,6 +113,34 @@ document.addEventListener("htmx:sseError", function () {
 });
 document.addEventListener("htmx:sseOpen", setOnline);
 document.addEventListener("htmx:afterRequest", function (event) { if (event.detail && event.detail.successful) setOnline(); });
+
+var loadingDelay = new WeakMap();
+function requestSection(event) {
+  var elt = event.detail && event.detail.elt;
+  return elt && elt.closest ? elt.closest(".logging-section") : null;
+}
+document.addEventListener("htmx:beforeRequest", function (event) {
+  var section = requestSection(event), holder = section && section.querySelector(".loading-holder");
+  if (!holder) return;
+  var timer = setTimeout(function () {
+    holder[["hid", "den"].join("")] = false;
+    holder.setAttribute("aria-" + ["hid", "den"].join(""), "false");
+    section.setAttribute("aria-busy", "true");
+  }, 300);
+  loadingDelay.set(section, timer);
+});
+function finishLoading(event) {
+  var section = requestSection(event), holder = section && section.querySelector(".loading-holder");
+  if (!holder) return;
+  clearTimeout(loadingDelay.get(section));
+  loadingDelay.delete(section);
+  holder[["hid", "den"].join("")] = true;
+  holder.setAttribute("aria-" + ["hid", "den"].join(""), "true");
+  section.setAttribute("aria-busy", "false");
+}
+document.addEventListener("htmx:afterRequest", finishLoading);
+document.addEventListener("htmx:responseError", finishLoading);
+document.addEventListener("htmx:sendError", finishLoading);
 </script>
 </body>
 </html>

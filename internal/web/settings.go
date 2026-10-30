@@ -237,7 +237,7 @@ func (s *Server) saveHeartbeatSetting(w http.ResponseWriter, r *http.Request, re
 		}
 		d.Settings.Heartbeat.Err = msg
 		w.WriteHeader(http.StatusUnprocessableEntity)
-		s.render(w, s.pages["logging_section"], "settings_layout", d)
+		s.render(w, s.pages["logging_section"], "layout", d)
 		return
 	}
 	http.Redirect(w, r, "/logging/settings?saved=heartbeat#heartbeat", http.StatusSeeOther)

@@ -51,17 +51,18 @@ type healthView struct {
 
 type dashboardData struct {
 	page
-	Health                      healthView
-	HasArchive                  bool
-	History                     []string
-	Logging, NotLogging, Gaps   int
-	LoggingNoun, NotLoggingNoun string
-	GapGroups                   []gapSummaryView
-	Media24Hours, Media7Days    string
-	Events                      []feedItem
-	Outages                     []store.OutageDay
-	HasOutages                  bool
-	LongestOutageMinutes        int
+	Health                                     healthView
+	HasArchive                                 bool
+	History                                    []string
+	Logging, NotLogging, Gaps                  int
+	ArchiveChats, ArchiveMessages, FailedMedia int
+	LoggingNoun, NotLoggingNoun                string
+	GapGroups                                  []gapSummaryView
+	Media24Hours, Media7Days                   string
+	Events                                     []feedItem
+	Outages                                    []store.OutageDay
+	HasOutages                                 bool
+	LongestOutageMinutes                       int
 }
 
 type gapSummaryView struct {
@@ -100,6 +101,9 @@ func (s *Server) dashboardData(ctx context.Context) (dashboardData, error) {
 		data.Media7Days = view.PercentageCount(media.WeekDone, media.WeekTotal)
 		filter := ingest.NewFilter(s.d.Rules, func(jid string) ([]string, error) { return s.d.Store.Aliases(ctx, jid) })
 		for _, c := range report.Chats {
+			data.ArchiveChats++
+			data.ArchiveMessages += c.MessageCount
+			data.FailedMedia += c.MediaFailed
 			names[c.CanonicalJID] = c.Name
 			off, err := filter.Excluded(c.CanonicalJID)
 			if err != nil {
@@ -130,7 +134,6 @@ func (s *Server) dashboardData(ctx context.Context) (dashboardData, error) {
 		data.History = view.HistoryLinesAt(loc, report.Coverage, s.d.Now())
 		data.LoggingNoun, data.NotLoggingNoun = chatNoun(data.Logging), chatNoun(data.NotLogging)
 	}
-	data.Events = s.recent(names, loc)
 	return data, nil
 }
 

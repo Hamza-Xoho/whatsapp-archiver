@@ -12,7 +12,6 @@ type loggingData struct {
 	Overview dashboardData
 	Storage  storageData
 	Backups  backupsData
-	Settings settingsData
 }
 
 // logging folds the former dashboard, storage, backups and settings screens into one operational area.
@@ -38,11 +37,6 @@ func (s *Server) logging(w http.ResponseWriter, r *http.Request) {
 	if min := s.diskFreeMinGB(ctx); min > 0 {
 		storage.Warning = projectionWarning(facts.free, facts.weekly, min)
 	}
-	settings, err := s.settingsData(ctx)
-	if err != nil {
-		http.Error(w, "the settings could not be read", http.StatusInternalServerError)
-		return
-	}
 	backups, err := s.backupsData(r)
 	if err != nil {
 		http.Error(w, "the settings could not be read", http.StatusInternalServerError)
@@ -53,7 +47,6 @@ func (s *Server) logging(w http.ResponseWriter, r *http.Request) {
 		Overview: overview,
 		Storage:  storage,
 		Backups:  backups,
-		Settings: settings,
 	}
 	s.render(w, s.pages["logging"], "layout", data)
 }

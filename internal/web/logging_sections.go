@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -70,11 +71,7 @@ func (s *Server) loggingSection(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(http.StatusInternalServerError)
 	}
-	templateName := "layout"
-	if section == "settings" {
-		templateName = "settings_layout"
-	}
-	s.render(w, s.pages["logging_section"], templateName, data)
+	s.render(w, s.pages["logging_section"], "layout", data)
 }
 
 func validLoggingSection(section string) bool {
@@ -191,7 +188,11 @@ func (s *Server) loggingSectionData(r *http.Request, section string) (loggingSec
 			return data, readErr
 		}
 	case "feed":
-		data.Feed = s.recentFiltered(nil, loc, data.FeedChat, data.FeedKind)
+		names, readErr := s.loggingFeedNames(r.Context())
+		if readErr != nil {
+			return data, readErr
+		}
+		data.Feed = s.recentFiltered(names, loc, data.FeedChat, data.FeedKind)
 	case "settings":
 		settings, readErr := s.settingsData(r.Context())
 		if readErr != nil {
@@ -246,8 +247,28 @@ func (s *Server) feedPartial(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data := loggingSectionData{FeedChat: strings.TrimSpace(r.URL.Query().Get("chat")), FeedKind: strings.TrimSpace(r.URL.Query().Get("kind"))}
-	data.Feed = s.recentFiltered(nil, loc, data.FeedChat, data.FeedKind)
+	names, err := s.loggingFeedNames(r.Context())
+	if err != nil {
+		http.Error(w, "The archive could not be read. Try again.", http.StatusInternalServerError)
+		return
+	}
+	data.Feed = s.recentFiltered(names, loc, data.FeedChat, data.FeedKind)
 	s.render(w, s.pages["logging_section"], "feed_panel", data)
+}
+
+func (s *Server) loggingFeedNames(ctx context.Context) (map[string]string, error) {
+	names := map[string]string{}
+	if s.d.Store == nil {
+		return names, nil
+	}
+	controls, err := s.d.Store.ChatControls(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for jid, control := range controls {
+		names[jid] = control.Name
+	}
+	return names, nil
 }
 
 func (s *Server) recentFiltered(names map[string]string, loc *time.Location, chat, kind string) []feedItem {

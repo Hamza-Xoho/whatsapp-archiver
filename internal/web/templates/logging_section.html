@@ -9,13 +9,11 @@
   <a href="/logging/settings"{{if eq .Section "settings"}} aria-current="page"{{end}}>Settings</a>
 </nav>{{end}}
 
-{{define "settings_layout"}}<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>{{.Title}} · WhatsApp Archiver</title><script>(function(){try{var t=localStorage.getItem("archiver-theme")||"system";if(t!=="system")document.documentElement.dataset.theme=t}catch(e){}})()</script><link rel="stylesheet" href="/static/app.css"></head><body><a class="skip-link" href="#main">Skip to main content</a><header class="top"><strong class="brand">WhatsApp Archiver</strong><nav aria-label="Primary"><a href="/chats">Chats</a><a href="/logging" aria-current="page">Logging</a><a href="/pair">Pairing</a></nav><label class="theme">Theme <select name="theme" aria-label="Theme"><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label></header><main id="main" tabindex="-1">{{if notPaired}}<p class="warn banner" role="alert">WhatsApp is not paired yet. <a href="/pair">Pair it now</a>. New messages are not being archived.</p>{{end}}{{template "content" .}}</main><script>var theme=document.querySelector('[name="theme"]');if(theme){var saved="system";try{saved=localStorage.getItem("archiver-theme")||"system"}catch(e){}theme.value=saved;theme.addEventListener("change",function(){var value=theme.value;if(value==="system"){delete document.documentElement.dataset.theme}else{document.documentElement.dataset.theme=value}try{localStorage.setItem("archiver-theme",value)}catch(e){}})}</script></body></html>{{end}}
-
-{{define "loading_state"}}<span class="visually-hidden loading-copy">Loading…</span>{{end}}
+{{define "loading_state"}}<span class="loading-holder" hidden aria-hidden="true"><span class="visually-hidden loading-copy">Loading…</span></span>{{end}}
 
 {{define "feed_panel"}}<section class="panel logging-section" aria-busy="false"><h2>Live feed</h2>
   <form method="get" action="/logging/feed" class="feed-filters"><label>Chat <input name="chat" value="{{.FeedChat}}"></label><label>Kind <input name="kind" value="{{.FeedKind}}"></label><button>Filter</button><button id="pause-feed" type="button" aria-pressed="false">Pause updates</button></form>
-  {{if .Feed}}<ul id="feed" class="feed" data-max="200" role="log" aria-live="polite" aria-relevant="additions" sse-swap="activity" hx-swap="afterbegin">{{range .Feed}}{{template "activity_item" .}}{{end}}</ul>{{else}}<p>Waiting for archive activity</p>{{end}}
+  <ul id="feed" class="feed" data-max="200" role="log" aria-live="polite" aria-relevant="additions" sse-swap="activity" hx-swap="afterbegin">{{range .Feed}}{{template "activity_item" .}}{{end}}</ul>{{if not .Feed}}<p id="feed-empty">Waiting for archive activity</p>{{end}}
   {{template "loading_state"}}
 </section>{{end}}
 
