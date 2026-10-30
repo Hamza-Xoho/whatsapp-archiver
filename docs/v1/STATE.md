@@ -121,6 +121,10 @@ Single status record for V1 (max 150 lines, update in place; history lives in gi
 - Done 30 Oct: three-area shell, ordered guard/recover/timing middleware, page-scoped SSE, global htmx error/offline behavior, escaped chat paths with unknown-chat 404, responsive cards, system/light/dark theme, and legacy operational content folded into Logging. Red commits `c3c8d29` and test-alignment `1f0837a`; full `make check` passed and no golden files changed.
 - Review 30 Oct: no Critical findings; two Important findings fixed through red `f52e3b3` and green `742a4fe`. Panic timing now records the recovered 500 response, and explicit Light/Dark choices override the system preference. Full `make check` passed; no invariant deviations or open questions.
 
+## W6(d) global search
+
+- Implemented on `v1/w6de-search-export`: folded, safely quoted dual-FTS routing; canonical filters and keyset paging; grouped, escaped `/search` results with edit/delete labels and message jumps. The 5k-message regression stays under the 300 ms budget; no golden files changed.
+
 ## Rulings
 
 - (a) The `add-message-kind` skill (replaces `add-event-kind`) was written in W2(c).
