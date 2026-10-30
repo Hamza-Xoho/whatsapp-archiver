@@ -34,6 +34,11 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
 	}
+	chat := strings.TrimSpace(r.URL.Query().Get("chat"))
+	kind := strings.TrimSpace(r.URL.Query().Get("kind"))
+	matches := func(e activity.Event) bool {
+		return (chat == "" || e.Chat == chat) && (kind == "" || e.Kind == kind)
+	}
 	// Subscribe before reading Recent, so no event falls between the replay and the feed; an event published in that
 	// instant can appear twice in the feed, which is harmless.
 	feed, cancel := s.d.Activity.Subscribe(sseBuffer)
@@ -46,7 +51,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 
 	if last, err := strconv.ParseInt(r.Header.Get("Last-Event-ID"), 10, 64); err == nil {
 		for _, e := range s.d.Activity.Recent() {
-			if e.At.UnixNano() > last && s.writeActivity(w, e) != nil {
+			if e.At.UnixNano() > last && matches(e) && s.writeActivity(w, e) != nil {
 				return
 			}
 		}
@@ -70,7 +75,9 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 			if !open {
 				return // dropped for falling behind: end the stream so the browser reconnects
 			}
-			err = s.writeActivity(w, e)
+			if matches(e) {
+				err = s.writeActivity(w, e)
+			}
 			if err == nil && e.Kind == "state" {
 				err = s.writeHealth(w)
 			}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -104,6 +105,19 @@ func (s *Server) loggingSectionData(r *http.Request, section string) (loggingSec
 	now := s.d.Now()
 	data := loggingSectionData{page: page{Title: "Logging", Current: "Logging", Live: section == "feed"}, Section: section,
 		FeedChat: strings.TrimSpace(r.URL.Query().Get("chat")), FeedKind: strings.TrimSpace(r.URL.Query().Get("kind"))}
+	if section == "feed" {
+		query := url.Values{}
+		if data.FeedChat != "" {
+			query.Set("chat", data.FeedChat)
+		}
+		if data.FeedKind != "" {
+			query.Set("kind", data.FeedKind)
+		}
+		data.EventsURL = "/events"
+		if encoded := query.Encode(); encoded != "" {
+			data.EventsURL += "?" + encoded
+		}
+	}
 	if s.d.Store == nil {
 		if section == "feed" {
 			data.Feed = s.recentFiltered(nil, loc, data.FeedChat, data.FeedKind)

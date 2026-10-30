@@ -204,6 +204,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 type page struct {
 	Title, Current string
 	Live           bool
+	EventsURL      string
 }
 
 // render executes the template name of t into memory first, so a failure is a clean 500 and never half a page.
