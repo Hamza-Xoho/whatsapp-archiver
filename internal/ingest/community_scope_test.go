@@ -139,3 +139,40 @@ func TestExcludedJoinedGroupPersistsParentAcrossRestart(t *testing.T) {
 		t.Fatalf("safe child directory metadata was not persisted: %+v", controls["child@g.us"])
 	}
 }
+
+func TestJoinedCommunityMetadataSurvivesOrdinaryMessages(t *testing.T) {
+	st := testkit.Store(t)
+	rules := ingest.NewRuleSet(nil)
+	p := ingest.NewPipeline(st, ingest.NewFilter(rules, nil), communityQueue{}, communityHealth{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	p.Handle(&events.JoinedGroup{GroupInfo: types.GroupInfo{
+		JID:         jid("community@g.us"),
+		GroupName:   types.GroupName{Name: "Neighbours"},
+		GroupParent: types.GroupParent{IsParent: true},
+	}})
+	p.Handle(&events.JoinedGroup{GroupInfo: types.GroupInfo{
+		JID:               jid("child@g.us"),
+		GroupName:         types.GroupName{Name: "Announcements"},
+		GroupLinkedParent: types.GroupLinkedParent{LinkedParentJID: jid("community@g.us")},
+	}})
+	p.Handle(messageEvent("community@g.us", "parent-message", &waE2E.Message{Conversation: proto.String("hello")}))
+	p.Handle(messageEvent("child@g.us", "child-message", &waE2E.Message{Conversation: proto.String("hello")}))
+
+	controls, err := st.ChatControls(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := controls["community@g.us"].Type; got != "community" {
+		t.Fatalf("community type after an ordinary message = %q, want community", got)
+	}
+	child := controls["child@g.us"]
+	if child.Type != "group" || child.Parent != "community@g.us" {
+		t.Fatalf("child metadata after an ordinary message = %+v, want group under community@g.us", child)
+	}
+	communities, _, _, err := st.ChatListPage(t.Context(), store.ChatListFilter{Type: "community"}, store.ChatListAfter{}, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(communities) != 1 || communities[0].CanonicalJID != "community@g.us" || communities[0].DisplayName != "Neighbours" {
+		t.Fatalf("community-filtered chat list = %+v", communities)
+	}
+}

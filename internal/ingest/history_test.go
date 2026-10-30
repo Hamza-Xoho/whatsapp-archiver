@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -327,6 +328,37 @@ func TestExcludedHistoryChatLeavesNoParticipantsOrMedia(t *testing.T) {
 	participants, media := rows(t, st, "SELECT jid FROM participants"), rows(t, st, "SELECT message_id FROM media")
 	if len(participants)+len(media)+len(q.items) != 0 {
 		t.Fatalf("participants=%v media=%v queued=%v", participants, media, q.items)
+	}
+}
+
+func TestExcludedCommunityHistoryUsesParentBeforeItsFirstMessage(t *testing.T) {
+	st := testkit.Store(t)
+	if err := st.SetChatRules(t.Context(), []store.ChatRule{{JID: "community@g.us", Logging: false}}); err != nil {
+		t.Fatal(err)
+	}
+	rules, err := st.ChatRules(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	hs := &events.HistorySync{Data: &waHistorySync.HistorySync{Progress: proto.Uint32(1), Conversations: []*waHistorySync.Conversation{
+		{ID: proto.String("community@g.us"), Name: proto.String("Neighbours"), IsParentGroup: proto.Bool(true)},
+		{ID: proto.String("child@g.us"), Name: proto.String("Announcements"), ParentGroupID: proto.String("community@g.us"),
+			Messages: []*waHistorySync.HistorySyncMsg{{Message: webMsg("SECRET", "3@lid", false, text("must not be stored"))}}},
+	}}}
+	p := historyPipeline(st, ingest.NewFilter(ingest.NewRuleSet(rules), nil), &queueFake{})
+	stored, skipped, err := p.ImportHistory(t.Context(), hs)
+	if err != nil || stored != 0 || skipped != 1 {
+		t.Fatalf("community history stored=%d skipped=%d err=%v; want 0, 1, nil", stored, skipped, err)
+	}
+	if got := rows(t, st, "SELECT id FROM messages"); len(got) != 0 {
+		t.Fatalf("excluded child history was stored: %v", got)
+	}
+	want := []string{
+		"child@g.us|Announcements|group|community@g.us",
+		"community@g.us|Neighbours|community|",
+	}
+	if got := rows(t, st, "SELECT jid,name,type,parent_jid FROM chats ORDER BY jid"); !slices.Equal(got, want) {
+		t.Fatalf("community history directory = %v, want %v", got, want)
 	}
 }
 
