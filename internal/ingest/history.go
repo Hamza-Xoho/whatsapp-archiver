@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/proto/waWeb"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -26,14 +27,22 @@ func (p *Pipeline) WithHistoryParser(parse HistoryParser) *Pipeline {
 }
 
 func (p *Pipeline) ImportHistory(ctx context.Context, evt *events.HistorySync) (stored, skipped int, err error) {
+	return p.importHistory(ctx, evt, true)
+}
+
+func (p *Pipeline) importHistory(ctx context.Context, evt *events.HistorySync, writeLedger bool) (stored, skipped int, err error) {
 	if evt == nil || evt.Data == nil {
 		return 0, 0, nil
 	}
 	hs := evt.Data
 	now := p.now()
-	ledger, ok := p.writer.(historyStore)
-	if !ok {
-		return 0, 0, fmt.Errorf("writer does not support history ledger")
+	var ledger historyStore
+	if writeLedger {
+		var ok bool
+		ledger, ok = p.writer.(historyStore)
+		if !ok {
+			return 0, 0, fmt.Errorf("writer does not support history ledger")
+		}
 	}
 	if p.parse == nil {
 		return 0, 0, fmt.Errorf("pipeline has no history parser")
@@ -43,23 +52,15 @@ func (p *Pipeline) ImportHistory(ctx context.Context, evt *events.HistorySync) (
 	if err != nil {
 		return 0, 0, fmt.Errorf("encode history chunk: %w", err)
 	}
-	chunk := store.HistoryChunk{ID: stableID(string(raw)), Stage: store.StageImported, SyncType: hs.GetSyncType().String(), ChunkOrder: int(hs.GetChunkOrder()), Progress: int(hs.GetProgress()), ConversationCount: len(hs.GetConversations()), ReceivedAt: now.Unix()}
+	chunk := describeHistory(hs, stableID(string(raw)), store.StageImported, now.Unix())
 	for _, conv := range hs.GetConversations() {
 		if conv == nil {
 			continue
 		}
-		chunk.MessageCount += len(conv.GetMessages())
 		for _, item := range conv.GetMessages() {
 			if item == nil || item.GetMessage() == nil {
 				skipped++
 				continue
-			}
-			ts := int64(item.GetMessage().GetMessageTimestamp())
-			if chunk.Oldest == 0 || ts < chunk.Oldest {
-				chunk.Oldest = ts
-			}
-			if ts > chunk.Newest {
-				chunk.Newest = ts
 			}
 		}
 	}
@@ -147,10 +148,35 @@ func (p *Pipeline) ImportHistory(ctx context.Context, evt *events.HistorySync) (
 	}
 	// The ledger row claims the whole chunk, so it is written last: a chunk cut short (SIGTERM, a write that kept
 	// failing) has no row and is imported again when WhatsApp redelivers it.
-	if err = p.persist(ctx, "insert history chunk", func() error { return ledger.InsertHistoryChunk(ctx, chunk) }); err != nil {
-		return stored, skipped, err
+	if writeLedger {
+		if err = p.persist(ctx, "insert history chunk", func() error { return ledger.InsertHistoryChunk(ctx, chunk) }); err != nil {
+			return stored, skipped, err
+		}
 	}
 	p.bus.Publish(activity.Event{At: now, Kind: "history_chunk", Detail: fmt.Sprintf("chunk %s #%d · %d messages", chunk.SyncType, chunk.ChunkOrder, chunk.MessageCount)})
 	p.log.Info("history chunk imported", "progress", chunk.Progress, "stored", stored, "skipped", skipped)
 	return
+}
+
+func describeHistory(hs *waHistorySync.HistorySync, id, stage string, receivedAt int64) store.HistoryChunk {
+	chunk := store.HistoryChunk{ID: id, Stage: stage, SyncType: hs.GetSyncType().String(), ChunkOrder: int(hs.GetChunkOrder()), Progress: int(hs.GetProgress()), ConversationCount: len(hs.GetConversations()), ReceivedAt: receivedAt}
+	for _, conv := range hs.GetConversations() {
+		if conv == nil {
+			continue
+		}
+		chunk.MessageCount += len(conv.GetMessages())
+		for _, item := range conv.GetMessages() {
+			if item == nil || item.GetMessage() == nil {
+				continue
+			}
+			ts := int64(item.GetMessage().GetMessageTimestamp())
+			if chunk.Oldest == 0 || ts < chunk.Oldest {
+				chunk.Oldest = ts
+			}
+			if ts > chunk.Newest {
+				chunk.Newest = ts
+			}
+		}
+	}
+	return chunk
 }

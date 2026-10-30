@@ -43,11 +43,11 @@ func liveHistoryDownloader(cli *whatsmeow.Client) historyDownloader {
 	}
 }
 
-// historyHandler wraps h so a history notification from our own phone is acked only once its chunk is stored.
+// historyHandler wraps h so a history notification from our own phone is acked only once its chunk is durably spooled.
 // whatsmeow (ManualHistorySyncDownload) delivers the notification as an *events.Message; it is downloaded under
-// historyTimeout, then h gets the message itself (archived as a protocol event, as before) and the chunk as an
-// *events.HistorySync. The verdict is true only when h stored both. A download that fails or times out is not acked;
-// a blob that is gone is logged at Error and acked. Every other event goes to h unchanged.
+// historyTimeout. WithHistorySpool moves the chunk to the importer goroutine, while h still gets the marker message
+// (archived as a protocol event). The legacy no-spool path remains for replay/unit callers. A download or spool failure
+// is not acked; a blob that is gone is logged at Error and acked. Every other event goes to h unchanged.
 func (c *Client) historyHandler(ctx context.Context, h func(any) bool) func(any) bool {
 	return func(evt any) bool {
 		msg, ok := evt.(*events.Message)
@@ -72,6 +72,13 @@ func (c *Client) historyHandler(ctx context.Context, h func(any) bool) func(any)
 			}
 			c.log.Log(context.WithoutCancel(ctx), level, "history download failed; not acked, so WhatsApp delivers it again", "sync_type", n.GetSyncType().String(), "chunk_order", n.GetChunkOrder(), "err", logsafe.RedactURLs(err.Error()))
 			return false
+		}
+		if c.historySpool != nil {
+			if err = c.historySpool(context.WithoutCancel(ctx), n, hs); err != nil {
+				c.log.Error("history spool write failed; not acked, so WhatsApp delivers it again", "sync_type", n.GetSyncType().String(), "chunk_order", n.GetChunkOrder(), "err", logsafe.RedactURLs(err.Error()))
+				return false
+			}
+			return h(evt)
 		}
 		return h(evt) && h(&events.HistorySync{Data: hs, Notification: n})
 	}
