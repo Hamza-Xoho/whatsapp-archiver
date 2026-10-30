@@ -14,6 +14,7 @@ import (
 	"whatsapp-archiver/internal/config"
 	"whatsapp-archiver/internal/ingest"
 	"whatsapp-archiver/internal/store"
+	"whatsapp-archiver/internal/testkit"
 )
 
 type communityWriter struct{ writes int }
@@ -98,5 +99,43 @@ func TestCommunityDiscoveryPreservesExplicitChildRule(t *testing.T) {
 	}
 	if q.got == nil || len(q.got.Download) != 1 || q.got.Download[0] != "image" {
 		t.Fatalf("media rule after discovery = %+v; want child's own image rule", q.got)
+	}
+}
+
+func TestExcludedJoinedGroupPersistsParentAcrossRestart(t *testing.T) {
+	st := testkit.Store(t)
+	if err := st.SetChatRules(t.Context(), []store.ChatRule{{JID: "community@g.us", Logging: false}}); err != nil {
+		t.Fatal(err)
+	}
+	rules, err := st.ChatRules(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := ingest.NewPipeline(st, ingest.NewFilter(ingest.NewRuleSet(rules), nil), communityQueue{}, communityHealth{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	p.Handle(&events.JoinedGroup{GroupInfo: types.GroupInfo{JID: jid("child@g.us"),
+		GroupLinkedParent: types.GroupLinkedParent{LinkedParentJID: jid("community@g.us")}}})
+
+	rules, err = st.ChatRules(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	restarted := ingest.NewPipeline(st, ingest.NewFilter(ingest.NewRuleSet(rules), nil), communityQueue{}, communityHealth{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	restarted.Handle(messageEvent("child@g.us", "after-restart", &waE2E.Message{Conversation: proto.String("must stay excluded")}))
+
+	rows, err := st.ChatList(t.Context(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		if row.CanonicalJID == "child@g.us" && row.MessageCount != 0 {
+			t.Fatalf("ordinary message after restart was archived: %+v", row)
+		}
+	}
+	controls, err := st.ChatControls(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if controls["child@g.us"].Parent != "community@g.us" {
+		t.Fatalf("safe child directory metadata was not persisted: %+v", controls["child@g.us"])
 	}
 }
