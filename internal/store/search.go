@@ -199,7 +199,7 @@ func (s *Store) Search(ctx context.Context, p SearchParams) ([]SearchHit, error)
 	candidateMatch := searchCandidateMatch(p.Query)
 	unfiltered := p.ChatJID == "" && p.SenderJID == "" && p.MediaType == "" && p.From == 0 && p.To == 0 && p.BeforeTS == 0
 	fastNewest := false
-	if unfiltered {
+	if unfiltered && table == "search_tri" {
 		var err error
 		if fastNewest, err = s.denseSearch(ctx, table, match); err != nil {
 			return nil, err

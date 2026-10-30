@@ -132,10 +132,10 @@ Single status record for V1 (max 150 lines, update in place; history lives in gi
 
 ## W6(d) global search
 
-- Implemented on `v1/w6de-search-export`: whole-query folded phrase routing, canonical filters/keyset paging, edit-row resolution, rich unfolded context, safe folded highlights, grouped `/search` results and message jumps. Review regressions cover punctuation, negative FTS rowids, detail/filename context and escaped segments; no golden file changed.
-- Actual W6(h) seed (250 canonical chats, 300,000 messages, seed 42), warm cache, query `archive message`, 5 warmups + 30 measured `Store.Search` calls: p50 5.140 ms, p95 6.115 ms, slowest 6.377 ms (under 300 ms). Dense unfiltered searches use the global message-time index after bounded FTS routing; sparse/filtered/edit searches remain FTS-first.
+- Implemented on `v1/w6de-search-export`: whole-query folded phrase routing, canonical filters/keyset paging, edit-row resolution, rich unfolded context, safe folded highlights, grouped `/search` results and message jumps. Review regressions cover punctuation, negative FTS rowids, detail/filename context and escaped segments; dense newest-first optimization is trigram-only so 1–2 rune `search_fts` terms retain Unicode word-token semantics. No golden file changed.
+- Actual W6(h) seed (250 canonical chats, 300,000 messages, seed 42), warm cache, query `archive message`, 5 warmups + 30 measured `Store.Search` calls after the review fixes: p50 5.170 ms, p95 6.508 ms, slowest 6.771 ms (under 300 ms). Dense unfiltered searches use the global message-time index after bounded FTS routing; sparse/filtered/edit searches remain FTS-first.
 ## W6(e) chat export
-- Streamed per-chat typed JSON, self-contained escaped HTML, WhatsApp `_chat.txt`, and ZIP-with-media exports use canonical alias paging, configured-local timestamps, bounded HTML embedding and containment-checked collision-safe media names. The text formatter is round-tripped by a parser across multiline, Arabic, attachments, archived events and a DST boundary; no golden file changed.
+- Streamed per-chat typed JSON, self-contained escaped HTML, WhatsApp `_chat.txt`, and ZIP-with-media exports use canonical alias paging plus a bounded chronological message/event merge. Review fixes include orphan and chat events, meaningful kind details, exact timezone/sender/body text round trips, cancellation checks, direct-streamed missing manifests, transcript-to-ZIP duplicate-name mapping, stored thumbnails, native safe media tags, precise bounded-embed omissions and inert HTML/SVG. No golden file changed.
 
 ## Rulings
 

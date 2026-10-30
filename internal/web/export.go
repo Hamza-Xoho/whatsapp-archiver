@@ -1,11 +1,8 @@
 package web
 
 import (
-	"archive/zip"
-	"bytes"
 	"context"
 	"database/sql"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,11 +10,8 @@ import (
 	"io"
 	"mime"
 	"net/http"
-	"net/url"
-	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -186,6 +180,9 @@ func (s *Server) eachExport(ctx context.Context, x exportScope, fn func(store.Ex
 			return nil
 		}
 		for _, r := range page {
+			if err = ctx.Err(); err != nil {
+				return err
+			}
 			if err = fn(r); err != nil {
 				return err
 			}
@@ -220,6 +217,7 @@ type jsonMessage struct {
 	Media         *jsonMedia      `json:"media,omitempty"`
 }
 type jsonEvent struct {
+	EventID    string `json:"event_id"`
 	Kind       string `json:"kind"`
 	SourceID   string `json:"source_id,omitempty"`
 	Cause      string `json:"cause,omitempty"`
@@ -240,12 +238,20 @@ type jsonMedia struct {
 	ErrorClass string `json:"error_class,omitempty"`
 	Size       int64  `json:"size"`
 }
+type jsonChatEvent struct {
+	EventID    string `json:"event_id"`
+	Kind       string `json:"kind"`
+	Sender     string `json:"sender,omitempty"`
+	Value      string `json:"value,omitempty"`
+	Timestamp  int64  `json:"timestamp"`
+	ReceivedAt int64  `json:"received_at"`
+}
 
 func exportJSONRecord(r store.ExportRecord) jsonMessage {
 	m := r.Message
 	j := jsonMessage{ID: m.ID, Sender: m.SenderJID, SenderName: r.SenderName, Kind: m.Kind, Text: m.Text, Caption: m.Caption, QuotedID: m.QuotedID, QuotedSender: m.QuotedSender, Source: m.Source, Details: json.RawMessage(m.Details), Mentions: m.Mentions, Timestamp: m.Timestamp, ReceivedAt: m.ReceivedAt, FromMe: m.FromMe, Forwarded: m.Forwarded, ViewOnce: m.ViewOnce, ForwardScore: m.ForwardScore, EphemeralSecs: m.EphemeralSecs}
 	for _, e := range r.Events {
-		j.Events = append(j.Events, jsonEvent{e.Kind, e.SourceID, e.Cause, e.SenderJID, e.Source, e.NewText, e.Value, e.Timestamp, e.ReceivedAt})
+		j.Events = append(j.Events, jsonEvent{e.EventID, e.Kind, e.SourceID, e.Cause, e.SenderJID, e.Source, e.NewText, e.Value, e.Timestamp, e.ReceivedAt})
 	}
 	if r.Media != nil {
 		v := r.Media
@@ -277,7 +283,50 @@ func (s *Server) streamJSON(ctx context.Context, w io.Writer, x exportScope) err
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(w, "],\"counts\":{\"messages\":%d}}", count)
+	if _, err = io.WriteString(w, "],\"message_events\":["); err != nil {
+		return err
+	}
+	eventCount, chatCount := 0, 0
+	first = true
+	err = s.eachEvent(ctx, x, func(e store.ExportEvent) error {
+		if e.Message == nil {
+			return nil
+		}
+		if !first {
+			if _, z := io.WriteString(w, ","); z != nil {
+				return z
+			}
+		}
+		first = false
+		eventCount++
+		m := e.Message
+		return json.NewEncoder(w).Encode(jsonEvent{m.EventID, m.Kind, m.SourceID, m.Cause, m.SenderJID, m.Source, m.NewText, m.Value, m.Timestamp, m.ReceivedAt})
+	})
+	if err != nil {
+		return err
+	}
+	if _, err = io.WriteString(w, "],\"chat_events\":["); err != nil {
+		return err
+	}
+	first = true
+	err = s.eachEvent(ctx, x, func(e store.ExportEvent) error {
+		if e.Chat == nil {
+			return nil
+		}
+		if !first {
+			if _, z := io.WriteString(w, ","); z != nil {
+				return z
+			}
+		}
+		first = false
+		chatCount++
+		c := e.Chat
+		return json.NewEncoder(w).Encode(jsonChatEvent{c.EventID, c.Kind, c.SenderJID, c.Value, c.Timestamp, c.ReceivedAt})
+	})
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(w, "],\"counts\":{\"messages\":%d,\"message_events\":%d,\"chat_events\":%d}}", count, eventCount, chatCount)
 	return err
 }
 
@@ -286,24 +335,23 @@ func (s *Server) streamHTML(ctx context.Context, w io.Writer, x exportScope) err
 		return err
 	}
 	var embedded int64
-	return s.eachExport(ctx, x, func(r store.ExportRecord) error {
+	return s.eachTimeline(ctx, x, func(r *store.ExportRecord, e *store.ExportEvent) error {
+		if e != nil {
+			label := exportEventLabel(*e)
+			if e.Message != nil {
+				label = htmlEventLabel(*e.Message)
+			}
+			_, err := fmt.Fprintf(w, "<article class=\"m event\"><header>%s</header><div dir=auto>%s</div></article>", mTime(e.TS, x.loc), template.HTMLEscapeString(label))
+			return err
+		}
 		m := r.Message
 		sender := r.SenderName
 		if sender == "" {
 			sender = m.SenderJID
 		}
-		body := m.Text
-		if body == "" {
-			body = m.Caption
-		}
+		body := messageDisplay(m)
 		if _, err := fmt.Fprintf(w, "<article class=m><header>%s · %s</header><div dir=auto>%s</div>", template.HTMLEscapeString(sender), mTime(m.Timestamp, x.loc), template.HTMLEscapeString(body)); err != nil {
 			return err
-		}
-		for _, e := range r.Events {
-			label := htmlEventLabel(e)
-			if _, err := fmt.Fprintf(w, "<div class=event dir=auto>%s</div>", template.HTMLEscapeString(label)); err != nil {
-				return err
-			}
 		}
 		if r.Media != nil {
 			if err := s.htmlMedia(w, x.jid, r.Media, &embedded); err != nil {
@@ -314,53 +362,33 @@ func (s *Server) streamHTML(ctx context.Context, w io.Writer, x exportScope) err
 		return err
 	})
 }
-func (s *Server) htmlMedia(w io.Writer, jid string, m *store.Media, total *int64) error {
-	path, ok := s.insideMediaDir(m.Path)
-	if ok && safeEmbedMIME(m.MIME) {
-		if st, err := os.Stat(path); err == nil && st.Mode().IsRegular() && st.Size() <= 10<<20 && *total+st.Size() <= 100<<20 {
-			b, err := os.ReadFile(path)
-			if err == nil {
-				*total += int64(len(b))
-				ctype, _ := mediaType(m.MIME)
-				_, err = fmt.Fprintf(w, "<p><a download=%q href=\"data:%s;base64,%s\">%s</a></p>", template.HTMLEscapeString(safeMediaName(m.Filename, m.MessageID)), ctype, base64.StdEncoding.EncodeToString(b), template.HTMLEscapeString(safeMediaName(m.Filename, m.MessageID)))
-				return err
-			}
-		}
-	}
-	link := "/media?chat=" + url.QueryEscape(jid) + "&id=" + url.QueryEscape(m.MessageID)
-	_, err := fmt.Fprintf(w, "<p>Media omitted (%s, %d bytes). <a href=%q>Open in live archive</a></p>", template.HTMLEscapeString(m.State), m.DeclaredSize, link)
-	return err
-}
-
-func safeEmbedMIME(raw string) bool {
-	t, _, err := mime.ParseMediaType(raw)
-	return err == nil && t != "text/html" && t != "image/svg+xml" && (strings.HasPrefix(t, "image/") || strings.HasPrefix(t, "audio/") || strings.HasPrefix(t, "video/") || t == "text/plain" || t == "application/pdf")
-}
 
 func (s *Server) streamText(ctx context.Context, w io.Writer, x exportScope) error {
-	return s.eachExport(ctx, x, func(r store.ExportRecord) error {
+	return s.streamTextWithNames(ctx, w, x, nil)
+}
+func (s *Server) streamTextWithNames(ctx context.Context, w io.Writer, x exportScope, names map[string]string) error {
+	return s.eachTimeline(ctx, x, func(r *store.ExportRecord, e *store.ExportEvent) error {
+		if e != nil {
+			return writeWALine(w, time.Unix(e.TS, 0).In(x.loc), exportEventSender(*e), exportEventLabel(*e))
+		}
 		m := r.Message
 		sender := r.SenderName
 		if sender == "" {
 			sender = m.SenderJID
 		}
-		body := m.Text
-		if body == "" {
-			body = m.Caption
-		}
+		body := messageDisplay(m)
 		if r.Media != nil && r.Media.Filename != "" {
 			if body != "" {
 				body += " "
 			}
-			body += "[attachment: " + safeMediaName(r.Media.Filename, m.ID) + "]"
+			name := safeMediaName(r.Media.Filename, m.ID)
+			if names != nil && names[m.ID] != "" {
+				name = names[m.ID]
+			}
+			body += "[attachment: " + name + "]"
 		}
 		if err := writeWALine(w, time.Unix(m.Timestamp, 0).In(x.loc), sender, body); err != nil {
 			return err
-		}
-		for _, e := range r.Events {
-			if err := writeWALine(w, time.Unix(e.Timestamp, 0).In(x.loc), sender, eventLabel(e)); err != nil {
-				return err
-			}
 		}
 		return nil
 	})
@@ -375,64 +403,4 @@ func safeMediaName(filename, id string) string {
 		name = safeExportName(id)
 	}
 	return name
-}
-func uniqueName(name string, used map[string]int) string {
-	n := used[name]
-	used[name] = n + 1
-	if n == 0 {
-		return name
-	}
-	ext := filepath.Ext(name)
-	return strings.TrimSuffix(name, ext) + "_" + strconv.Itoa(n+1) + ext
-}
-func (s *Server) streamZIP(ctx context.Context, w io.Writer, x exportScope) error {
-	z := zip.NewWriter(w)
-	tw, err := z.Create("_chat.txt")
-	if err != nil {
-		return err
-	}
-	if err = s.streamText(ctx, tw, x); err != nil {
-		return err
-	}
-	used := map[string]int{"_chat.txt": 1, "missing-media.txt": 1}
-	var missing bytes.Buffer
-	err = s.eachExport(ctx, x, func(r store.ExportRecord) error {
-		m := r.Media
-		if m == nil {
-			return nil
-		}
-		path, ok := s.insideMediaDir(m.Path)
-		if !ok || m.State != "done" {
-			fmt.Fprintf(&missing, "%s\t%s\t%s\n", r.Message.ID, safeMediaName(m.Filename, r.Message.ID), m.State)
-			return nil
-		}
-		f, e := os.Open(path)
-		if e != nil {
-			fmt.Fprintf(&missing, "%s\t%s\tmissing\n", r.Message.ID, safeMediaName(m.Filename, r.Message.ID))
-			return nil
-		}
-		name := uniqueName(safeMediaName(m.Filename, r.Message.ID), used)
-		zw, e := z.Create(name)
-		if e == nil {
-			_, e = io.Copy(zw, f)
-		}
-		closeErr := f.Close()
-		if e == nil {
-			e = closeErr
-		}
-		return e
-	})
-	if err != nil {
-		return err
-	}
-	if missing.Len() > 0 {
-		mw, e := z.Create("missing-media.txt")
-		if e != nil {
-			return e
-		}
-		if _, e = io.Copy(mw, &missing); e != nil {
-			return e
-		}
-	}
-	return z.Close()
 }
