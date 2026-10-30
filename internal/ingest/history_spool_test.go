@@ -1,9 +1,12 @@
 package ingest_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -13,10 +16,17 @@ import (
 	"go.mau.fi/whatsmeow/types/events"
 	"google.golang.org/protobuf/proto"
 
+	"whatsapp-archiver/internal/activity"
 	"whatsapp-archiver/internal/ingest"
 	"whatsapp-archiver/internal/store"
 	"whatsapp-archiver/internal/testkit"
 )
+
+type failImportedStore struct{ *store.Store }
+
+func (s *failImportedStore) SpoolImported(context.Context, int64, int64, store.HistoryChunk) error {
+	return errors.New("injected imported-marker failure")
+}
 
 func spoolNotification() *waE2E.HistorySyncNotification {
 	return &waE2E.HistorySyncNotification{
@@ -125,6 +135,28 @@ func TestHistorySpoolResumesAfterCrashWithoutDuplicates(t *testing.T) {
 	}
 	if got := rows(t, reopened, "SELECT stage||':'||count(*) FROM history_sync_chunks GROUP BY stage ORDER BY stage"); strings.Join(got, ",") != "imported:1,received:1" {
 		t.Fatalf("ledger=%v, want one row at each stage", got)
+	}
+}
+
+func TestHistorySpoolPublishesSuccessOnlyAfterImportedMarkerCommits(t *testing.T) {
+	st := testkit.Store(t)
+	bus := activity.NewBus(10)
+	var logs bytes.Buffer
+	p := ingest.NewPipeline(st, ingest.NewFilter(nil, nil), &queueFake{}, &healthFake{}, quiet()).WithHistoryParser(historyParser()).WithActivity(bus)
+	spool := ingest.NewHistorySpool(&failImportedStore{Store: st}, p, slog.New(slog.NewTextHandler(&logs, nil)))
+	if err := spool.Receive(t.Context(), spoolNotification(), threeMessageChunk().Data); err != nil {
+		t.Fatal(err)
+	}
+	if imported, err := spool.ImportNext(t.Context()); err == nil || imported {
+		t.Fatalf("import=(%v,%v), want marker failure", imported, err)
+	}
+	for _, event := range bus.Recent() {
+		if event.Kind == "history_chunk" {
+			t.Fatalf("published successful history event before imported marker committed: %+v", event)
+		}
+	}
+	if strings.Contains(logs.String(), "history chunk imported") {
+		t.Fatalf("logged successful import before imported marker committed: %s", logs.String())
 	}
 }
 

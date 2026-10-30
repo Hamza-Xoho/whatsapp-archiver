@@ -168,6 +168,25 @@ func TestHistoryDownloadIsBoundedAndNotAckedOnTimeout(t *testing.T) {
 	}
 }
 
+// A notification that declares an impossible chunk size is rejected before any allocation or network request. The
+// live downloader additionally enforces the same bound while writing, so a dishonest Content-Length cannot bypass it.
+func TestOversizeHistoryIsNotDownloadedSpooledOrAcked(t *testing.T) {
+	notif := historyNotification(true)
+	n := notif.Message.GetProtocolMessage().GetHistorySyncNotification()
+	n.FileLength = proto.Uint64(uint64(historyMaxBlobBytes + 1))
+	downloaded, spooled, handled := false, false, false
+	c := historyClient(nil, time.Minute, func(context.Context, *waE2E.HistorySyncNotification) (*waHistorySync.HistorySync, error) {
+		downloaded = true
+		return &waHistorySync.HistorySync{}, nil
+	}).WithHistorySpool(func(context.Context, *waE2E.HistorySyncNotification, *waHistorySync.HistorySync) error {
+		spooled = true
+		return nil
+	})
+	if acked := c.historyHandler(t.Context(), func(any) bool { handled = true; return true })(notif); acked || downloaded || spooled || handled {
+		t.Fatalf("acked=%v downloaded=%v spooled=%v handled=%v, want bounded rejection before all work", acked, downloaded, spooled, handled)
+	}
+}
+
 // Any other download error is retried by redelivery: no ack.
 func TestHistoryDownloadErrorIsNotAcked(t *testing.T) {
 	c := historyClient(nil, time.Minute, func(context.Context, *waE2E.HistorySyncNotification) (*waHistorySync.HistorySync, error) {
