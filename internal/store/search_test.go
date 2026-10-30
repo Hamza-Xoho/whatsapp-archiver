@@ -101,9 +101,9 @@ func TestSearchCanonicalResolutionFiltersBadgesAndCursor(t *testing.T) {
 	}
 }
 
-func TestSearchSyntheticPerformanceUnder300Milliseconds(t *testing.T) {
-	if testing.Short() {
-		t.Skip("scale timing")
+func TestSearchAtScaleUnder300Milliseconds(t *testing.T) {
+	if testing.Short() || !searchPerformanceEnabled {
+		t.Skip("release timing is measured without race instrumentation")
 	}
 	s := open(t)
 	for i := range 5_000 {
