@@ -102,7 +102,7 @@ func TestViewerFiltersDateJumpAndBothDirectionCursors(t *testing.T) {
 	if code != http.StatusOK || !strings.Contains(string(body), `id="message-`) || !strings.Contains(string(body), "nearest archived message") {
 		t.Fatalf("date jump = %d %s", code, body)
 	}
-	body, code, _ = get(t, u.handler(), "/chats/g@g.us?before=1761600106&before_id=m106")
+	body, code, _ = get(t, u.handler(), "/chats/g@g.us?before=1761609706&before_id=m106")
 	if code != http.StatusOK || !strings.Contains(string(body), "Load newer messages") || !strings.Contains(string(body), "Load older messages") {
 		t.Fatalf("middle page has no two-way controls: %d %s", code, body)
 	}
