@@ -116,3 +116,46 @@ func TestW6IPairingQRRenewalAndOfflinePresentation(t *testing.T) {
 		}
 	}
 }
+
+func TestW6IMobileTraceTargetsAndBidiIsolation(t *testing.T) {
+	u := newChatsUI(t)
+	const chat = "arabic@g.us"
+	if err := u.st.UpsertChat(t.Context(), store.Chat{JID: chat, Name: "عائلة الاختبار", Type: "group"}); err != nil {
+		t.Fatal(err)
+	}
+	u.msg(t, chat, "message-one", "1@lid", 1760000000, "مرحبا بالعالم")
+	u.event(t, store.MessageEvent{ChatJID: chat, TargetID: "message-one", Kind: "edit", EventID: "edit-one", SenderJID: "2@lid", NewText: "النص المعدل", Timestamp: 1760000060})
+	h := u.handler()
+
+	trace, code, _ := get(t, h, "/chats/"+chat+"/m/message-one")
+	if code != http.StatusOK {
+		t.Fatalf("trace status = %d", code)
+	}
+	for _, want := range []string{
+		`class="trace-events"`, `data-label="When"`, `data-label="What"`, `data-label="By"`, `data-label="Details"`,
+		`class="text" dir="auto"`, `<td data-label="Details" dir="auto">`,
+	} {
+		if !strings.Contains(string(trace), want) {
+			t.Errorf("mobile/bidi trace lacks %q", want)
+		}
+	}
+
+	preview, status := postForm(t, h, "/chats/rules/preview", url.Values{"jid[]": {chat}, "logging": {"on"}})
+	if status != http.StatusOK || !strings.Contains(preview, `<bdi dir="auto">عائلة الاختبار</bdi>`) {
+		t.Errorf("Arabic rule confirmation is not isolated: status=%d %s", status, preview)
+	}
+	export, code, _ := get(t, h, "/chats/"+chat+"/export")
+	if code != http.StatusOK || !strings.Contains(string(export), `Export <bdi dir="auto">عائلة الاختبار</bdi>`) {
+		t.Errorf("Arabic export heading is not isolated: status=%d", code)
+	}
+
+	css, code, _ := get(t, h, "/static/app.css")
+	if code != http.StatusOK {
+		t.Fatalf("CSS status = %d", code)
+	}
+	for _, want := range []string{".viewer-actions a", ".page-controls a", "min-height: 44px", ".trace-events td::before"} {
+		if !strings.Contains(string(css), want) {
+			t.Errorf("mobile control/card CSS lacks %q", want)
+		}
+	}
+}
