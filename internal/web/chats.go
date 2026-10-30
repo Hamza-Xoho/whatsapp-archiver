@@ -112,7 +112,12 @@ func (s *Server) chatRowViews(ctx context.Context, list []store.ChatRow, only ma
 	if err != nil {
 		return nil, err
 	}
-	names := make(map[string]string, len(list))
+	names := make(map[string]string, len(controls))
+	for jid, control := range controls {
+		if control.Name != "" {
+			names[jid] = control.Name
+		}
+	}
 	for _, c := range list {
 		names[c.CanonicalJID] = c.DisplayName
 	}
@@ -348,6 +353,14 @@ func (s *Server) chatAck(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, "the form could not be read", http.StatusBadRequest)
 		return
+	}
+	if r.PostForm.Get("scope") == "filtered" {
+		jids, err := s.filteredFormJIDs(r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		r.PostForm["jid[]"] = jids
 	}
 	jids := formJIDs(r)
 	if len(jids) == 0 {

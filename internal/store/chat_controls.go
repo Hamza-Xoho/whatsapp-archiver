@@ -8,8 +8,8 @@ import (
 
 // ChatControl is the directory and explicit-rule metadata used by the paged Chats UI. Parent is canonical.
 type ChatControl struct {
-	Type, Parent string
-	Rule         *ChatRule
+	Name, Type, Parent string
+	Rule               *ChatRule
 }
 
 // ChatEstimate is the archived activity used for the FR-25 weekly size estimate.
@@ -41,13 +41,13 @@ func (s *Store) ChatControls(ctx context.Context) (map[string]ChatControl, error
 	_ = rows.Close()
 
 	out := make(map[string]ChatControl, len(aliases))
-	rows, err = s.read.QueryContext(ctx, `SELECT jid,type,parent_jid FROM chats ORDER BY jid`)
+	rows, err = s.read.QueryContext(ctx, `SELECT jid,name,type,parent_jid FROM chats ORDER BY jid`)
 	if err != nil {
 		return nil, fmt.Errorf("chat controls directory: %w", err)
 	}
 	for rows.Next() {
-		var jid, typ, parent string
-		if err = rows.Scan(&jid, &typ, &parent); err != nil {
+		var jid, name, typ, parent string
+		if err = rows.Scan(&jid, &name, &typ, &parent); err != nil {
 			_ = rows.Close()
 			return nil, fmt.Errorf("chat controls directory: %w", err)
 		}
@@ -56,6 +56,9 @@ func (s *Store) ChatControls(ctx context.Context) (map[string]ChatControl, error
 			canonical = jid
 		}
 		c := out[canonical]
+		if c.Name == "" && name != "" {
+			c.Name = name
+		}
 		if c.Type == "" || typ == "community" {
 			c.Type = typ
 		}
