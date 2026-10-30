@@ -15,16 +15,19 @@ import (
 
 	"whatsapp-archiver/internal/activity"
 	"whatsapp-archiver/internal/config"
+	"whatsapp-archiver/internal/health"
 	"whatsapp-archiver/internal/testkit"
 )
 
 // fakePairer is the wa pairer at the web boundary: StartPairing hands out one channel the test feeds.
 type fakePairer struct {
-	mu     sync.Mutex
-	paired bool
-	starts int
-	ch     chan PairUpdate
-	closed bool
+	mu      sync.Mutex
+	paired  bool
+	starts  int
+	repairs int
+	cancels int
+	ch      chan PairUpdate
+	closed  bool
 }
 
 func newFakePairer(t *testing.T, paired bool) *fakePairer {
@@ -39,6 +42,19 @@ func (f *fakePairer) StartPairing(context.Context) (<-chan PairUpdate, error) {
 	defer f.mu.Unlock()
 	f.starts++
 	return f.ch, nil
+}
+func (f *fakePairer) RePair(context.Context) (<-chan PairUpdate, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.repairs++
+	f.paired = false
+	return f.ch, nil
+}
+func (f *fakePairer) CancelPairing() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cancels++
+	return nil
 }
 func (f *fakePairer) startCount() int { f.mu.Lock(); defer f.mu.Unlock(); return f.starts }
 func (f *fakePairer) send(u PairUpdate) {
@@ -121,9 +137,46 @@ func TestPairPageWhenPairedHasNoButton(t *testing.T) {
 		t.Fatalf("status %d", code)
 	}
 	page := visibleText(string(body))
-	contains(t, page, "Paired", "history: none received yet")
+	contains(t, page, "Paired", "history: none received yet", "Open WhatsApp on your phone regularly", "after 14 days", "Pair a different device")
 	if strings.Contains(string(body), "/pair/start") || strings.Contains(page, "Pair WhatsApp") {
 		t.Fatalf("paired page offers pairing:\n%s", body)
+	}
+}
+
+func TestPairedPageConfirmsAndStartsVoluntaryRePair(t *testing.T) {
+	f := newFakePairer(t, true)
+	h := newPairUI(t, f).Handler()
+	body, _, _ := get(t, h, "/pair")
+	page := visibleText(string(body))
+	contains(t, page, "Re-pair WhatsApp?", "The archive is not changed", "no new messages are logged until pairing finishes")
+	resp := samePost(t, h, "/pair/restart", true)
+	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/pair" {
+		t.Fatalf("POST /pair/restart: %d Location=%q", resp.StatusCode, resp.Header.Get("Location"))
+	}
+	f.mu.Lock()
+	repairs := f.repairs
+	f.mu.Unlock()
+	if repairs != 1 {
+		t.Fatalf("re-pairs=%d, want 1", repairs)
+	}
+	f.send(PairUpdate{QR: "2@replacement"})
+	waitPage(t, h, `src="/pair/qr.png`)
+}
+
+func TestCancelPairingReturnsToNotPaired(t *testing.T) {
+	f := newFakePairer(t, false)
+	h := newPairUI(t, f).Handler()
+	samePost(t, h, "/pair/start", true)
+	f.send(PairUpdate{QR: "2@cancel"})
+	waitPage(t, h, "Cancel pairing")
+	if resp := samePost(t, h, "/pair/cancel", true); resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("POST /pair/cancel: %d", resp.StatusCode)
+	}
+	f.mu.Lock()
+	cancels := f.cancels
+	f.mu.Unlock()
+	if cancels != 1 {
+		t.Fatalf("cancels=%d, want 1", cancels)
 	}
 }
 
@@ -325,15 +378,20 @@ type loggedOutPairer struct{}
 
 func (loggedOutPairer) Paired() bool { return false }
 func (loggedOutPairer) StartPairing(context.Context) (<-chan PairUpdate, error) {
-	return nil, errors.New("WhatsApp logged this archiver out. Restart it (sudo systemctl restart archiver) to pair again.")
+	return make(chan PairUpdate), nil
 }
+func (loggedOutPairer) RePair(context.Context) (<-chan PairUpdate, error) {
+	return nil, errors.New("not paired")
+}
+func (loggedOutPairer) CancelPairing() error { return nil }
 
-// F1: the refusal reaches the /pair page, not an endless wait for a QR code.
-func TestPairPageShowsLoggedOutAdvice(t *testing.T) {
-	h := New(Deps{Store: testkit.Store(t), Config: &config.Config{TimeZone: "UTC"}, Pairer: loggedOutPairer{}, Activity: activity.NewBus(10)}).Handler()
-	samePost(t, h, "/pair/start", true)
-	page := visibleText(waitPage(t, h, "sudo systemctl restart archiver"))
-	if !strings.Contains(page, "WhatsApp logged this archiver out. Restart it (sudo systemctl restart archiver) to pair again.") || strings.Contains(page, "Waiting for WhatsApp") {
+// W6(g): LoggedOut is a distinct red state with Pair again; it never tells the operator to restart the process.
+func TestPairPageOffersLoggedOutRePairWithoutRestart(t *testing.T) {
+	h := New(Deps{Store: testkit.Store(t), Config: &config.Config{TimeZone: "UTC"}, Pairer: loggedOutPairer{}, Health: func() health.Snapshot {
+		return health.Snapshot{State: "logged_out"}
+	}, Activity: activity.NewBus(10)}).Handler()
+	page := visibleText(waitPage(t, h, "Pair again"))
+	if strings.Contains(strings.ToLower(page), "restart") || !strings.Contains(page, "WhatsApp logged this archiver out") {
 		t.Fatalf("page:\n%s", page)
 	}
 }
