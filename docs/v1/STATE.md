@@ -132,6 +132,10 @@ Single status record for V1 (max 150 lines, update in place; history lives in gi
 - Warm release build on the 250-chat/300k devseed (chat `100145@lid`, 1,288 messages; five warm-ups + 30 runs): initial p50/p95 31.5/35.6 ms, older 28.7/32.8 ms, newer 22.4/25.8 ms; 57 KiB responses. The page-select query was slowest at about 10 ms (indexed canonical lookup plus bounded window/order); all are below 150 ms.
 - Review 30 Oct: no Critical findings; Important findings fixed through red `8360d5f` and `2180f4e`, green `769f2bf`. Live SSE now resumes by insert sequence without duplicates or same-second misses; both keyset edges load through revealed htmx fragments without dropping the forward boundary; away pages count new messages; image originals lazy-load after thumbnails; unavailable media links to Details; poll totals, exact date-gap copy, inert missing quotes, precise folded highlights and focused headings are present. Full `make check` passed; no invariant deviations or open questions. Minor follow-ups are a populated sender selector and `dir="auto"` on collapsed vCard/document-name text.
 
+## W6(d) global search
+
+- Implemented on `v1/w6de-search-export`: folded, safely quoted dual-FTS routing; canonical filters and keyset paging; grouped, escaped `/search` results with edit/delete labels and message jumps. The 5k-message regression stays under the 300 ms budget; no golden files changed.
+
 ## Rulings
 
 - (a) The `add-message-kind` skill (replaces `add-event-kind`) was written in W2(c).

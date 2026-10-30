@@ -1,0 +1,45 @@
+{{define "content"}}
+  <h1>Search messages</h1>
+  <form class="panel search" method="get" action="/search">
+    <label for="search-query">Search archived messages</label>
+    <input id="search-query" name="q" value="{{.Query}}" placeholder="Words or part of a word">
+    <button type="submit">Search</button>
+    <details>
+      <summary>Filters</summary>
+      <label>Chat <input name="chat" value="{{.Chat}}"></label>
+      <label>Sender <input name="sender" value="{{.Sender}}"></label>
+      <label>From date <input type="date" name="from" value="{{.From}}"></label>
+      <label>To date <input type="date" name="to" value="{{.To}}"></label>
+      <label>Media type
+        <select name="media"><option value="">All</option>
+          {{range .MediaKinds}}<option value="{{.}}"{{if eq $.Media .}} selected{{end}}>{{.}}</option>{{end}}
+        </select>
+      </label>
+    </details>
+  </form>
+  {{if not .Searched}}
+    <p class="panel muted">Search text and captions across all logged chats.</p>
+  {{else if not .Groups}}
+    <p class="panel">No archived messages match <strong dir="auto">{{.Query}}</strong>. Try different spelling or filters.</p>
+  {{else}}
+    <p role="status">{{.ResultCount}} results in {{.ChatCount}} chats</p>
+    {{range .Groups}}
+      <section class="panel search-group">
+        <h2><bdi dir="auto">{{.Name}}</bdi> · {{len .Results}} results</h2>
+        <ol class="search-results">
+        {{range .Results}}
+          <li>
+            <p class="meta"><time>{{.Time}}</time>{{if .SenderName}} · <bdi dir="auto">{{.SenderName}}</bdi>{{end}} · {{.Kind}}
+              {{if .Deleted}}<span class="badge bad">Deleted</span>{{end}}
+              {{if .Edited}}<span class="badge">Edited</span>{{end}}
+            </p>
+            <p class="search-context" dir="auto">{{.Text}}</p>
+            <a href="/chats/{{pathEscape .CanonicalJID}}/m/{{pathEscape .ID}}">Open message</a>
+          </li>
+        {{end}}
+        </ol>
+      </section>
+    {{end}}
+    {{if .HasMore}}<p><a href="{{.NextURL}}">More results</a></p>{{end}}
+  {{end}}
+{{end}}
