@@ -40,9 +40,12 @@ func TestLoggingGapAndMediaPlansReuseExistingIndexesWithoutSchemaGrowth(t *testi
 	if strings.Contains(outagePlan, "TEMP B-TREE") {
 		t.Errorf("outage range read sorts:\n%s", outagePlan)
 	}
-	for name, query := range map[string]string{"counts": loggingMediaCountsQuery, "reasons": loggingMediaReasonsQuery} {
-		mediaPlan := planOf(t, s, query)
-		if !strings.Contains(mediaPlan, "SCAN media USING COVERING INDEX media_pick") || strings.Contains(mediaPlan, "TEMP B-TREE") {
+	for name, check := range map[string]struct{ query, access string }{
+		"counts":  {loggingMediaCountsQuery, "SCAN media USING COVERING INDEX media_pick"},
+		"reasons": {loggingMediaReasonsQuery, "SEARCH media USING COVERING INDEX media_pick"},
+	} {
+		mediaPlan := planOf(t, s, check.query)
+		if !strings.Contains(mediaPlan, check.access) || strings.Contains(mediaPlan, "TEMP B-TREE") {
 			t.Errorf("media %s aggregation streams the base table instead of the covering index:\n%s", name, mediaPlan)
 		}
 	}
