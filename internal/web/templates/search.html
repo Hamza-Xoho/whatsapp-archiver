@@ -1,6 +1,6 @@
 {{define "content"}}
   <h1>Search messages</h1>
-  <form class="panel search" method="get" action="/search">
+  <form class="panel search" method="get" action="/search" hx-get="/search" hx-target="#main" hx-select="#main" hx-swap="outerHTML" hx-push-url="true">
     <label for="search-query">Search archived messages</label>
     <input id="search-query" name="q" value="{{.Query}}" placeholder="Words or part of a word">
     <button type="submit">Search</button>
@@ -34,7 +34,7 @@
               {{if .Edited}}<span class="badge">Edited</span>{{end}}
             </p>
             <p class="search-context" dir="auto">{{range .Segments}}{{if .Match}}<mark>{{.Text}}</mark>{{else}}{{.Text}}{{end}}{{end}}</p>
-            <a href="/chats/{{pathEscape .CanonicalJID}}/m/{{pathEscape .ID}}">Open message</a>
+            <a href="/chats/{{pathEscape .CanonicalJID}}?at={{urlquery .ID}}#message-{{fragmentEscape .ID}}">Open message</a>
           </li>
         {{end}}
         </ol>

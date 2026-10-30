@@ -21,6 +21,15 @@ import (
 
 const exportPageSize = 200
 
+type exportClientError string
+
+func (e exportClientError) Error() string { return string(e) }
+
+const (
+	errExportFailed exportClientError = "The chat could not be exported. Try again."
+	errExportEmpty  exportClientError = "There are no archived messages in this date range."
+)
+
 type exportPageData struct {
 	page
 	JID, Name, From, To string
@@ -54,6 +63,7 @@ func (s *Server) exportPage(w http.ResponseWriter, r *http.Request) {
 
 type exportScope struct {
 	jid, name, format string
+	origin            string
 	from, to          int64
 	loc               *time.Location
 	aliases           []string
@@ -81,7 +91,7 @@ func (s *Server) exportDownload(w http.ResponseWriter, r *http.Request) {
 		err = s.streamJSON(r.Context(), w, scope)
 	case "html":
 		h.Set("Content-Type", "text/html; charset=utf-8")
-		h.Set("Content-Security-Policy", "sandbox; default-src 'none'; img-src data:; media-src data:")
+		h.Set("Content-Security-Policy", "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:; media-src data:")
 		err = s.streamHTML(r.Context(), w, scope)
 	case "txt":
 		h.Set("Content-Type", "text/plain; charset=utf-8")
@@ -100,6 +110,7 @@ func (s *Server) validateExport(r *http.Request) (exportScope, int, error) {
 	x.jid = r.PathValue("jid")
 	x.format = r.URL.Query().Get("format")
 	x.generated = s.d.Now()
+	x.origin = requestOrigin(r)
 	if s.d.Store == nil {
 		return x, 404, sql.ErrNoRows
 	}
@@ -108,7 +119,7 @@ func (s *Server) validateExport(r *http.Request) (exportScope, int, error) {
 	}
 	loc, err := view.Location(s.config())
 	if err != nil {
-		return x, 500, errors.New("the export could not be prepared")
+		return x, 500, errExportFailed
 	}
 	x.loc = loc
 	if x.from, err = parseExportDate(r.URL.Query().Get("from"), false, loc); err != nil {
@@ -125,23 +136,34 @@ func (s *Server) validateExport(r *http.Request) (exportScope, int, error) {
 		return x, 404, err
 	}
 	if err != nil {
-		return x, 500, errors.New("the archive could not be read")
+		return x, 500, errExportFailed
 	}
 	x.name, err = s.d.Store.ChatName(r.Context(), x.jid)
 	if err != nil {
-		return x, 500, errors.New("the archive could not be read")
+		return x, 500, errExportFailed
 	}
 	if x.name == "" {
 		x.name = x.jid
 	}
 	first, err := s.d.Store.ExportPage(r.Context(), store.ExportParams{CanonicalJID: x.jid, From: x.from, To: x.to, Limit: 1})
 	if err != nil {
-		return x, 500, errors.New("the archive could not be read")
+		return x, 500, errExportFailed
 	}
 	if len(first) == 0 {
-		return x, 400, errors.New("there are no archived messages in this date range")
+		return x, 400, errExportEmpty
 	}
 	return x, 200, nil
+}
+
+func requestOrigin(r *http.Request) string {
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if forwarded := strings.TrimSpace(strings.Split(r.Header.Get("X-Forwarded-Proto"), ",")[0]); forwarded == "http" || forwarded == "https" {
+		scheme = forwarded
+	}
+	return scheme + "://" + r.Host
 }
 
 func parseExportDate(raw string, end bool, loc *time.Location) (int64, error) {
@@ -329,12 +351,29 @@ func (s *Server) streamJSON(ctx context.Context, w io.Writer, x exportScope) err
 }
 
 func (s *Server) streamHTML(ctx context.Context, w io.Writer, x exportScope) error {
-	if _, err := fmt.Fprintf(w, "<!doctype html><meta charset=utf-8><title>%s</title><style>body{font:16px system-ui;max-width:60rem;margin:auto}.m{border-bottom:1px solid #ccc;padding:1rem;white-space:pre-wrap}.event{color:#555}img,video{max-width:100%%}</style><h1>%s</h1><p>Canonical chat: %s · Time zone: %s · Generated: %s</p>", template.HTMLEscapeString(x.name), template.HTMLEscapeString(x.name), template.HTMLEscapeString(x.jid), template.HTMLEscapeString(x.loc.String()), x.generated.In(x.loc).Format(time.RFC3339)); err != nil {
+	rangeLabel := "All archived messages"
+	if x.from > 0 || x.to > 0 {
+		from, to := "start of archive", "end of archive"
+		if x.from > 0 {
+			from = time.Unix(x.from, 0).In(x.loc).Format("2006-01-02")
+		}
+		if x.to > 0 {
+			to = time.Unix(x.to, 0).In(x.loc).Format("2006-01-02")
+		}
+		rangeLabel = "Applied range: " + from + " to " + to
+	}
+	if _, err := fmt.Fprintf(w, "<!doctype html><meta charset=utf-8><title>%s</title><style>body{font:16px system-ui;max-width:60rem;margin:auto}.m{border-bottom:1px solid #ccc;padding:1rem;white-space:pre-wrap}.event{color:#555}img,video{max-width:100%%}</style><h1>%s</h1><p>Schema version: v1 · Canonical chat: %s · Time zone: %s · Generated: %s</p><p>Aliases included: %s</p><p>%s</p>", template.HTMLEscapeString(x.name), template.HTMLEscapeString(x.name), template.HTMLEscapeString(x.jid), template.HTMLEscapeString(x.loc.String()), x.generated.In(x.loc).Format(time.RFC3339), template.HTMLEscapeString(strings.Join(x.aliases, ", ")), template.HTMLEscapeString(rangeLabel)); err != nil {
 		return err
 	}
 	var embedded int64
-	return s.eachTimeline(ctx, x, func(r *store.ExportRecord, e *store.ExportEvent) error {
+	var messages, messageEvents, chatEvents int
+	err := s.eachTimeline(ctx, x, func(r *store.ExportRecord, e *store.ExportEvent) error {
 		if e != nil {
+			if e.Message != nil {
+				messageEvents++
+			} else if e.Chat != nil {
+				chatEvents++
+			}
 			label := exportEventLabel(*e)
 			if e.Message != nil {
 				label = htmlEventLabel(*e.Message)
@@ -342,6 +381,7 @@ func (s *Server) streamHTML(ctx context.Context, w io.Writer, x exportScope) err
 			_, err := fmt.Fprintf(w, "<article class=\"m event\"><header>%s</header><div dir=auto>%s</div></article>", mTime(e.TS, x.loc), template.HTMLEscapeString(label))
 			return err
 		}
+		messages++
 		m := r.Message
 		sender := r.SenderName
 		if sender == "" {
@@ -352,13 +392,18 @@ func (s *Server) streamHTML(ctx context.Context, w io.Writer, x exportScope) err
 			return err
 		}
 		if r.Media != nil {
-			if err := s.htmlMedia(w, x.jid, r.Media, &embedded); err != nil {
+			if err := s.htmlMediaWithOriginAndLimits(w, x.jid, x.origin, r.Media, &embedded, defaultHTMLEmbedLimits); err != nil {
 				return err
 			}
 		}
 		_, err := io.WriteString(w, "</article>")
 		return err
 	})
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(w, "<footer><p>Messages: %d · Message events: %d · Chat events: %d</p></footer>", messages, messageEvents, chatEvents)
+	return err
 }
 
 func (s *Server) streamText(ctx context.Context, w io.Writer, x exportScope) error {
@@ -396,6 +441,14 @@ func safeMediaName(filename, id string) string {
 	name = strings.Trim(unsafeMediaName.ReplaceAllString(name, "_"), "_.")
 	if name == "" {
 		name = safeExportName(id)
+	}
+	const maxNameBytes = 120
+	if len(name) > maxNameBytes {
+		ext := filepath.Ext(name)
+		if len(ext) > 16 {
+			ext = ext[:16]
+		}
+		name = strings.TrimRight(name[:maxNameBytes-len(ext)], "_.") + ext
 	}
 	return name
 }

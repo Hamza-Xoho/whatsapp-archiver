@@ -18,10 +18,14 @@ type htmlEmbedLimits struct{ PerFile, Total int64 }
 var defaultHTMLEmbedLimits = htmlEmbedLimits{PerFile: 10 << 20, Total: 100 << 20}
 
 func (s *Server) htmlMedia(w io.Writer, jid string, m *store.Media, total *int64) error {
-	return s.htmlMediaWithLimits(w, jid, m, total, defaultHTMLEmbedLimits)
+	return s.htmlMediaWithOriginAndLimits(w, jid, "", m, total, defaultHTMLEmbedLimits)
 }
 
 func (s *Server) htmlMediaWithLimits(w io.Writer, jid string, m *store.Media, total *int64, limits htmlEmbedLimits) error {
+	return s.htmlMediaWithOriginAndLimits(w, jid, "", m, total, limits)
+}
+
+func (s *Server) htmlMediaWithOriginAndLimits(w io.Writer, jid, origin string, m *store.Media, total *int64, limits htmlEmbedLimits) error {
 	if len(m.Thumb) > 0 && *total+int64(len(m.Thumb)) <= limits.Total {
 		*total += int64(len(m.Thumb))
 		if _, err := fmt.Fprintf(w, "<img class=thumbnail alt=\"Stored thumbnail\" src=\"data:image/jpeg;base64,%s\">", base64.StdEncoding.EncodeToString(m.Thumb)); err != nil {
@@ -72,7 +76,7 @@ func (s *Server) htmlMediaWithLimits(w io.Writer, jid string, m *store.Media, to
 	if size == 0 {
 		size = m.DeclaredSize
 	}
-	link := "/media?chat=" + url.QueryEscape(jid) + "&id=" + url.QueryEscape(m.MessageID)
+	link := origin + "/media?chat=" + url.QueryEscape(jid) + "&id=" + url.QueryEscape(m.MessageID)
 	sha := m.SHA256
 	if sha == "" {
 		sha = "unknown"

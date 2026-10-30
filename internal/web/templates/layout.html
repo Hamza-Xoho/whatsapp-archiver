@@ -57,13 +57,18 @@ if (theme) {
 }
 var toast = document.getElementById("toast");
 function showRequestError(event) {
-  var response = event.detail && event.detail.xhr && event.detail.xhr.status >= 400 && event.detail.xhr.status < 500 ? event.detail.xhr.responseText.trim() : "";
+  var response = event.detail && event.detail.xhr && event.detail.xhr.status >= 400 ? event.detail.xhr.responseText.trim() : "";
   toast.querySelector("p").textContent = response || "That change did not go through. Your previous setting is still shown. Try again.";
   toast.hidden = false;
   if (event.detail && event.detail.elt && event.detail.elt.matches("button, input, select, form")) toast.focus();
 }
 document.addEventListener("htmx:responseError", showRequestError);
-document.addEventListener("htmx:sendError", showRequestError);
+document.addEventListener("htmx:sendError", function (event) {
+  setOffline();
+  toast.querySelector("p").textContent = "Live updates paused. Check the SSH tunnel or archiver. This page will reconnect automatically.";
+  toast.hidden = false;
+  if (event.detail && event.detail.elt) toast.focus();
+});
 toast.querySelector("button").addEventListener("click", function () { toast.hidden = true; });
 var failures = 0, offlineTimer;
 function writesDisabled(disabled) {

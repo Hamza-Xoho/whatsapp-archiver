@@ -35,7 +35,11 @@ var staticFiles embed.FS
 
 // templateFuncs are the helpers every page may call. pathEscape makes one path segment of a value that came from
 // another phone (a message id may hold "?" or "/").
-var templateFuncs = template.FuncMap{"pathEscape": url.PathEscape}
+var templateFuncs = template.FuncMap{
+	"pathEscape": url.PathEscape,
+	// fragmentEscape is safe trusted URL syntax: PathEscape removes every delimiter an untrusted message ID could add.
+	"fragmentEscape": func(s string) template.URL { return template.URL(url.PathEscape(s)) }, //nolint:gosec // escaped URL component
+}
 
 // shutdownBound is how long Run waits for requests in flight once its context ends.
 const shutdownBound = 5 * time.Second

@@ -151,7 +151,7 @@ ORDER BY m.ts DESC,m.seq DESC`)
 	if err = rows.Err(); err != nil {
 		return nil, fmt.Errorf("search newest messages: %w", err)
 	}
-	if err = s.enrichSearchHits(ctx, out); err != nil {
+	if err := s.enrichSearchHits(ctx, out); err != nil {
 		return nil, err
 	}
 	return out, nil
@@ -197,6 +197,9 @@ func (s *Store) Search(ctx context.Context, p SearchParams) ([]SearchHit, error)
 		fetchLimit = 100
 	}
 	candidateMatch := searchCandidateMatch(p.Query)
+	if candidateMatch == match {
+		candidateMatch = ""
+	}
 	unfiltered := p.ChatJID == "" && p.SenderJID == "" && p.MediaType == "" && p.From == 0 && p.To == 0 && p.BeforeTS == 0
 	fastNewest := false
 	if unfiltered && table == "search_tri" {
@@ -212,6 +215,21 @@ func (s *Store) Search(ctx context.Context, p SearchParams) ([]SearchHit, error)
 		}
 		if !hasEdits {
 			return s.searchDenseNewest(ctx, p, limit)
+		}
+	}
+	if unfiltered && table == "search_tri" && candidateMatch != "" {
+		dense, err := s.denseSearch(ctx, table, candidateMatch)
+		if err != nil {
+			return nil, err
+		}
+		if dense {
+			hasEdits, editErr := s.hasEditSearchHit(ctx, table, candidateMatch)
+			if editErr != nil {
+				return nil, editErr
+			}
+			if !hasEdits {
+				return s.searchDenseNewest(ctx, p, limit)
+			}
 		}
 	}
 	var args []any
@@ -233,20 +251,19 @@ func (s *Store) Search(ctx context.Context, p SearchParams) ([]SearchHit, error)
 			hitsQuery += ` UNION ALL SELECT rowid FROM (SELECT rowid FROM ` + table + ` WHERE ` + table + ` MATCH ? AND rowid<0 LIMIT ?)`
 			args = append(args, match, fetchLimit)
 		}
-		if candidateMatch != match {
-			hitsQuery += ` UNION ALL SELECT rowid FROM (SELECT rowid FROM ` + table + ` WHERE ` + table + ` MATCH ? LIMIT ?)`
-			args = append(args, candidateMatch, 500)
+		if candidateMatch != "" {
+			hitsQuery += ` UNION SELECT rowid FROM ` + table + ` WHERE ` + table + ` MATCH ?`
+			args = append(args, candidateMatch)
 		}
 	} else {
 		hitsQuery = `SELECT rowid FROM ` + table + ` WHERE ` + table + ` MATCH ?`
 		args = append(args, match)
-		if candidateMatch != match {
-			hitsQuery += ` UNION ALL SELECT rowid FROM (SELECT rowid FROM ` + table + ` WHERE ` + table + ` MATCH ? LIMIT ?)`
-			args = append(args, candidateMatch, 500)
+		if candidateMatch != "" {
+			hitsQuery += ` UNION SELECT rowid FROM ` + table + ` WHERE ` + table + ` MATCH ?`
+			args = append(args, candidateMatch)
 		}
 	}
 	args = append(args, filterArgs...)
-	args = append(args, fetchLimit)
 	candidatesQuery := `SELECT c.canonical,m.id,m.sender_jid,
   m.text,m.caption,m.details,
   '' AS edit_text,m.kind,m.ts,m.received_at,m.chat_jid,0 AS is_edit
@@ -266,44 +283,52 @@ func (s *Store) Search(ctx context.Context, p SearchParams) ([]SearchHit, error)
 	if len(where) > 0 {
 		query += ` WHERE ` + strings.Join(where, " AND ")
 	}
-	query += ` ORDER BY ts DESC,canonical,id,is_edit DESC,received_at DESC,chat_jid LIMIT ?)
+	query += ` ORDER BY ts DESC,canonical,id,is_edit DESC,received_at DESC,chat_jid LIMIT ? OFFSET ?)
 SELECT p.canonical,p.id,p.sender_jid,p.text,p.caption,p.details,COALESCE(x.filename,''),
  p.edit_text,p.is_edit,p.kind,p.ts
 FROM page p LEFT JOIN media x ON x.chat_jid=p.chat_jid AND x.message_id=p.id
 ORDER BY p.ts DESC,p.canonical,p.id,p.is_edit DESC,p.received_at DESC,p.chat_jid`
 	var out []SearchHit
 	seen := make(map[string]struct{}, limit)
-	err := s.scanRows(ctx, query, args, func(rows *sql.Rows) error {
-		var h SearchHit
-		var text, caption, details, filename, editText string
-		var isEdit bool
-		if err := rows.Scan(&h.CanonicalJID, &h.ID, &h.Sender, &text, &caption, &details, &filename, &editText, &isEdit, &h.Kind, &h.TS); err != nil {
-			return err
-		}
-		if isEdit {
-			h.Text = editText
-		} else {
-			h.Text = searchContext(h.Kind, text, caption, details, filename)
-		}
-		h.Edited = isEdit
-		if !searchPhraseMatches(h.Text, p.Query) {
+	for offset := 0; len(out) < limit; offset += fetchLimit {
+		pageArgs := append(slices.Clone(args), fetchLimit, offset)
+		rawRows := 0
+		err := s.scanRows(ctx, query, pageArgs, func(rows *sql.Rows) error {
+			rawRows++
+			var h SearchHit
+			var text, caption, details, filename, editText string
+			var isEdit bool
+			if scanErr := rows.Scan(&h.CanonicalJID, &h.ID, &h.Sender, &text, &caption, &details, &filename, &editText, &isEdit, &h.Kind, &h.TS); scanErr != nil {
+				return scanErr
+			}
+			if isEdit {
+				h.Text = editText
+			} else {
+				h.Text = searchContext(h.Kind, text, caption, details, filename)
+			}
+			h.Edited = isEdit
+			if !searchPhraseMatches(h.Text, p.Query) || len(out) == limit {
+				return nil
+			}
+			key := h.CanonicalJID + "\x00" + h.ID
+			if _, ok := seen[key]; ok {
+				return nil
+			}
+			seen[key] = struct{}{}
+			out = append(out, h)
 			return nil
+		})
+		if err != nil {
+			return nil, fmt.Errorf("search archive: %w", err)
 		}
-		key := h.CanonicalJID + "\x00" + h.ID
-		if _, ok := seen[key]; ok {
-			return nil
+		if rawRows < fetchLimit {
+			break
 		}
-		seen[key] = struct{}{}
-		out = append(out, h)
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("search archive: %w", err)
 	}
 	if len(out) > limit {
 		out = out[:limit]
 	}
-	if err = s.enrichSearchHits(ctx, out); err != nil {
+	if err := s.enrichSearchHits(ctx, out); err != nil {
 		return nil, err
 	}
 	return out, nil
