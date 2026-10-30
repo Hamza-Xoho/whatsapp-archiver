@@ -171,8 +171,9 @@ func safeExportName(s string) string {
 func (s *Server) eachExport(ctx context.Context, x exportScope, fn func(store.ExportRecord) error) error {
 	var ts int64
 	var id string
+	hasCursor := false
 	for {
-		page, err := s.d.Store.ExportPage(ctx, store.ExportParams{CanonicalJID: x.jid, From: x.from, To: x.to, AfterTS: ts, AfterID: id, Limit: exportPageSize})
+		page, err := s.d.Store.ExportPage(ctx, store.ExportParams{CanonicalJID: x.jid, From: x.from, To: x.to, AfterTS: ts, AfterID: id, HasCursor: hasCursor, Limit: exportPageSize})
 		if err != nil {
 			return err
 		}
@@ -187,6 +188,7 @@ func (s *Server) eachExport(ctx context.Context, x exportScope, fn func(store.Ex
 				return err
 			}
 			ts, id = r.Message.Timestamp, r.Message.ID
+			hasCursor = true
 		}
 		if len(page) < exportPageSize {
 			return nil
@@ -213,7 +215,6 @@ type jsonMessage struct {
 	ViewOnce      bool            `json:"view_once"`
 	ForwardScore  int             `json:"forward_score"`
 	EphemeralSecs int             `json:"ephemeral_secs"`
-	Events        []jsonEvent     `json:"events,omitempty"`
 	Media         *jsonMedia      `json:"media,omitempty"`
 }
 type jsonEvent struct {
@@ -250,9 +251,6 @@ type jsonChatEvent struct {
 func exportJSONRecord(r store.ExportRecord) jsonMessage {
 	m := r.Message
 	j := jsonMessage{ID: m.ID, Sender: m.SenderJID, SenderName: r.SenderName, Kind: m.Kind, Text: m.Text, Caption: m.Caption, QuotedID: m.QuotedID, QuotedSender: m.QuotedSender, Source: m.Source, Details: json.RawMessage(m.Details), Mentions: m.Mentions, Timestamp: m.Timestamp, ReceivedAt: m.ReceivedAt, FromMe: m.FromMe, Forwarded: m.Forwarded, ViewOnce: m.ViewOnce, ForwardScore: m.ForwardScore, EphemeralSecs: m.EphemeralSecs}
-	for _, e := range r.Events {
-		j.Events = append(j.Events, jsonEvent{e.EventID, e.Kind, e.SourceID, e.Cause, e.SenderJID, e.Source, e.NewText, e.Value, e.Timestamp, e.ReceivedAt})
-	}
 	if r.Media != nil {
 		v := r.Media
 		j.Media = &jsonMedia{v.Type, v.MIME, v.Filename, v.SHA256, v.State, v.Reason, v.ErrorClass, v.DeclaredSize}
@@ -326,7 +324,7 @@ func (s *Server) streamJSON(ctx context.Context, w io.Writer, x exportScope) err
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(w, "],\"counts\":{\"messages\":%d,\"message_events\":%d,\"chat_events\":%d}}", count, eventCount, chatCount)
+	_, err = fmt.Fprintf(w, "],\"counts\":{\"messages\":%d,\"message_events\":%d,\"chat_events\":%d,\"events\":%d}}", count, eventCount, chatCount, eventCount+chatCount)
 	return err
 }
 
@@ -364,9 +362,6 @@ func (s *Server) streamHTML(ctx context.Context, w io.Writer, x exportScope) err
 }
 
 func (s *Server) streamText(ctx context.Context, w io.Writer, x exportScope) error {
-	return s.streamTextWithNames(ctx, w, x, nil)
-}
-func (s *Server) streamTextWithNames(ctx context.Context, w io.Writer, x exportScope, names map[string]string) error {
 	return s.eachTimeline(ctx, x, func(r *store.ExportRecord, e *store.ExportEvent) error {
 		if e != nil {
 			return writeWALine(w, time.Unix(e.TS, 0).In(x.loc), exportEventSender(*e), exportEventLabel(*e))
@@ -381,9 +376,9 @@ func (s *Server) streamTextWithNames(ctx context.Context, w io.Writer, x exportS
 			if body != "" {
 				body += " "
 			}
-			name := safeMediaName(r.Media.Filename, m.ID)
-			if names != nil && names[m.ID] != "" {
-				name = names[m.ID]
+			name, err := s.exportArchiveName(ctx, x, *r)
+			if err != nil {
+				return err
 			}
 			body += "[attachment: " + name + "]"
 		}

@@ -3,53 +3,77 @@ package web
 import (
 	"archive/zip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"whatsapp-archiver/internal/store"
 )
 
-func (s *Server) zipMediaNames(ctx context.Context, x exportScope) (map[string]string, error) {
-	counts := map[string]int{}
-	if err := s.eachExport(ctx, x, func(r store.ExportRecord) error {
-		if r.Media != nil {
-			counts[safeMediaName(r.Media.Filename, r.Message.ID)]++
-		}
-		return nil
-	}); err != nil {
-		return nil, err
+func archiveMediaName(chat, id, filename string) string {
+	base := safeMediaName(filename, id)
+	ext := filepath.Ext(base)
+	stem := base[:len(base)-len(ext)]
+	sum := sha256.Sum256([]byte(chat + "\x00" + id))
+	return stem + "_" + hex.EncodeToString(sum[:]) + ext
+}
+func ordinalName(base string, n int) string {
+	if n <= 1 {
+		return base
 	}
-	seen := map[string]int{}
-	names := map[string]string{}
-	err := s.eachExport(ctx, x, func(r store.ExportRecord) error {
-		if r.Media == nil {
-			return nil
-		}
-		base := safeMediaName(r.Media.Filename, r.Message.ID)
-		seen[base]++
-		name := base
-		if counts[base] > 1 && seen[base] > 1 {
-			name = uniqueName(base, seen[base])
-		}
-		names[r.Message.ID] = name
-		return nil
-	})
-	return names, err
+	ext := filepath.Ext(base)
+	return base[:len(base)-len(ext)] + "_" + strconv.Itoa(n) + ext
 }
 
-func uniqueName(name string, n int) string {
-	ext := filepath.Ext(name)
-	return name[:len(name)-len(ext)] + "_" + strconv.Itoa(n) + ext
+// exportArchiveName is deterministic per record and stores no archive-sized state. Familiar basenames are retained
+// when unambiguous; reserved or adversarial collisions use the full canonical-chat/message-id hash.
+func (s *Server) exportArchiveName(ctx context.Context, x exportScope, r store.ExportRecord) (string, error) {
+	m := r.Media
+	if m == nil {
+		return "", nil
+	}
+	base := safeMediaName(m.Filename, r.Message.ID)
+	ordinal, _, err := s.d.Store.ExportMediaNameFacts(ctx, x.jid, m.Filename, base, r.Message.ID, m.MessageTimestamp)
+	if err != nil {
+		return "", err
+	}
+	candidate := ordinalName(base, ordinal)
+	_, collision, err := s.d.Store.ExportMediaNameFacts(ctx, x.jid, m.Filename, candidate, r.Message.ID, m.MessageTimestamp)
+	if err != nil {
+		return "", err
+	}
+	originalBase := filepath.Base(strings.ReplaceAll(m.Filename, "\\", "/"))
+	if collision || base != originalBase || candidate == "_chat.txt" || candidate == "missing-media.txt" {
+		candidate = archiveMediaName(x.jid, r.Message.ID, base)
+	}
+	return candidate, nil
+}
+
+type contextReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (r contextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.r.Read(p)
+}
+func copyContext(ctx context.Context, w io.Writer, r io.Reader) error {
+	_, err := io.CopyBuffer(w, contextReader{ctx, r}, make([]byte, 32<<10))
+	if err == nil {
+		err = ctx.Err()
+	}
+	return err
 }
 
 func (s *Server) streamZIP(ctx context.Context, w io.Writer, x exportScope) error {
-	names, err := s.zipMediaNames(ctx, x)
-	if err != nil {
-		return err
-	}
 	z := zip.NewWriter(w)
 	manifest, err := z.Create("missing-media.txt")
 	if err != nil {
@@ -60,14 +84,24 @@ func (s *Server) streamZIP(ctx context.Context, w io.Writer, x exportScope) erro
 		if m == nil {
 			return nil
 		}
-		path, ok := s.insideMediaDir(m.Path)
-		if ok && m.State == "done" {
-			if st, e := os.Stat(path); e == nil && st.Mode().IsRegular() {
-				return nil
-			}
+		name, e := s.exportArchiveName(ctx, x, r)
+		if e != nil {
+			return e
 		}
-		_, e := fmt.Fprintf(manifest, "%s\t%s\t%s\n", r.Message.ID, names[r.Message.ID], m.State)
-		return e
+		path, ok := s.insideMediaDir(m.Path)
+		state := m.State
+		if !ok || state != "done" {
+			if state == "done" {
+				state = "missing"
+			}
+			_, e = fmt.Fprintf(manifest, "%s\t%s\t%s\n", r.Message.ID, name, state)
+			return e
+		}
+		if st, e2 := os.Stat(path); e2 != nil || !st.Mode().IsRegular() {
+			_, e = fmt.Fprintf(manifest, "%s\t%s\tmissing\n", r.Message.ID, name)
+			return e
+		}
+		return nil
 	})
 	if err != nil {
 		return err
@@ -76,7 +110,7 @@ func (s *Server) streamZIP(ctx context.Context, w io.Writer, x exportScope) erro
 	if err != nil {
 		return err
 	}
-	if err = s.streamTextWithNames(ctx, tw, x, names); err != nil {
+	if err = s.streamText(ctx, tw, x); err != nil {
 		return err
 	}
 	err = s.eachExport(ctx, x, func(r store.ExportRecord) error {
@@ -92,9 +126,14 @@ func (s *Server) streamZIP(ctx context.Context, w io.Writer, x exportScope) erro
 		if e != nil {
 			return nil
 		}
-		zw, e := z.Create(names[r.Message.ID])
+		name, e := s.exportArchiveName(ctx, x, r)
+		if e != nil {
+			_ = f.Close()
+			return e
+		}
+		zw, e := z.Create(name)
 		if e == nil {
-			_, e = io.Copy(zw, f)
+			e = copyContext(ctx, zw, f)
 		}
 		closeErr := f.Close()
 		if e == nil {
