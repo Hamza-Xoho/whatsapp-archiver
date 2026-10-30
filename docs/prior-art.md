@@ -40,7 +40,8 @@ All rows refer to `v0.0.0-20261013142727-4cf8bc8e0aeb`.
 | Connection and account events | `events.ClientOutdated`, `TemporaryBan`, `LoggedOut`, `StreamReplaced`, `Connected`, `Disconnected` | `types/events/events.go` | pinned |
 | Media retry event | `events.MediaRetry` | `types/events/events.go` | pinned |
 | Group events | `events.GroupInfo`, `events.JoinedGroup` | `types/events/events.go` | pinned |
-| Community parent on join | `events.JoinedGroup.GroupInfo.GroupLinkedParent.LinkedParentJID types.JID` | `types/events/events.go`, `types/group.go` | pinned |
+| Community metadata on join | `events.JoinedGroup.GroupInfo.GroupParent.IsParent bool`, `GroupLinkedParent.LinkedParentJID types.JID` | `types/events/events.go`, `types/group.go` | pinned |
+| Community metadata in history | `waHistorySync.Conversation.GetIsParentGroup() bool`, `GetParentGroupID() string` | `proto/waHistorySync/WAWebProtobufsHistorySync.proto` | pinned |
 | App-state events | `events.Archive`, `events.Mute`, `events.Pin` | `types/events/appstate.go` | pinned |
 | Alternate message JIDs | `types.MessageInfo.MessageSource.SenderAlt`, `RecipientAlt`, and `AddressingMode` | `types/message.go`, `message.go` | pinned |
 | Manual history download | `Client.ManualHistorySyncDownload bool` (the notification then reaches handlers as `*events.Message` with `Message.GetProtocolMessage().GetHistorySyncNotification()`, only when `Info.IsFromMe`; `DisableManualHistorySyncReceipt` left false) | `client.go:109`, `message.go:888-906,1172-1178` | pinned |
