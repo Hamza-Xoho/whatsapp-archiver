@@ -1,6 +1,6 @@
 {{define "content"}}
   <h1>{{.Title}}</h1>
-  <p><a href="/chats/{{.JID}}">Back to the chat</a></p>
+  <p><a href="/chats/{{pathEscape .JID}}">Back to the chat</a></p>
   {{if .Trace.Gap}}
   <section class="panel">
     <p class="warn" role="alert">This message could not be decrypted. WhatsApp delivered it in a form this archiver could not read, so its content is missing (a gap). If the phone sends it again it is stored then.</p>
@@ -18,7 +18,7 @@
       <dt>Archived</dt><dd>{{$.Received}}</dd>
       <dt>Arrived as</dt><dd>{{.Source}}</dd>
       {{if .Forwarded}}<dt>Forwarded</dt><dd>yes</dd>{{end}}
-      {{if .QuotedID}}<dt>Reply to</dt><dd><a href="/chats/{{$.JID}}/m/{{pathEscape .QuotedID}}">{{.QuotedID}}</a></dd>{{end}}
+      {{if .QuotedID}}<dt>Reply to</dt><dd><a href="/chats/{{pathEscape $.JID}}/m/{{pathEscape .QuotedID}}">{{.QuotedID}}</a></dd>{{end}}
       {{if $.MediaKind}}<dt>Media</dt><dd>{{$.MediaKind}}</dd>{{end}}
       <dt>Original record</dt><dd>{{$.Raw}}</dd>
       <dt>Text</dt><dd class="text">{{if .Text}}{{.Text}}{{else}}{{.Caption}}{{end}}</dd>

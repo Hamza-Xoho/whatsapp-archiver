@@ -98,6 +98,15 @@ func (s *Store) ChatName(ctx context.Context, jid string) (string, error) {
 	return name, nil
 }
 
+// ChatKnown reports whether jid is the canonical identifier of a chat visible to the UI.
+func (s *Store) ChatKnown(ctx context.Context, jid string) (bool, error) {
+	var known bool
+	if err := s.read.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM chat_stats WHERE canonical=?1)`, jid).Scan(&known); err != nil {
+		return false, fmt.Errorf("known chat %s: %w", jid, err)
+	}
+	return known, nil
+}
+
 // senderNames maps each JID to its display name (nameOfJID) in one query; a JID without a name is absent.
 func (s *Store) senderNames(ctx context.Context, jids []string) (map[string]string, error) {
 	out := make(map[string]string, len(jids))

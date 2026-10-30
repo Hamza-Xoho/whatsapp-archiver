@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"html/template"
 	"io/fs"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -52,6 +53,8 @@ type Deps struct {
 	Notifier health.Notifier
 	// DiskFree reports the free bytes of the disk holding a path; nil: health.DiskFree.
 	DiskFree func(string) (uint64, error)
+	// Logger receives request timing and panic records. Nil uses slog.Default.
+	Logger *slog.Logger
 	// Listening is called with the address once Run has the listener, before it serves; nil: nothing.
 	Listening func(addr string)
 }
@@ -97,6 +100,9 @@ func New(d Deps) *Server {
 	if d.DiskFree == nil {
 		d.DiskFree = health.DiskFree
 	}
+	if d.Logger == nil {
+		d.Logger = slog.Default()
+	}
 	sub, err := fs.Sub(staticFiles, "static")
 	if err != nil {
 		panic(err) // the embed directive guarantees the directory
@@ -110,6 +116,7 @@ func New(d Deps) *Server {
 		tmpl: base,
 		pages: map[string]*template.Template{
 			"dashboard": pageTemplate(base, "dashboard"),
+			"logging":   pageTemplate(base, "logging"),
 			"chats":     pageTemplate(base, "chats"),
 			"viewer":    pageTemplate(base, "viewer"),
 			"trace":     pageTemplate(base, "trace"),
@@ -136,12 +143,15 @@ func pageTemplate(layout *template.Template, name string) *template.Template {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	s.routes(mux)
-	return guard(mux)
+	return guard(recoverRequests(s.d.Logger)(timeRequests(s.d.Logger)(mux)))
 }
 
 // routes registers the pages. Later tasks add theirs here.
 func (s *Server) routes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /{$}", s.dashboard)
+	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/chats", http.StatusSeeOther)
+	})
+	mux.HandleFunc("GET /logging", s.logging)
 	mux.HandleFunc("GET /partials/health", s.healthPartial)
 	mux.HandleFunc("GET /events", s.events)
 	mux.HandleFunc("GET /chats", s.chats)
@@ -163,7 +173,8 @@ func (s *Server) routes(mux *http.ServeMux) {
 
 // page is what the layout renders; a page's own data embeds it.
 type page struct {
-	Title string
+	Title, Current string
+	Live           bool
 }
 
 // render executes the template name of t into memory first, so a failure is a clean 500 and never half a page.

@@ -76,6 +76,7 @@ func (s *Server) storage(w http.ResponseWriter, r *http.Request) {
 	}
 	d := f.storageData
 	d.Title = "Storage"
+	d.Current = "Logging"
 	if min := s.diskFreeMinGB(r.Context()); min > 0 {
 		d.Warning = projectionWarning(f.free, f.weekly, min)
 	}

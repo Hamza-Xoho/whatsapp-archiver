@@ -1,13 +1,13 @@
 {{define "chat_row"}}<tr id="{{.RowID}}"{{if .OOB}} hx-swap-oob="true"{{end}}>
-  <td><input type="checkbox" name="jid[]" value="{{.CanonicalJID}}" form="bulk" aria-label="Select {{.DisplayName}}"></td>
-  <td><a href="/chats/{{.CanonicalJID}}">{{.DisplayName}}</a>{{if .New}} <span class="badge">New</span>{{end}}
+  <td data-label="Select"><input type="checkbox" name="jid[]" value="{{.CanonicalJID}}" form="bulk" aria-label="Select {{.DisplayName}}"></td>
+  <td data-label="Chat"><a href="/chats/{{pathEscape .CanonicalJID}}">{{.DisplayName}}</a>{{if .New}} <span class="badge">New</span>{{end}}
     {{if ne .DisplayName .CanonicalJID}}<br><span class="chat">{{.CanonicalJID}}</span>{{end}}
     {{if .HistoryBackTo}}<br><span class="muted">History back to {{.HistoryBackTo}}</span>{{end}}</td>
-  <td class="num">{{.MessageCount}}</td>
-  <td>{{.LastMessage}}</td>
-  <td>{{if .Logging}}<span class="ok">Logging</span>{{else}}<span class="bad">Not logging</span>{{end}}</td>
-  <td>{{if .HasMediaRule}}Own media rules{{else}}Default media{{end}}</td>
-  <td class="actions">
+  <td class="num" data-label="Messages">{{.MessageCount}}</td>
+  <td data-label="Last message">{{.LastMessage}}</td>
+  <td data-label="Status">{{if .Logging}}<span class="ok">Logging</span>{{else}}<span class="bad">Not logging</span>{{end}}</td>
+  <td data-label="Media">{{if .HasMediaRule}}Own media rules{{else}}Default media{{end}}</td>
+  <td class="actions" data-label="Actions">
     {{if .Logging}}<form method="post" action="/chats/rules" hx-post="/chats/rules" hx-swap="none" hx-confirm="Stop logging this chat? Messages that arrive while logging is off are not saved." onsubmit="if(!window.htmx&&!confirm('Stop logging this chat? Messages that arrive while logging is off are not saved.')){return false}">{{else}}<form method="post" action="/chats/rules" hx-post="/chats/rules" hx-swap="none">{{end}}
       <input type="hidden" name="jid[]" value="{{.CanonicalJID}}">
       {{if .Logging}}<input type="hidden" name="logging" value="off"><button>Stop logging</button>

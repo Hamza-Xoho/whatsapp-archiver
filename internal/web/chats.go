@@ -41,7 +41,7 @@ func (s *Server) chats(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "the archive could not be read", http.StatusInternalServerError)
 		return
 	}
-	s.render(w, s.pages["chats"], "layout", chatsData{page: page{Title: "Chats"}, Query: q, Rows: rows, MediaTypes: mediaTypes})
+	s.render(w, s.pages["chats"], "layout", chatsData{page: page{Title: "Chats", Current: "Chats"}, Query: q, Rows: rows, MediaTypes: mediaTypes})
 }
 
 // chatRows is the list filtered by q; with only set, just those chats. oob marks the rows for an out-of-band swap.
