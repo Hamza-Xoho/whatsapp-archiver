@@ -85,6 +85,8 @@ func (c *Client) Download(ctx context.Context, raw []byte, directPathOverride st
 	if downloadable == nil {
 		return nil, fmt.Errorf("message has no downloadable media")
 	}
+	c.clientMu.RLock()
+	defer c.clientMu.RUnlock()
 	data, err := c.client.Download(ctx, downloadable)
 	return data, classifyDownloadErr(err)
 }

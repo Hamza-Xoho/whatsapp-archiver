@@ -11,6 +11,8 @@ import (
 // the SHA-256 hashes of the options the vote selected; ingest names them from the archived poll.
 func (c *Client) VoteDecryptor() func(context.Context, *events.Message) ([][]byte, error) {
 	return func(ctx context.Context, vote *events.Message) ([][]byte, error) {
+		c.clientMu.RLock()
+		defer c.clientMu.RUnlock()
 		decrypted, err := c.client.DecryptPollVote(ctx, vote)
 		if err != nil {
 			return nil, err

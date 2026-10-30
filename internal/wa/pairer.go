@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"go.mau.fi/whatsmeow"
 )
@@ -25,25 +27,32 @@ const pairUpdates = 16
 // errPairingStopped is StartPairing's answer once Run has returned.
 var errPairingStopped = errors.New("pairing is not available: the archiver is stopping")
 
-// errLoggedOut is StartPairing's answer after WhatsApp logged a paired device out.
-var errLoggedOut = errors.New("WhatsApp logged this archiver out. Restart it (sudo systemctl restart archiver) to pair again.") //nolint:staticcheck // shown to the user as a sentence
+type pairRequest struct {
+	reset bool
+	out   chan PairUpdate
+}
 
 // Pairer runs `archiver run`'s connection: capture at once when the device is paired, otherwise nothing until
 // StartPairing, then pairing in the same run, carrying on as capture after PairSuccess. Only one pairing runs at a
 // time; a failed one can be started again.
 type Pairer struct {
 	c         *Client
-	start     chan struct{} // StartPairing's request to Run; buffered, at most one pending
+	start     chan pairRequest // pairing requests, including reset-and-pair
+	cancel    chan chan PairUpdate
 	ready     chan struct{} // closed once paired: capture may start
 	readyOnce sync.Once
 	mu        sync.Mutex
 	cur       chan PairUpdate // the running pairing's updates; nil when none runs
 	stopped   bool            // Run has returned
+	pairedAt  atomic.Int64    // unix seconds; when this process observed the current pairing
 }
 
 // NewPairer wraps c. Run must be called for pairing to start.
 func NewPairer(c *Client) *Pairer {
-	return &Pairer{c: c, start: make(chan struct{}, 1), ready: make(chan struct{})}
+	if c.resetDevice == nil {
+		c.resetDevice = c.resetForPairing
+	}
+	return &Pairer{c: c, start: make(chan pairRequest, 1), cancel: make(chan chan PairUpdate, 1), ready: make(chan struct{})}
 }
 
 // Paired reports whether the device holds a login.
@@ -52,68 +61,135 @@ func (p *Pairer) Paired() bool { return p.c.Paired() }
 // Ready is closed once the device is paired: at Run's start when it already was, else at PairSuccess.
 func (p *Pairer) Ready() <-chan struct{} { return p.ready }
 
+func (p *Pairer) PairingStarted() time.Time {
+	if at := p.pairedAt.Load(); at > 0 {
+		return time.Unix(at, 0)
+	}
+	return time.Time{}
+}
+
 // StartPairing asks Run to pair and returns the pairing's updates: each QR code, then Done or Err, then the channel
 // is closed. While a pairing runs, a second call returns the same channel and starts nothing.
 func (p *Pairer) StartPairing(context.Context) (<-chan PairUpdate, error) {
+	return p.startPairing(false)
+}
+
+// RePair stops capture, resets only the whatsmeow device store and begins a fresh QR flow.
+func (p *Pairer) RePair(context.Context) (<-chan PairUpdate, error) {
+	return p.startPairing(true)
+}
+
+func (p *Pairer) startPairing(voluntary bool) (<-chan PairUpdate, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	switch {
 	case p.stopped:
 		return nil, errPairingStopped
-	case p.c.Paired():
+	case voluntary && !p.c.Paired():
+		return nil, errors.New("not paired")
+	case !voluntary && p.c.Paired():
 		return nil, errors.New("already paired")
-	case p.isReady() && !p.c.Paired():
-		// Run is inside the capture loop, which nothing reads StartPairing's request from, so a pairing would never
-		// start: say so now instead of leaving the page waiting for a QR code.
-		return nil, errLoggedOut
 	case p.cur != nil:
 		return p.cur, nil
 	}
 	p.cur = make(chan PairUpdate, pairUpdates)
-	select {
-	case p.start <- struct{}{}:
-	default: // a request is already pending
-	}
+	p.start <- pairRequest{reset: voluntary || p.isReady(), out: p.cur}
 	return p.cur, nil
+}
+
+// CancelPairing cancels an active QR attempt without stopping the archiver process.
+func (p *Pairer) CancelPairing() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.stopped {
+		return errPairingStopped
+	}
+	if p.cur == nil {
+		return errors.New("pairing is not running")
+	}
+	select {
+	case p.cancel <- p.cur:
+	default:
+	}
+	return nil
 }
 
 // Run captures until ctx ends. Unpaired, it connects to nothing until StartPairing, then pairs; a failed pairing
 // disconnects and waits for the next StartPairing. It returns nil once ctx ends.
 func (p *Pairer) Run(ctx context.Context, h func(any) bool) error {
 	defer p.stop()
+	type attemptResult struct {
+		pairing bool
+		out     chan PairUpdate
+		err     error
+	}
+	results := make(chan attemptResult, 1)
+	var attemptCancel context.CancelFunc
+	active := false
+	launch := func(pairing bool) {
+		actx, cancel := context.WithCancel(ctx)
+		out := p.current()
+		attemptCancel, active = cancel, true
+		go func() {
+			err := p.c.run(actx, h, pairing, func(ctx context.Context, qr <-chan whatsmeow.QRChannelItem) {
+				p.forward(ctx, cancel, qr, out)
+			})
+			results <- attemptResult{pairing: pairing, out: out, err: err}
+		}()
+	}
 	if p.c.Paired() {
 		p.markReady()
-		return p.c.Run(ctx, h, false)
+		p.pairedAt.CompareAndSwap(0, time.Now().Unix())
+		launch(false)
 	}
 	for {
 		select {
 		case <-ctx.Done():
+			if active {
+				attemptCancel()
+				<-results
+			}
 			return nil
-		case <-p.start:
-		}
-		p.mu.Lock()
-		out := p.cur
-		p.mu.Unlock()
-		if out == nil {
-			continue
-		}
-		actx, cancel := context.WithCancel(ctx)
-		err := p.c.run(actx, h, true, func(ctx context.Context, qr <-chan whatsmeow.QRChannelItem) {
-			p.forward(ctx, cancel, qr, out)
-		})
-		cancel()
-		if ctx.Err() != nil {
-			return nil
-		}
-		if p.isReady() {
-			return err // capture ended by itself after pairing
-		}
-		if err != nil {
-			p.end(out, &PairUpdate{Err: fmt.Sprintf("Pairing failed: %v", err)})
-		} else {
-			p.end(out, nil)
+		case req := <-p.start:
+			if active {
+				attemptCancel()
+				<-results
+				active = false
+			}
+			if req.reset {
+				if err := p.c.resetDevice(ctx); err != nil {
+					p.end(req.out, &PairUpdate{Err: "Pairing could not reset the WhatsApp session."})
+					continue
+				}
+			}
+			launch(true)
+		case out := <-p.cancel:
+			if p.current() != out {
+				continue
+			}
+			if active {
+				attemptCancel()
+				<-results
+				active = false
+			}
+			p.end(out, &PairUpdate{Err: "Pairing cancelled."})
+		case result := <-results:
+			active = false
+			if result.pairing && !p.c.Paired() {
+				if result.err != nil {
+					p.end(result.out, &PairUpdate{Err: fmt.Sprintf("Pairing failed: %v", result.err)})
+				} else {
+					p.end(result.out, nil)
+				}
+			}
 		}
 	}
+}
+
+func (p *Pairer) current() chan PairUpdate {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.cur
 }
 
 // forward turns the QR channel into updates: a code becomes QR, success becomes Done and marks the Pairer ready, an
@@ -136,6 +212,7 @@ func (p *Pairer) forward(ctx context.Context, cancel context.CancelFunc, qr <-ch
 				p.send(out, PairUpdate{QR: item.Code})
 			case whatsmeow.QRChannelSuccess.Event:
 				p.c.setPaired(true) // the QR channel hears PairSuccess before run's handler does
+				p.pairedAt.Store(time.Now().Unix())
 				p.markReady()
 				p.end(out, &PairUpdate{Done: true})
 			default:
@@ -164,6 +241,9 @@ func (p *Pairer) send(out chan PairUpdate, u PairUpdate) {
 
 // end sends the last update (nil for none) and closes out, once; a later StartPairing starts a new pairing.
 func (p *Pairer) end(out chan PairUpdate, last *PairUpdate) {
+	if out == nil {
+		return
+	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.cur != out {

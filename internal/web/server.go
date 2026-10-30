@@ -66,6 +66,11 @@ type Pairer interface {
 	StartPairing(ctx context.Context) (<-chan PairUpdate, error)
 }
 
+type resetPairer interface {
+	RePair(context.Context) (<-chan PairUpdate, error)
+	CancelPairing() error
+}
+
 // PairUpdate is one step of pairing: a QR code to show, the end of pairing, or why it failed.
 type PairUpdate struct {
 	QR   string
@@ -167,6 +172,8 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /backups/test-alert", s.testAlert)
 	mux.HandleFunc("GET /pair", s.pairPage)
 	mux.HandleFunc("POST /pair/start", s.pairStart)
+	mux.HandleFunc("POST /pair/restart", s.pairRestart)
+	mux.HandleFunc("POST /pair/cancel", s.pairCancel)
 	mux.HandleFunc("GET /pair/qr.png", s.pairQR)
 	mux.Handle("GET /static/", s.static)
 }
