@@ -187,7 +187,9 @@ func wantPage(t *testing.T, h http.Handler, want string) string {
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
 		w := httptest.NewRecorder()
-		h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/pair", nil))
+		req := httptest.NewRequest(http.MethodGet, "/pair", nil)
+		req.Host = "localhost:8090"
+		h.ServeHTTP(w, req)
 		body, _ := io.ReadAll(w.Result().Body)
 		if strings.Contains(string(body), want) {
 			return string(body)
