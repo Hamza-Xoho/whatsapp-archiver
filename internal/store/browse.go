@@ -144,14 +144,29 @@ const chatPageQuery = `WITH m AS (
 )
 SELECT m.id,m.sender_jid,m.body,m.media_type,m.ts,m.quoted_id
 FROM m
-WHERE m.rk=1 AND (?2<=0 OR m.ts<?2 OR (m.ts=?2 AND m.id<?4))
+WHERE m.rk=1 AND (?5=0 OR m.ts<?2 OR (m.ts=?2 AND (m.id<?4 OR (?6=1 AND m.id=?4))))
 ORDER BY m.ts DESC,m.id DESC LIMIT ?3`
 
 // ChatPage is one page of the viewer: at most limit messages of the chat after the cursor (beforeTS, beforeID) in
 // newest-first order (all when beforeTS is 0), newest first, with their edits, deletion, reactions and media state.
 func (s *Store) ChatPage(ctx context.Context, canonicalJID string, beforeTS int64, beforeID string, limit int) ([]ViewMessage, error) {
+	return s.chatPage(ctx, canonicalJID, beforeTS, beforeID, beforeTS > 0, false, limit)
+}
+
+// ChatPageAt starts with the named message and continues toward older messages. It is the indexed viewer landing
+// path for global-search results; sql.ErrNoRows means the target is not a message in this canonical chat.
+func (s *Store) ChatPageAt(ctx context.Context, canonicalJID, id string, limit int) ([]ViewMessage, error) {
+	var ts int64
+	err := s.read.QueryRowContext(ctx, `SELECT ts FROM messages WHERE id=?2 AND chat_jid IN (`+chatForms+`) ORDER BY received_at,chat_jid LIMIT 1`, canonicalJID, id).Scan(&ts)
+	if err != nil {
+		return nil, err
+	}
+	return s.chatPage(ctx, canonicalJID, ts, id, true, true, limit)
+}
+
+func (s *Store) chatPage(ctx context.Context, canonicalJID string, beforeTS int64, beforeID string, hasCursor, inclusive bool, limit int) ([]ViewMessage, error) {
 	var page []ViewMessage
-	err := s.scanRows(ctx, chatPageQuery, []any{canonicalJID, beforeTS, limit, beforeID}, func(rows *sql.Rows) error {
+	err := s.scanRows(ctx, chatPageQuery, []any{canonicalJID, beforeTS, limit, beforeID, hasCursor, inclusive}, func(rows *sql.Rows) error {
 		var m ViewMessage
 		if err := rows.Scan(&m.ID, &m.Sender, &m.Text, &m.MediaType, &m.TS, &m.QuotedID); err != nil {
 			return err

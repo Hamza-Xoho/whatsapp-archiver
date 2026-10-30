@@ -182,7 +182,7 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	hits, err := s.d.Store.Search(r.Context(), store.SearchParams{Query: data.Query, ChatJID: data.Chat, SenderJID: data.Sender,
 		From: from, To: to, MediaType: data.Media, BeforeTS: before, BeforeChat: q.Get("before_chat"), BeforeID: q.Get("before_id"), Limit: limit})
 	if err != nil {
-		http.Error(w, "search is unavailable right now", http.StatusInternalServerError)
+		http.Error(w, "Search is unavailable right now. Try again.", http.StatusInternalServerError)
 		return
 	}
 	groupAt := map[string]int{}

@@ -24,6 +24,7 @@
 
 {{define "content"}}
   <h1>{{.Title}}</h1>
+  <p><a href="/search">Search messages</a></p>
   <form class="panel search" method="get" action="/chats">
     <label>Find a chat <input type="search" name="q" value="{{.Query}}" placeholder="Name or number"></label>
     <button>Find</button>

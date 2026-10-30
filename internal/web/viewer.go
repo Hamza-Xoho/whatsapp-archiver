@@ -24,6 +24,7 @@ type viewMsg struct {
 type viewerData struct {
 	page
 	JID, Name   string
+	FocusID     string
 	Messages    []viewMsg // oldest first, as a chat reads
 	HasOlder    bool
 	OlderBefore int64
@@ -35,6 +36,7 @@ type viewerData struct {
 // before, with an "Older" link when more remain.
 func (s *Server) viewer(w http.ResponseWriter, r *http.Request) {
 	jid := r.PathValue("jid")
+	focusID := r.URL.Query().Get("at")
 	var before int64
 	if v := r.URL.Query().Get("before"); v != "" {
 		n, err := strconv.ParseInt(v, 10, 64)
@@ -64,7 +66,16 @@ func (s *Server) viewer(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "the page could not be rendered", http.StatusInternalServerError)
 		return
 	}
-	msgs, err := s.d.Store.ChatPage(ctx, jid, before, beforeID, viewerPageSize+1)
+	var msgs []store.ViewMessage
+	if focusID != "" {
+		msgs, err = s.d.Store.ChatPageAt(ctx, jid, focusID, viewerPageSize+1)
+	} else {
+		msgs, err = s.d.Store.ChatPage(ctx, jid, before, beforeID, viewerPageSize+1)
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		http.NotFound(w, r)
+		return
+	}
 	if err != nil {
 		http.Error(w, "the archive could not be read", http.StatusInternalServerError)
 		return
@@ -77,7 +88,7 @@ func (s *Server) viewer(w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		name = jid
 	}
-	data := viewerData{page: page{Title: name, Current: "Chats", Live: before == 0}, JID: jid, Name: name, Before: before}
+	data := viewerData{page: page{Title: name, Current: "Chats", Live: before == 0 && focusID == ""}, JID: jid, Name: name, FocusID: focusID, Before: before}
 	if len(msgs) > viewerPageSize {
 		msgs = msgs[:viewerPageSize]
 		data.HasOlder, data.OlderBefore, data.OlderID = true, msgs[viewerPageSize-1].TS, msgs[viewerPageSize-1].ID
