@@ -43,4 +43,3 @@ func TestDashboardOpenGapsHasAnExplicitEmptyState(t *testing.T) {
 		t.Fatalf("dashboard lacks empty gap copy: %s", got)
 	}
 }
-

@@ -48,4 +48,3 @@ func TestOpenGapSummaryGroupsCauseAndPostOutageAfterApplyingR11(t *testing.T) {
 		t.Errorf("second summary = %+v", got[1])
 	}
 }
-
