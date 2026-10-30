@@ -5,25 +5,20 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
-
-const reviewLoggingGapsQuery = `SELECT c.canonical,e.chat_jid,e.target_id,e.cause,e.received_at,
- EXISTS (SELECT 1 FROM connection_periods p WHERE p.ended_at IS NOT NULL AND e.received_at BETWEEN p.ended_at AND p.ended_at+120)
- FROM message_events e INDEXED BY message_events_gaps JOIN chat_canonical c ON c.alias=e.chat_jid
- WHERE e.kind='undecryptable'
- AND NOT EXISTS (SELECT 1 FROM chat_canonical ga JOIN messages gm ON gm.chat_jid=ga.alias WHERE ga.canonical=c.canonical AND gm.id=e.target_id)
- AND NOT EXISTS (SELECT 1 FROM chat_canonical ga JOIN message_events gs ON gs.chat_jid=ga.alias WHERE ga.canonical=c.canonical AND gs.source_id=e.target_id AND gs.source_id<>'' AND gs.kind<>'undecryptable')
- ORDER BY e.received_at DESC,e.seq DESC LIMIT ?`
 
 func TestLoggingReadModelsAllHonorCancellation(t *testing.T) {
 	s := openInternal(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	reads := map[string]func() error{
-		"gaps":    func() error { _, err := s.LoggingGaps(ctx, 10); return err },
-		"media":   func() error { _, err := s.LoggingMedia(ctx, 10); return err },
-		"history": func() error { _, err := s.LoggingHistory(ctx, 10); return err },
-		"alerts":  func() error { _, err := s.LoggingAlerts(ctx, 10); return err },
+		"gaps":           func() error { _, err := s.LoggingGaps(ctx, 10); return err },
+		"gap groups":     func() error { _, err := s.LoggingGapGroups(ctx); return err },
+		"media":          func() error { _, err := s.LoggingMedia(ctx, 10); return err },
+		"history":        func() error { _, err := s.LoggingHistory(ctx, 10); return err },
+		"alerts":         func() error { _, err := s.LoggingAlerts(ctx, 10); return err },
+		"outage summary": func() error { _, err := s.OutageSummary(ctx, time.Now(), time.UTC, 7); return err },
 	}
 	for name, read := range reads {
 		if err := read(); err == nil {
@@ -34,13 +29,22 @@ func TestLoggingReadModelsAllHonorCancellation(t *testing.T) {
 
 func TestLoggingGapAndMediaPlansReuseExistingIndexesWithoutSchemaGrowth(t *testing.T) {
 	s := openInternal(t)
-	gapPlan := planOf(t, s, reviewLoggingGapsQuery, 200)
+	gapPlan := planOf(t, s, loggingGapGroupsQuery)
 	if !strings.Contains(gapPlan, "message_events_gaps") || strings.Contains(gapPlan, "TEMP B-TREE") {
 		t.Errorf("gap plan is unbounded or sorts:\n%s", gapPlan)
 	}
-	mediaPlan := planOf(t, s, `SELECT state,error_class,reason FROM media INDEXED BY media_pick ORDER BY state,source_rank,message_ts DESC`)
-	if !strings.Contains(mediaPlan, "COVERING INDEX media_pick") || strings.Contains(mediaPlan, "TEMP B-TREE") {
-		t.Errorf("media aggregation does not stay on the existing covering scheduler index:\n%s", mediaPlan)
+	if strings.Contains(gapPlan, "SCAN p") || strings.Contains(gapPlan, "connection_periods") {
+		t.Errorf("gap aggregation has a correlated outage scan:\n%s", gapPlan)
+	}
+	outagePlan := planOf(t, s, loggingOutageRangeQuery, int64(0))
+	if strings.Contains(outagePlan, "TEMP B-TREE") {
+		t.Errorf("outage range read sorts:\n%s", outagePlan)
+	}
+	for name, query := range map[string]string{"counts": loggingMediaCountsQuery, "reasons": loggingMediaReasonsQuery} {
+		mediaPlan := planOf(t, s, query)
+		if !strings.Contains(mediaPlan, "COVERING INDEX media_pick") || strings.Contains(mediaPlan, "SCAN media") {
+			t.Errorf("media %s aggregation streams the base table instead of the covering index:\n%s", name, mediaPlan)
+		}
 	}
 	for name, q := range map[string]struct {
 		query string
@@ -76,7 +80,7 @@ func TestLoggingDenseGapAndMediaResultsStayBounded(t *testing.T) {
 		t.Fatalf("dense gaps = %d, %v", len(gaps), err)
 	}
 	media, err := s.LoggingMedia(t.Context(), 50)
-	if err != nil || len(media.Reasons) != 50 || media.States[0].Count != 600 {
+	if err != nil || len(media.Reasons) != 1 || media.Reasons[0].Reason != "Download failed" || media.Reasons[0].Count != 600 || media.States[0].Count != 600 {
 		t.Fatalf("dense media = %+v, %v", media, err)
 	}
 }

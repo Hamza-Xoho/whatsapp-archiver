@@ -73,7 +73,7 @@ func TestLoggingMediaGroupsStateClassAndSafeReason(t *testing.T) {
 	if countNamed(got.States, "failed") != 2 || countNamed(got.States, "pending") != 1 || countNamed(got.ErrorClasses, "network") != 2 {
 		t.Fatalf("LoggingMedia = %+v", got)
 	}
-	if len(got.Reasons) != 1 || got.Reasons[0].Reason != "dns unavailable" || got.Reasons[0].Count != 2 {
+	if len(got.Reasons) != 1 || got.Reasons[0].Reason != "DNS lookup failed" || got.Reasons[0].Count != 2 {
 		t.Fatalf("reason groups = %+v", got.Reasons)
 	}
 }

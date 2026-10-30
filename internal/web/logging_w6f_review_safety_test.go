@@ -28,6 +28,24 @@ func TestLoggingOverviewRedactsUntrustedHealthDetail(t *testing.T) {
 	}
 }
 
+func TestLoggingOverviewUsesControlledVersionReason(t *testing.T) {
+	d := newDash(t)
+	d.snap.VersionReason = "lookup failed at https://user:pass@secret.invalid/private?token=VERSION_SECRET /home/private/version"
+	body, code, _ := get(t, d.handler(), "/logging")
+	if code != http.StatusOK {
+		t.Fatalf("status %d: %s", code, body)
+	}
+	page := string(body)
+	for _, secret := range []string{"VERSION_SECRET", "secret.invalid", "user:pass", "/home/private/version"} {
+		if strings.Contains(page, secret) {
+			t.Fatalf("version reason leaks %q: %s", secret, page)
+		}
+	}
+	if !strings.Contains(visibleText(page), d.snap.Version+" (lookup failed)") {
+		t.Fatalf("overview lacks controlled version reason: %s", page)
+	}
+}
+
 func TestLoggingMediaReasonsAreSafeDisplayCategories(t *testing.T) {
 	d := newDash(t)
 	reason := "dns failed at https://secret.invalid/private?token=MEDIA_SECRET_92 path=/home/shakeel/media.key"
