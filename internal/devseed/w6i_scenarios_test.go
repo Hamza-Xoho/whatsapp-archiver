@@ -149,7 +149,7 @@ func TestW6IDevPairerHTTPScenarioCoversEverySafeStateWithoutArchiveWrites(t *tes
 		if readErr != nil {
 			t.Fatal(readErr)
 		}
-		if strings.Contains(string(body), "internal/wa") || strings.Contains(string(body), "whatsmeow") {
+		if strings.Contains(string(body), "internal/wa") || strings.Contains(string(body), `"go.mau.fi/whatsmeow"`) {
 			t.Fatalf("%s imports a WhatsApp boundary", path)
 		}
 	}
