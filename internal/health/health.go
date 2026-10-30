@@ -70,7 +70,7 @@ type Monitor struct {
 	outbox       AlertStore
 	wakeAlert    chan struct{}
 	heartbeat    *http.Client
-	heartbeatURL func() string
+	heartbeatURL func(context.Context) string
 }
 type alert struct{ title, body string }
 
@@ -164,6 +164,13 @@ func (m *Monitor) WithHeartbeatClient(client *http.Client) *Monitor {
 // WithHeartbeatURL makes each heartbeat read the current write-only setting.
 // It does not mutate the shared config and must be called before Run.
 func (m *Monitor) WithHeartbeatURL(url func() string) *Monitor {
+	m.heartbeatURL = func(context.Context) string { return url() }
+	return m
+}
+
+// WithHeartbeatURLContext makes the provider's archive read share Run's
+// cancellation and ownership. It must be called before Run.
+func (m *Monitor) WithHeartbeatURLContext(url func(context.Context) string) *Monitor {
 	m.heartbeatURL = url
 	return m
 }

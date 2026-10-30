@@ -178,7 +178,7 @@ func (s *Server) healthView(ctx context.Context, loc *time.Location) healthView 
 	if s.d.Health != nil {
 		snap = s.d.Health()
 	}
-	v := healthView{Detail: snap.Detail, Version: "-", Panics: snap.Panics,
+	v := healthView{Detail: safeHealthDetail(snap.State, snap.Detail), Version: "-", Panics: snap.Panics,
 		LastEvent: view.FormatTime(loc, snap.LastEvent), PhoneLastActive: view.FormatTime(loc, snap.PhoneLastActive)}
 	v.State, v.StateClass = stateWords(snap.State)
 	if snap.Version != "" {
@@ -205,6 +205,46 @@ func (s *Server) healthView(ctx context.Context, loc *time.Location) healthView 
 		}
 	}
 	return v
+}
+
+// safeHealthDetail reduces transport-owned error text to controlled copy. A
+// monitor detail can contain a URL, filesystem path or server response and is
+// never suitable for direct HTML rendering.
+func safeHealthDetail(state, detail string) string {
+	detail = strings.ToLower(strings.TrimSpace(detail))
+	if detail == "" {
+		return ""
+	}
+	if detail == "stream error" { // stable legacy monitor category
+		return detail
+	}
+	cause := ""
+	for _, item := range []struct{ needle, label string }{
+		{"dns", "DNS"}, {"tls", "TLS"}, {"websocket", "WebSocket"}, {"class=ws", "WebSocket"},
+		{"tcp", "network"}, {"keepalive", "keepalive"},
+	} {
+		if strings.Contains(detail, item.needle) {
+			cause = item.label
+			break
+		}
+	}
+	switch state {
+	case "disconnected", "reconnecting", "degraded":
+		if cause != "" {
+			return "Connection interrupted (" + cause + ")"
+		}
+		return "Connection interrupted"
+	case "logged_out":
+		return "WhatsApp logged out"
+	case "client_outdated":
+		return "WhatsApp client update required"
+	case "temp_banned":
+		return "WhatsApp temporarily paused capture"
+	case "stream_replaced":
+		return "WhatsApp session replaced"
+	default:
+		return ""
+	}
 }
 
 // phoneQuietAfter is the live alert threshold (the alerts.thresholds setting, read at each use), falling back to

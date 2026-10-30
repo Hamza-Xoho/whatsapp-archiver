@@ -143,7 +143,7 @@ func (s *Server) loggingSectionData(r *http.Request, section string) (loggingSec
 		}
 		data.MediaStates = labelledCounts(media.States)
 		data.MediaClasses = labelledCounts(media.ErrorClasses)
-		data.MediaReasons = media.Reasons
+		data.MediaReasons = safeMediaReasons(media.Reasons)
 		timeliness, readErr := s.d.Store.MediaTimeliness(r.Context(), now)
 		if readErr != nil {
 			return data, readErr
@@ -200,6 +200,43 @@ func (s *Server) loggingSectionData(r *http.Request, section string) (loggingSec
 		data.Settings = settings
 	}
 	return data, nil
+}
+
+func safeMediaReasons(rows []store.LoggingMediaReason) []store.LoggingMediaReason {
+	positions := make(map[string]int)
+	var safe []store.LoggingMediaReason
+	for _, row := range rows {
+		name := safeMediaReason(row.Reason)
+		if at, ok := positions[name]; ok {
+			safe[at].Count += row.Count
+			continue
+		}
+		positions[name] = len(safe)
+		safe = append(safe, store.LoggingMediaReason{Reason: name, Count: row.Count})
+	}
+	return safe
+}
+
+func safeMediaReason(reason string) string {
+	lower := strings.ToLower(reason)
+	switch {
+	case strings.Contains(lower, "dns"):
+		return "DNS lookup failed"
+	case strings.Contains(lower, "timeout"), strings.Contains(lower, "deadline"):
+		return "Request timed out"
+	case strings.Contains(lower, "403"), strings.Contains(lower, "expired"):
+		return "Media expired"
+	case strings.Contains(lower, "404"), strings.Contains(lower, "410"), strings.Contains(lower, "gone"):
+		return "Media unavailable"
+	case strings.Contains(lower, "key"):
+		return "Media key unavailable"
+	case strings.Contains(lower, "re-upload"), strings.Contains(lower, "reupload"):
+		return "Re-upload unavailable"
+	case strings.Contains(lower, "network"), strings.Contains(lower, "connection"):
+		return "Network request failed"
+	default:
+		return "Download failed"
+	}
 }
 
 func (s *Server) feedPartial(w http.ResponseWriter, r *http.Request) {

@@ -33,7 +33,7 @@ func (m *Monitor) runAlertOutbox(ctx context.Context) {
 func (m *Monitor) pingHeartbeat(ctx context.Context) error {
 	url := m.cfg.Alerts.HeartbeatURL
 	if m.heartbeatURL != nil {
-		url = m.heartbeatURL()
+		url = m.heartbeatURL(ctx)
 	}
 	if url == "" || m.heartbeat == nil {
 		return nil

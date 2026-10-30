@@ -83,21 +83,29 @@ func (l liveSettings) backup() config.BackupConfig {
 // heartbeatURL is read for each ping. Once config has been imported, absence
 // means that the dashboard explicitly removed the URL; older archives fall
 // back to config.yaml until their first import.
-func (l liveSettings) heartbeatURL() string {
-	value, ok, err := l.st.HeartbeatURL(context.Background())
+func (l liveSettings) heartbeatURLContext(ctx context.Context) string {
+	value, ok, err := l.st.HeartbeatURL(ctx)
 	if err != nil {
-		l.log.Warn("heartbeat setting not read, using config.yaml", "err", err)
-		return l.cfg.Alerts.HeartbeatURL
+		l.log.Warn("heartbeat setting not read; heartbeat disabled", "err", err)
+		return ""
 	}
 	if ok {
 		return value
 	}
-	imported, err := l.st.ConfigImported(context.Background())
+	imported, err := l.st.ConfigImported(ctx)
 	if err == nil && imported {
+		return ""
+	}
+	if err != nil {
+		l.log.Warn("config import marker not read; heartbeat disabled", "err", err)
 		return ""
 	}
 	return l.cfg.Alerts.HeartbeatURL
 }
+
+// heartbeatURL preserves the pre-W6(f) helper contract for callers that do
+// not own a run context. Production heartbeat pings use heartbeatURLContext.
+func (l liveSettings) heartbeatURL() string { return l.heartbeatURLContext(context.Background()) }
 
 // warnIgnoredExclusions logs one warning per config.yaml exclude entry that the archive's rules (through aliases, as
 // capture applies them) do not exclude: after the import the dashboard owns the chat rules, so such an entry does
