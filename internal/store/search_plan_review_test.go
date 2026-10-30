@@ -34,7 +34,7 @@ ORDER BY m.ts DESC,m.seq DESC LIMIT 50`)
 	if !strings.Contains(got, "messages_global_ts") || strings.Contains(got, "USE TEMP B-TREE FOR ORDER BY") {
 		t.Fatalf("search plan must scan the global time index without a sort:\n%s", got)
 	}
-	if !strings.Contains(got, "SCAN f VIRTUAL TABLE INDEX") {
+	if !strings.Contains(got, "VIRTUAL TABLE INDEX 0:=M1") {
 		t.Fatalf("search plan must probe the FTS table by rowid and MATCH:\n%s", got)
 	}
 }
