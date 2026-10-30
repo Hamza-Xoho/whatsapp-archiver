@@ -47,7 +47,7 @@ CREATE TABLE messages (
   UNIQUE (chat_jid, id));
 CREATE INDEX messages_chat_ts   ON messages(chat_jid, ts, id);
 CREATE INDEX messages_chat_kind ON messages(chat_jid, kind, ts);
-CREATE INDEX messages_received  ON messages(received_at);
+CREATE INDEX messages_global_ts ON messages(ts DESC, seq DESC, received_at);
 CREATE INDEX messages_unknown   ON messages(seq) WHERE kind = 'unknown';
 
 CREATE TABLE message_events (

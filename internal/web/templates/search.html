@@ -33,7 +33,7 @@
               {{if .Deleted}}<span class="badge bad">Deleted</span>{{end}}
               {{if .Edited}}<span class="badge">Edited</span>{{end}}
             </p>
-            <p class="search-context" dir="auto">{{.Text}}</p>
+            <p class="search-context" dir="auto">{{range .Segments}}{{if .Match}}<mark>{{.Text}}</mark>{{else}}{{.Text}}{{end}}{{end}}</p>
             <a href="/chats/{{pathEscape .CanonicalJID}}/m/{{pathEscape .ID}}">Open message</a>
           </li>
         {{end}}
