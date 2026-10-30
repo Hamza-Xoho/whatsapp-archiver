@@ -50,6 +50,15 @@ func (s *Server) viewer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
+	known, err := s.d.Store.ChatKnown(ctx, jid)
+	if err != nil {
+		http.Error(w, "the archive could not be read", http.StatusInternalServerError)
+		return
+	}
+	if !known {
+		http.NotFound(w, r)
+		return
+	}
 	loc, err := view.Location(s.config())
 	if err != nil {
 		http.Error(w, "the page could not be rendered", http.StatusInternalServerError)
@@ -68,7 +77,7 @@ func (s *Server) viewer(w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		name = jid
 	}
-	data := viewerData{page: page{Title: name}, JID: jid, Name: name, Before: before}
+	data := viewerData{page: page{Title: name, Current: "Chats", Live: before == 0}, JID: jid, Name: name, Before: before}
 	if len(msgs) > viewerPageSize {
 		msgs = msgs[:viewerPageSize]
 		data.HasOlder, data.OlderBefore, data.OlderID = true, msgs[viewerPageSize-1].TS, msgs[viewerPageSize-1].ID
@@ -124,7 +133,7 @@ func (s *Server) trace(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "the archive could not be read", http.StatusInternalServerError)
 		return
 	}
-	data := traceData{page: page{Title: "Message details"}, JID: jid, ID: id, Trace: t, HasMessage: t.Message.ID != "",
+	data := traceData{page: page{Title: "Message details", Current: "Chats"}, JID: jid, ID: id, Trace: t, HasMessage: t.Message.ID != "",
 		Time: view.FormatUnix(loc, t.Message.Timestamp), Received: view.FormatUnix(loc, t.Message.ReceivedAt),
 		Raw: view.HumanSize(int64(len(t.Message.RawProto))), MediaReady: t.Media != nil && t.Media.State == "done"}
 	if slices.Contains(mediaKinds, t.Message.Kind) {

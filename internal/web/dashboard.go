@@ -63,24 +63,29 @@ type dashboardData struct {
 
 // dashboard is GET /. Like every GET it only reads.
 func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	loc, err := view.Location(s.config())
+	data, err := s.dashboardData(r.Context())
 	if err != nil {
-		http.Error(w, "the page could not be rendered", http.StatusInternalServerError)
+		http.Error(w, "the archive could not be read", http.StatusInternalServerError)
 		return
 	}
-	data := dashboardData{page: page{Title: "Dashboard"}, Health: s.healthView(ctx, loc)}
+	s.render(w, s.pages["dashboard"], "layout", data)
+}
+
+func (s *Server) dashboardData(ctx context.Context) (dashboardData, error) {
+	loc, err := view.Location(s.config())
+	if err != nil {
+		return dashboardData{}, err
+	}
+	data := dashboardData{page: page{Title: "Logging", Current: "Logging", Live: true}, Health: s.healthView(ctx, loc)}
 	names := map[string]string{}
 	if s.d.Store != nil {
 		report, err := s.d.Store.StatusReport(ctx)
 		if err != nil {
-			http.Error(w, "the archive could not be read", http.StatusInternalServerError)
-			return
+			return dashboardData{}, err
 		}
 		media, err := s.d.Store.MediaTimeliness(ctx, s.d.Now())
 		if err != nil {
-			http.Error(w, "the archive could not be read", http.StatusInternalServerError)
-			return
+			return dashboardData{}, err
 		}
 		data.Media24Hours = view.PercentageCount(media.DayDone, media.DayTotal)
 		data.Media7Days = view.PercentageCount(media.WeekDone, media.WeekTotal)
@@ -89,8 +94,7 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 			names[c.CanonicalJID] = c.Name
 			off, err := filter.Excluded(c.CanonicalJID)
 			if err != nil {
-				http.Error(w, "the archive could not be read", http.StatusInternalServerError)
-				return
+				return dashboardData{}, err
 			}
 			if off {
 				data.NotLogging++
@@ -99,13 +103,11 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if data.Gaps, err = s.d.Store.OpenGapCount(ctx); err != nil {
-			http.Error(w, "the archive could not be read", http.StatusInternalServerError)
-			return
+			return dashboardData{}, err
 		}
 		outages, err := s.d.Store.OutageSummary(ctx, s.d.Now(), loc, 7)
 		if err != nil {
-			http.Error(w, "the archive could not be read", http.StatusInternalServerError)
-			return
+			return dashboardData{}, err
 		}
 		data.Outages, data.HasOutages = outages.Days, outages.HasOutages
 		data.LongestOutageMinutes = roundedMinutes(outages.Longest)
@@ -114,7 +116,7 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 		data.LoggingNoun, data.NotLoggingNoun = chatNoun(data.Logging), chatNoun(data.NotLogging)
 	}
 	data.Events = s.recent(names, loc)
-	s.render(w, s.pages["dashboard"], "layout", data)
+	return data, nil
 }
 
 func roundedMinutes(d time.Duration) int {

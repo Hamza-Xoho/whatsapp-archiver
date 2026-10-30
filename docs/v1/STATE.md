@@ -109,6 +109,10 @@ Single status record for V1 (max 150 lines, update in place; history lives in gi
 - W6.0 done 29 Oct 2026: Hamza accepted all seven recommended product decisions. `docs/v1/ui.md` specifies text wireframes, states, copy, accessibility, 375 px mobile, dark mode, RTL Arabic and performance budgets for W6(a)-(g). No Go code changed.
 - W6.0 review 29 Oct 2026: no Critical findings; one Important fixed through red `3788cfd` and green `77b972f`. `TestUIHistoryStallCopyUsesPlanThreshold` pins the W5.2 48-hour stalled-history threshold. Full `make check` passed; no deviations or open questions.
 
+## W6(a) shell
+
+- Done 30 Oct: three-area shell, ordered guard/recover/timing middleware, page-scoped SSE, global htmx error/offline behavior, escaped chat paths with unknown-chat 404, responsive cards, system/light/dark theme, and legacy operational content folded into Logging. Red commits `c3c8d29` and test-alignment `1f0837a`; full `make check` passed and no golden files changed.
+
 ## Rulings
 
 - (a) The `add-message-kind` skill (replaces `add-event-kind`) was written in W2(c).

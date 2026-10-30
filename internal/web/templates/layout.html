@@ -4,32 +4,36 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.Title}} · WhatsApp Archiver</title>
+<script>(function(){try{var t=localStorage.getItem("archiver-theme")||"system";if(t!=="system")document.documentElement.dataset.theme=t}catch(e){}})()</script>
 <link rel="stylesheet" href="/static/app.css">
 <script src="/static/htmx.min.js"></script>
 <script src="/static/sse.js"></script>
 </head>
-<body hx-ext="sse" sse-connect="/events">
+<body{{if .Live}} hx-ext="sse" sse-connect="/events"{{end}}>
+<a class="skip-link" href="#main">Skip to main content</a>
 <header class="top">
   <strong class="brand">WhatsApp Archiver</strong>
-  <nav>
-    <a href="/">Dashboard</a>
-    <a href="/chats">Chats</a>
-    <a href="/storage">Storage</a>
-    <a href="/backups">Backups</a>
-    <a href="/settings">Settings</a>
-    <a href="/pair">Pairing</a>
+  <nav aria-label="Primary">
+    <a href="/chats"{{if eq .Current "Chats"}} aria-current="page"{{end}}>Chats</a>
+    <a href="/logging"{{if eq .Current "Logging"}} aria-current="page"{{end}}>Logging</a>
+    <a href="/pair"{{if eq .Current "Pairing"}} aria-current="page"{{end}}>Pairing</a>
   </nav>
+  <label class="theme">Theme
+    <select name="theme" aria-label="Theme">
+      <option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option>
+    </select>
+  </label>
 </header>
-<main>
-{{if notPaired}}<p class="warn banner" role="alert">WhatsApp is not paired yet. <a href="/pair">Pair it now</a></p>{{end}}
+<main id="main" tabindex="-1">
+{{if notPaired}}<p class="warn banner" role="alert">WhatsApp is not paired yet. <a href="/pair">Pair it now</a>. New messages are not being archived.</p>{{end}}
+<p id="offline-banner" class="warn banner" role="status" hidden>Live updates paused. Check the SSH tunnel or archiver. This page will reconnect automatically.</p>
+<p id="connection-status" class="visually-hidden" role="status"></p>
 {{block "content" .}}
   <h1>{{.Title}}</h1>
-  <section class="panel">
-    <h2>Activity</h2>
-    <ul id="feed" class="feed" data-max="200" sse-swap="activity" hx-swap="afterbegin"></ul>
-  </section>
+  <p class="panel">This page has no content.</p>
 {{end}}
 </main>
+<div id="toast" class="toast" tabindex="-1" hidden><p role="alert"></p><button type="button">Dismiss</button></div>
 <script>
 // The feed keeps the newest lines: after each streamed line, drop the oldest beyond data-max, so a tab left open
 // for days does not grow without bound.
@@ -39,6 +43,52 @@ document.addEventListener("htmx:sseMessage", function () {
   var max = parseInt(f.getAttribute("data-max"), 10) || 200;
   while (f.children.length > max) { f.lastElementChild.remove(); }
 });
+var theme = document.querySelector('[name="theme"]');
+if (theme) {
+  var saved = "system";
+  try { saved = localStorage.getItem("archiver-theme") || "system"; } catch (e) {}
+  theme.value = saved;
+  theme.addEventListener("change", function () {
+    var value = theme.value;
+    if (value === "system") { delete document.documentElement.dataset.theme; }
+    else { document.documentElement.dataset.theme = value; }
+    try { localStorage.setItem("archiver-theme", value); } catch (e) {}
+  });
+}
+var toast = document.getElementById("toast");
+function showRequestError(event) {
+  var response = event.detail && event.detail.xhr && event.detail.xhr.status >= 400 && event.detail.xhr.status < 500 ? event.detail.xhr.responseText.trim() : "";
+  toast.querySelector("p").textContent = response || "That change did not go through. Your previous setting is still shown. Try again.";
+  toast.hidden = false;
+  if (event.detail && event.detail.elt && event.detail.elt.matches("button, input, select, form")) toast.focus();
+}
+document.addEventListener("htmx:responseError", showRequestError);
+document.addEventListener("htmx:sendError", showRequestError);
+toast.querySelector("button").addEventListener("click", function () { toast.hidden = true; });
+var failures = 0, offlineTimer;
+function writesDisabled(disabled) {
+  document.querySelectorAll('form[method="post"] button, form[method="post"] input, form[method="post"] select').forEach(function (control) { control.disabled = disabled; });
+}
+function setOffline() {
+  document.getElementById("offline-banner").hidden = false;
+  writesDisabled(true);
+}
+function setOnline() {
+  failures = 0;
+  clearTimeout(offlineTimer);
+  var banner = document.getElementById("offline-banner");
+  if (!banner.hidden) document.getElementById("connection-status").textContent = "Live updates resumed.";
+  banner.hidden = true;
+  writesDisabled(false);
+}
+document.addEventListener("htmx:sseError", function () {
+  failures++;
+  if (failures >= 2) setOffline();
+  clearTimeout(offlineTimer);
+  offlineTimer = setTimeout(setOffline, 10000);
+});
+document.addEventListener("htmx:sseOpen", setOnline);
+document.addEventListener("htmx:afterRequest", function (event) { if (event.detail && event.detail.successful) setOnline(); });
 </script>
 </body>
 </html>
