@@ -66,6 +66,25 @@ func (s *Server) media(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, "", info.ModTime(), f)
 }
 
+// mediaThumb serves only the inert JPEG thumbnail bytes stored in archive.db.
+func (s *Server) mediaThumb(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	chat, id := q.Get("chat"), q.Get("id")
+	if chat == "" || id == "" || s.d.Store == nil {
+		http.NotFound(w, r)
+		return
+	}
+	thumb, err := s.d.Store.ChatMediaThumb(r.Context(), chat, id)
+	if err != nil || len(thumb) == 0 {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Security-Policy", "sandbox; frame-ancestors 'none'")
+	_, _ = w.Write(thumb)
+}
+
 // mediaType is the Content-Type to send for a stored MIME type, and whether the file may open inline.
 func mediaType(stored string) (ctype string, inline bool) {
 	t, _, err := mime.ParseMediaType(stored)

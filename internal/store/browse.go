@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
-	"sort"
 	"strings"
 )
 
@@ -26,11 +24,27 @@ type ChatRow struct {
 // ViewMessage is one message as the chat viewer shows it. Text is the text as first received; EditedText is the
 // latest edit, if any. Reactions are each reactor's current reaction (a removed reaction is not listed).
 type ViewMessage struct {
-	ID, Sender, SenderName, Text, EditedText, MediaType, MediaState string
-	TS                                                              int64
-	Deleted                                                         bool
-	Reactions                                                       []string
-	QuotedID                                                        string
+	ID, Sender, SenderName, Kind, Text, Caption, Details, EditedText string
+	MediaType, MediaState, QuotedID, QuotedSender                    string
+	QuotedText, QuotedSenderName                                     string
+	TS                                                               int64
+	FromMe, Deleted, ViewOnce                                        bool
+	EphemeralSecs                                                    int
+	Reactions                                                        []string
+	ReactionCounts                                                   []ReactionCount
+	PollOptions                                                      []PollOption
+	PollIncomplete                                                   bool
+	Media                                                            *Media
+}
+
+type ReactionCount struct {
+	Emoji string
+	Count int
+}
+
+type PollOption struct {
+	Text  string
+	Votes int
 }
 
 // Trace is everything the archive holds about one message. Message is zero when only events arrived; Gap is true
@@ -132,107 +146,9 @@ func (s *Store) senderNames(ctx context.Context, jids []string) (map[string]stri
 	return out, err
 }
 
-// chatPageQuery is messages_resolved for one chat: its messages under every JID form (chatForms of ?1), each id once
-// (the first received copy), newest first, at most ?3, and, when ?2 > 0, after the cursor (?2, ?4) in that order:
-// older than ?2, or at ?2 with an id below ?4. The dedupe rank is computed over all the chat's rows before the cursor
-// filter. Restricting to the chat's forms before the window function keeps the cost to the chat's own rows instead of
-// the whole archive.
-const chatPageQuery = `WITH m AS (
- SELECT chat_jid,id,sender_jid,ts,CASE WHEN text<>'' THEN text ELSE caption END AS body,quoted_id,CASE WHEN kind IN ('image','video','gif','audio','voice','document','sticker') THEN kind ELSE '' END AS media_type,
-  ROW_NUMBER() OVER (PARTITION BY id ORDER BY received_at,chat_jid) AS rk
- FROM messages WHERE chat_jid IN (` + chatForms + `)
-)
-SELECT m.id,m.sender_jid,m.body,m.media_type,m.ts,m.quoted_id
-FROM m
-WHERE m.rk=1 AND (?2<=0 OR m.ts<?2 OR (m.ts=?2 AND m.id<?4))
-ORDER BY m.ts DESC,m.id DESC LIMIT ?3`
-
-// ChatPage is one page of the viewer: at most limit messages of the chat after the cursor (beforeTS, beforeID) in
-// newest-first order (all when beforeTS is 0), newest first, with their edits, deletion, reactions and media state.
+// ChatPage preserves the original viewer read API for callers outside the W6 viewer.
 func (s *Store) ChatPage(ctx context.Context, canonicalJID string, beforeTS int64, beforeID string, limit int) ([]ViewMessage, error) {
-	var page []ViewMessage
-	err := s.scanRows(ctx, chatPageQuery, []any{canonicalJID, beforeTS, limit, beforeID}, func(rows *sql.Rows) error {
-		var m ViewMessage
-		if err := rows.Scan(&m.ID, &m.Sender, &m.Text, &m.MediaType, &m.TS, &m.QuotedID); err != nil {
-			return err
-		}
-		page = append(page, m)
-		return nil
-	})
-	if err != nil || len(page) == 0 {
-		return page, err
-	}
-	var senders []string
-	for _, m := range page {
-		if m.Sender != "" && !slices.Contains(senders, m.Sender) {
-			senders = append(senders, m.Sender)
-		}
-	}
-	names, err := s.senderNames(ctx, senders)
-	if err != nil {
-		return nil, err
-	}
-	for i := range page {
-		page[i].SenderName = names[page[i].Sender]
-	}
-	at := make(map[string]int, len(page))
-	args := []any{canonicalJID}
-	marks := make([]string, 0, len(page))
-	for i, m := range page {
-		at[m.ID] = i
-		args = append(args, m.ID)
-		marks = append(marks, fmt.Sprintf("?%d", i+2))
-	}
-	in := strings.Join(marks, ",")
-	reactions := map[string]map[string]string{} // message id -> reactor -> current reaction
-	err = s.scanRows(ctx, `SELECT target_id,kind,sender_jid,new_text,value FROM message_events WHERE chat_jid IN (`+chatForms+`) AND kind IN ('edit','revoke','reaction') AND target_id IN (`+in+`) ORDER BY ts,received_at,event_id`, args, func(rows *sql.Rows) error {
-		var id, kind, sender, newText, value string
-		if err := rows.Scan(&id, &kind, &sender, &newText, &value); err != nil {
-			return err
-		}
-		m := &page[at[id]]
-		switch kind {
-		case "edit":
-			m.EditedText = newText
-		case "revoke":
-			m.Deleted = true
-		case "reaction":
-			if reactions[id] == nil {
-				reactions[id] = map[string]string{}
-			}
-			reactions[id][sender] = value
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	for id, by := range reactions {
-		reactors := make([]string, 0, len(by))
-		for r := range by {
-			reactors = append(reactors, r)
-		}
-		sort.Strings(reactors)
-		for _, r := range reactors {
-			if by[r] != "" {
-				page[at[id]].Reactions = append(page[at[id]].Reactions, by[r])
-			}
-		}
-	}
-	err = s.scanRows(ctx, `SELECT message_id,state FROM media WHERE chat_jid IN (`+chatForms+`) AND message_id IN (`+in+`) ORDER BY chat_jid`, args, func(rows *sql.Rows) error {
-		var id, state string
-		if err := rows.Scan(&id, &state); err != nil {
-			return err
-		}
-		if m := &page[at[id]]; m.MediaState == "" {
-			m.MediaState = state
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return page, nil
+	return s.ViewerPage(ctx, canonicalJID, ViewerQuery{BeforeTS: beforeTS, BeforeID: beforeID, Limit: limit})
 }
 
 // Trace reads message id of the chat (under any of its JID forms), every event about it, and its media row. It
@@ -285,6 +201,16 @@ func (s *Store) ChatMedia(ctx context.Context, chatJID, id string) (*Media, erro
 		return nil, fmt.Errorf("media of %s: %w", id, err)
 	}
 	return &m, nil
+}
+
+// ChatMediaThumb reads a stored thumbnail under any JID form of the canonical chat.
+func (s *Store) ChatMediaThumb(ctx context.Context, chatJID, id string) ([]byte, error) {
+	var thumb []byte
+	err := s.read.QueryRowContext(ctx, `SELECT thumb FROM media WHERE message_id=?2 AND chat_jid IN (`+chatForms+`) ORDER BY chat_jid LIMIT 1`, chatJID, id).Scan(&thumb)
+	if err != nil {
+		return nil, fmt.Errorf("thumbnail of %s: %w", id, err)
+	}
+	return thumb, nil
 }
 
 // stringsByCanonical runs a two-column (canonical JID, value) query into a map.
