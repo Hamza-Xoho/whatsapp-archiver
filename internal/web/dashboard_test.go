@@ -229,8 +229,8 @@ func TestHealthPartialIsThePanelOnly(t *testing.T) {
 	}
 }
 
-// The dashboard and its feed show counts and kinds, never message text.
-func TestDashboardShowsNoMessageText(t *testing.T) {
+// The feed shows counts and kinds, never message text.
+func TestLoggingFeedShowsNoMessageText(t *testing.T) {
 	d := newDash(t)
 	m := testkit.Message("1@g.us", "a", dashNow.Add(-time.Hour))
 	m.Text = "SECRET-BODY-TEXT"
@@ -238,20 +238,20 @@ func TestDashboardShowsNoMessageText(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.bus.Publish(activity.Event{At: dashNow, Kind: "message", Chat: "1@g.us", Detail: "text"})
-	if got := d.page(t, "/logging"); strings.Contains(got, "SECRET-BODY-TEXT") {
-		t.Fatal("message text on the dashboard")
+	if got := d.page(t, "/logging/feed"); strings.Contains(got, "SECRET-BODY-TEXT") {
+		t.Fatal("message text on the logging feed")
 	}
 }
 
 // A chat shows by name, with its JID only as secondary text.
-func TestDashboardEventShowsChatName(t *testing.T) {
+func TestLoggingFeedEventShowsChatName(t *testing.T) {
 	d := newDash(t)
 	d.message(t, "1@g.us", "a")
 	if err := d.st.UpsertChat(t.Context(), store.Chat{JID: "1@g.us", Name: "Family"}); err != nil {
 		t.Fatal(err)
 	}
 	d.bus.Publish(activity.Event{At: dashNow, Kind: "message", Chat: "1@g.us", Detail: "text"})
-	got := d.page(t, "/logging")
+	got := d.page(t, "/logging/feed")
 	if !strings.Contains(got, "Family") {
 		t.Fatalf("no chat name: %s", got)
 	}
