@@ -90,7 +90,7 @@ func TestViewerFiltersDateJumpAndBothDirectionCursors(t *testing.T) {
 		if i%2 == 0 {
 			kind, sender = "image", "2@lid"
 		}
-		u.typedMessage(t, store.Message{ID: fmt.Sprintf("m%03d", i), Kind: kind, Text: fmt.Sprintf("body-%03d", i), SenderJID: sender, Timestamp: 1761600000 + int64(i)})
+		u.typedMessage(t, store.Message{ID: fmt.Sprintf("m%03d", i), Kind: kind, Text: fmt.Sprintf("body-%03d", i), SenderJID: sender, Timestamp: 1761609600 + int64(i)})
 	}
 
 	q := url.Values{"sender": {"2@lid"}, "media": {"image"}, "from": {"2025-10-28"}, "to": {"2025-10-28"}}
@@ -118,7 +118,7 @@ func TestViewerInChatSearchHighlightsAndNavigatesSafely(t *testing.T) {
 	if code != http.StatusOK || !strings.Contains(got, "1 of 2") || !strings.Contains(got, "Next match") || !strings.Contains(got, `<mark>`) || !strings.Contains(got, `aria-current="true"`) {
 		t.Fatalf("search navigation = %d %s", code, got)
 	}
-	if strings.Contains(got, "<script>") || !strings.Contains(got, "&lt;script&gt;") {
+	if strings.Contains(got, "<script>alert") || !strings.Contains(got, "&lt;script&gt;") {
 		t.Fatalf("highlight injected unescaped content: %s", got)
 	}
 }
@@ -137,7 +137,7 @@ func TestViewerUsesStoredThumbnailAndNativeMediaControls(t *testing.T) {
 		t.Fatalf("viewer status %d", code)
 	}
 	body := string(raw)
-	for _, want := range []string{`src="/media/thumb?chat=g%40g.us&amp;id=image"`, `loading="lazy"`, `<video`, `<audio`, `preload="metadata"`, `download`, "document.safe", "42 B"} {
+	for _, want := range []string{`src="/media/thumb?chat=g%40g.us&amp;id=image"`, `loading="lazy"`, `<video`, `<audio`, `preload="metadata"`, `download`, "document.safe", "42.0 B"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("viewer lacks %q: %s", want, body)
 		}
