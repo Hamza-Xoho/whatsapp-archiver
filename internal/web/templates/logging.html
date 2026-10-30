@@ -12,8 +12,9 @@
 </nav>
 <section id="overview">
   {{template "logging_health" .Overview.Health}}
-  {{if .Overview.HasArchive}}<section class="panel"><h2>Archive</h2><p>{{.Overview.History}}</p>
-    <ul class="counts"><li>Logging: <strong>{{.Overview.Logging}}</strong> {{.Overview.LoggingNoun}}</li><li>Not logging: <strong>{{.Overview.NotLogging}}</strong> {{.Overview.NotLoggingNoun}}</li><li>Open gaps: <strong>{{.Overview.Gaps}}</strong></li><li>Media done within 5 min (24 hours): <strong>{{.Overview.Media24Hours}}</strong></li><li>Media done within 5 min (7 days): <strong>{{.Overview.Media7Days}}</strong></li></ul>
+  {{if .Overview.HasArchive}}<section class="panel"><h2>Archive</h2>{{range .Overview.History}}<p>{{.}}</p>{{end}}
+    <ul class="counts"><li>Logging: <strong>{{.Overview.Logging}}</strong> {{.Overview.LoggingNoun}}</li><li>Not logging: <strong>{{.Overview.NotLogging}}</strong> {{.Overview.NotLoggingNoun}}</li><li class="{{if .Overview.Gaps}}warn{{end}}">Open gaps: <strong>{{.Overview.Gaps}}</strong></li><li>Media done within 5 min (24 hours): <strong>{{.Overview.Media24Hours}}</strong></li><li>Media done within 5 min (7 days): <strong>{{.Overview.Media7Days}}</strong></li></ul>
+    {{if .Overview.GapGroups}}<h3>Open gaps by cause</h3><ul class="counts">{{range .Overview.GapGroups}}<li>{{.Cause}}: <strong>{{.Count}}</strong> {{.GapNoun}}, oldest {{.Age}} ago{{if .PostOutage}}, after an outage{{end}}</li>{{end}}</ul>{{else}}<p>No open gaps</p>{{end}}
     {{if .Overview.HasOutages}}<h3>Outage minutes by day</h3><ul class="counts">{{range .Overview.Outages}}{{if .Minutes}}<li>{{.Date}}: <strong>{{.Minutes}}</strong> minutes</li>{{end}}{{end}}</ul><p>Longest outage: <strong>{{.Overview.LongestOutageMinutes}}</strong> minutes</p>{{end}}
   </section>{{end}}
 </section>
