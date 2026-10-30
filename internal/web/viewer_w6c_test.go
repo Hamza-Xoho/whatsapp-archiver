@@ -43,7 +43,11 @@ func TestViewerRendersTypedMessagesEventsAndBidiSafely(t *testing.T) {
 	u.event(t, store.MessageEvent{ChatJID: "g@g.us", TargetID: "poll", Kind: "poll_vote", EventID: "v1", SenderJID: "2@lid", Value: `{"options":["Pizza"]}`, Timestamp: 1761609790})
 	u.event(t, store.MessageEvent{ChatJID: "g@g.us", TargetID: "poll", Kind: "poll_vote", EventID: "v2", SenderJID: "3@lid", Value: "", Timestamp: 1761609791})
 
-	body := u.page(t, "/chats/g@g.us")
+	raw, code, _ := get(t, u.handler(), "/chats/g@g.us")
+	if code != http.StatusOK {
+		t.Fatalf("viewer status %d", code)
+	}
+	body := string(raw)
 	for _, want := range []string{`dir="auto"`, "مرحبا بالعالم", "View once", "24 hours", "28 October 2025", "Riyadh", "Central", "Open map", `rel="noopener noreferrer"`, "Aisha", "Show vCard", "Lunch?", "Pizza", "1 vote", "Results may be incomplete"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("viewer lacks %q: %s", want, body)
@@ -64,7 +68,11 @@ func TestViewerQuotedJumpReactionCountsAndDeletedDefault(t *testing.T) {
 	}
 	u.event(t, store.MessageEvent{ChatJID: "g@g.us", TargetID: "gone", Kind: "revoke", EventID: "delete", Timestamp: 120})
 
-	body := u.page(t, "/chats/g@g.us")
+	raw, code, _ := get(t, u.handler(), "/chats/g@g.us")
+	if code != http.StatusOK {
+		t.Fatalf("viewer status %d", code)
+	}
+	body := string(raw)
 	for _, want := range []string{`href="/chats/g@g.us?focus=original#message-original"`, "the original words", "👍", "3", "This message was deleted", "Show deleted text"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("viewer lacks %q: %s", want, body)
@@ -124,7 +132,11 @@ func TestViewerUsesStoredThumbnailAndNativeMediaControls(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	body := u.page(t, "/chats/g@g.us")
+	raw, code, _ := get(t, u.handler(), "/chats/g@g.us")
+	if code != http.StatusOK {
+		t.Fatalf("viewer status %d", code)
+	}
+	body := string(raw)
 	for _, want := range []string{`src="/media/thumb?chat=g%40g.us&amp;id=image"`, `loading="lazy"`, `<video`, `<audio`, `preload="metadata"`, `download`, "document.safe", "42 B"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("viewer lacks %q: %s", want, body)
