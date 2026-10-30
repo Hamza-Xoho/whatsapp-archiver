@@ -42,12 +42,13 @@ type viewMsg struct {
 
 type viewerData struct {
 	page
-	JID, Name, OlderURL, NewerURL, Query, Sender, Media, FromDate, ToDate string
-	LiveCursor                                                            string
-	Messages                                                              []viewMsg
-	HasOlder, HasNewer, Filtered, DateJump, ViewerLive                    bool
-	MatchPosition, MatchCount                                             int
-	PreviousMatchURL, NextMatchURL                                        string
+	JID, Name, OlderURL, NewerURL, OlderFragmentURL, NewerFragmentURL string
+	Query, Sender, Media, FromDate, ToDate, LiveCursor, LiveDay       string
+	Messages                                                          []viewMsg
+	HasOlder, HasNewer, Filtered, DateJump, DateJumpMissing           bool
+	ViewerLive, AwayLive                                              bool
+	MatchPosition, MatchCount                                         int
+	PreviousMatchURL, NextMatchURL                                    string
 }
 
 // viewer is the typed, bounded chat reader. Its URL owns cursors, filters, date jumps and in-chat search.
@@ -94,10 +95,10 @@ func (s *Server) viewer(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "the archive could not be read", http.StatusInternalServerError)
 		return
 	}
-	dateJump := false
+	dateJump, dateJumpMissing := false, false
 	if date := r.URL.Query().Get("date"); date != "" {
 		start, _ := time.ParseInLocation("2006-01-02", date, loc)
-		_, id, anchorErr := s.d.Store.ViewerDateAnchor(ctx, jid, start.Unix())
+		anchorTS, id, anchorErr := s.d.Store.ViewerDateAnchor(ctx, jid, start.Unix())
 		if errors.Is(anchorErr, sql.ErrNoRows) {
 			// An empty chat renders its normal empty state.
 		} else if anchorErr != nil {
@@ -105,6 +106,7 @@ func (s *Server) viewer(w http.ResponseWriter, r *http.Request) {
 			return
 		} else {
 			query.FocusID, dateJump = id, true
+			dateJumpMissing = time.Unix(anchorTS, 0).In(loc).Format("2006-01-02") != date
 		}
 	}
 	msgs, err := s.d.Store.ViewerPage(ctx, jid, query)
@@ -124,30 +126,41 @@ func (s *Server) viewer(w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		name = jid
 	}
+	liveCursor, err := s.d.Store.ViewerLiveCursor(ctx, jid)
+	if err != nil {
+		http.Error(w, "the archive could not be read", http.StatusInternalServerError)
+		return
+	}
 	values := cloneValues(r.URL.Query())
 	values.Del("date")
+	values.Del("edge")
 	data := viewerData{page: page{Title: name, Current: "Chats"}, JID: jid, Name: name,
-		Query: values.Get("q"), Sender: values.Get("sender"), Media: values.Get("media"), FromDate: values.Get("from"), ToDate: values.Get("to"), DateJump: dateJump}
+		Query: values.Get("q"), Sender: values.Get("sender"), Media: values.Get("media"), FromDate: values.Get("from"), ToDate: values.Get("to"),
+		DateJump: dateJump, DateJumpMissing: dateJumpMissing, LiveCursor: strconv.FormatInt(liveCursor, 10)}
 	if len(msgs) > viewerPageSize {
-		msgs = msgs[:viewerPageSize]
 		if query.AfterTS > 0 {
 			data.HasNewer = true
+			msgs = msgs[len(msgs)-viewerPageSize:]
 		} else {
 			data.HasOlder = true
+			msgs = msgs[:viewerPageSize]
 		}
 	}
 	data.HasNewer = data.HasNewer || query.BeforeTS > 0
 	data.HasOlder = data.HasOlder || query.AfterTS > 0
 	data.Filtered = data.Query != "" || data.Sender != "" || data.Media != "" || data.FromDate != "" || data.ToDate != ""
 	data.ViewerLive = query.BeforeTS == 0 && query.AfterTS == 0 && query.FocusID == "" && len(matches) == 0 && !data.Filtered
+	data.AwayLive = !data.ViewerLive
 	if len(msgs) > 0 {
 		oldest, newest := msgs[len(msgs)-1], msgs[0]
-		data.LiveCursor = newest.ID
+		data.LiveDay = time.Unix(newest.TS, 0).In(loc).Format("2 January 2006")
 		if data.HasOlder {
 			data.OlderURL = viewerURL(jid, values, "before", oldest.TS, oldest.ID)
+			data.OlderFragmentURL = edgeURL(data.OlderURL, "older")
 		}
 		if data.HasNewer {
 			data.NewerURL = viewerURL(jid, values, "after", newest.TS, newest.ID)
+			data.NewerFragmentURL = edgeURL(data.NewerURL, "newer")
 		}
 	}
 	slices.Reverse(msgs)
@@ -156,13 +169,16 @@ func (s *Server) viewer(w http.ResponseWriter, r *http.Request) {
 		currentMatch = matches[matchIndex]
 		data.MatchCount, data.MatchPosition = len(matches), matchIndex+1
 		if matchIndex > 0 {
-			data.PreviousMatchURL = matchURL(jid, values, matchIndex-1)
+			data.PreviousMatchURL = matchURL(jid, values, matchIndex-1, matches[matchIndex-1])
 		}
 		if matchIndex+1 < len(matches) {
-			data.NextMatchURL = matchURL(jid, values, matchIndex+1)
+			data.NextMatchURL = matchURL(jid, values, matchIndex+1, matches[matchIndex+1])
 		}
 	}
 	var lastDay string
+	if query.AfterTS > 0 {
+		lastDay = time.Unix(query.AfterTS, 0).In(loc).Format("2 January 2006")
+	}
 	for _, m := range msgs {
 		v := makeViewMessage(loc, m, data.Query, m.ID == currentMatch)
 		v.ChatJID = jid
@@ -172,6 +188,24 @@ func (s *Server) viewer(w http.ResponseWriter, r *http.Request) {
 		v.NewDay = v.Day != lastDay
 		lastDay = v.Day
 		data.Messages = append(data.Messages, v)
+	}
+	if query.BeforeTS > 0 && len(data.Messages) > 0 {
+		nextDay := time.Unix(query.BeforeTS, 0).In(loc).Format("2 January 2006")
+		if data.Messages[len(data.Messages)-1].Day == nextDay {
+			for i := len(data.Messages) - 1; i >= 0 && data.Messages[i].Day == nextDay; i-- {
+				data.Messages[i].NewDay = false
+			}
+		}
+	}
+	if r.Header.Get("HX-Request") == "true" {
+		switch r.URL.Query().Get("edge") {
+		case "older":
+			s.render(w, s.pages["viewer"], "older_fragment", data)
+			return
+		case "newer":
+			s.render(w, s.pages["viewer"], "newer_fragment", data)
+			return
+		}
 	}
 	s.render(w, s.pages["viewer"], "layout", data)
 }
@@ -245,11 +279,22 @@ func viewerURL(jid string, values url.Values, direction string, ts int64, id str
 	return "/chats/" + url.PathEscape(jid) + "?" + values.Encode()
 }
 
-func matchURL(jid string, values url.Values, index int) string {
+func edgeURL(raw, edge string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	values := parsed.Query()
+	values.Set("edge", edge)
+	parsed.RawQuery = values.Encode()
+	return parsed.String()
+}
+
+func matchURL(jid string, values url.Values, index int, id string) string {
 	values = cloneValues(values)
 	values.Set("match", strconv.Itoa(index))
 	values.Del("focus")
-	return "/chats/" + url.PathEscape(jid) + "?" + values.Encode()
+	return "/chats/" + url.PathEscape(jid) + "?" + values.Encode() + "#" + messageDOMID(id)
 }
 
 func makeViewMessage(loc *time.Location, m store.ViewMessage, search string, current bool) viewMsg {
@@ -317,10 +362,71 @@ func highlightParts(text, query string, current bool) []textPart {
 	if text == "" {
 		return nil
 	}
-	if current && query != "" && strings.Contains(store.Fold(text), store.Fold(query)) {
-		return []textPart{{Text: text, Mark: true}}
+	if !current || query == "" {
+		return []textPart{{Text: text}}
 	}
-	return []textPart{{Text: text}}
+	original := []rune(text)
+	var folded []rune
+	var originalAt []int
+	for i, r := range original {
+		for _, f := range store.Fold(string(r)) {
+			folded = append(folded, f)
+			originalAt = append(originalAt, i)
+		}
+	}
+	type span struct{ start, end int }
+	var spans []span
+	for _, term := range strings.Fields(store.Fold(query)) {
+		needle := []rune(term)
+		for from := 0; len(needle) > 0 && from+len(needle) <= len(folded); {
+			rel := indexRunes(folded[from:], needle)
+			if rel < 0 {
+				break
+			}
+			startFold := from + rel
+			endFold := startFold + len(needle)
+			start, end := originalAt[startFold], originalAt[endFold-1]+1
+			for end < len(original) && store.Fold(string(original[end])) == "" {
+				end++
+			}
+			spans = append(spans, span{start: start, end: end})
+			from = endFold
+		}
+	}
+	if len(spans) == 0 {
+		return []textPart{{Text: text}}
+	}
+	slices.SortFunc(spans, func(a, b span) int { return a.start - b.start })
+	merged := spans[:0]
+	for _, next := range spans {
+		if len(merged) > 0 && next.start <= merged[len(merged)-1].end {
+			merged[len(merged)-1].end = max(merged[len(merged)-1].end, next.end)
+			continue
+		}
+		merged = append(merged, next)
+	}
+	parts := make([]textPart, 0, len(merged)*2+1)
+	at := 0
+	for _, marked := range merged {
+		if marked.start > at {
+			parts = append(parts, textPart{Text: string(original[at:marked.start])})
+		}
+		parts = append(parts, textPart{Text: string(original[marked.start:marked.end]), Mark: true})
+		at = marked.end
+	}
+	if at < len(original) {
+		parts = append(parts, textPart{Text: string(original[at:])})
+	}
+	return parts
+}
+
+func indexRunes(haystack, needle []rune) int {
+	for i := 0; i+len(needle) <= len(haystack); i++ {
+		if slices.Equal(haystack[i:i+len(needle)], needle) {
+			return i
+		}
+	}
+	return -1
 }
 
 func ephemeralDuration(seconds int) string {
