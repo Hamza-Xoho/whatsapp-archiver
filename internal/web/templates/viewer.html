@@ -1,7 +1,7 @@
 {{define "content"}}
   <h1>{{.Name}}</h1>
   {{if ne .Name .JID}}<p class="chat">{{.JID}}</p>{{end}}
-  <p><a href="/chats">All chats</a>{{if .Before}} · <a href="/chats/{{pathEscape .JID}}">Newest messages</a>{{end}}</p>
+  <p><a href="/chats">All chats</a> · <a href="/chats/{{pathEscape .JID}}/export">Export</a>{{if .Before}} · <a href="/chats/{{pathEscape .JID}}">Newest messages</a>{{end}}</p>
   {{if .HasOlder}}<p><a href="/chats/{{pathEscape .JID}}?before={{.OlderBefore}}&amp;before_id={{urlquery .OlderID}}">Older messages</a></p>{{end}}
   <section class="panel">
     {{if not .Messages}}<p class="muted">No messages{{if .Before}} older than this{{end}}.</p>{{end}}
