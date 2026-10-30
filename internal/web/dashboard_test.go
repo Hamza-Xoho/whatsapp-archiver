@@ -127,12 +127,12 @@ func TestDashboardPhoneUnknownIsNotAWarning(t *testing.T) {
 	}
 }
 
-func TestDashboardLists20RecentEvents(t *testing.T) {
+func TestLoggingFeedLists20RecentEvents(t *testing.T) {
 	d := newDash(t)
 	for i := range 25 {
 		d.bus.Publish(activity.Event{At: dashNow.Add(time.Duration(i) * time.Second), Kind: "message", Chat: "c@g.us", Detail: fmt.Sprintf("item%02d", i)})
 	}
-	got := d.page(t, "/logging")
+	got := d.page(t, "/logging/feed")
 	if n := strings.Count(got, "item"); n != 20 {
 		t.Fatalf("%d events listed, want 20", n)
 	}
