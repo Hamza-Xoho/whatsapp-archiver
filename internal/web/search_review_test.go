@@ -46,9 +46,19 @@ func TestGlobalSearchEditOnlyResultJumpsToTargetWithEditContext(t *testing.T) {
 		t.Fatalf("edit Search = %d: %s", code, body)
 	}
 	page := string(body)
-	for _, want := range []string{"Edited", "<mark>unique replacement</mark>", "/chats/g@g.us/m/" + url.PathEscape("target/id")} {
+	wantJump := "/chats/g@g.us?at=" + url.QueryEscape("target/id") + "#message-" + url.PathEscape("target/id")
+	for _, want := range []string{"Edited", "<mark>unique replacement</mark>", wantJump} {
 		if !strings.Contains(page, want) {
 			t.Errorf("edit Search lacks %q: %s", want, page)
+		}
+	}
+	viewer, code, _ := get(t, u.handler(), "/chats/g@g.us?at="+url.QueryEscape("target/id"))
+	if code != http.StatusOK {
+		t.Fatalf("message jump = %d: %s", code, viewer)
+	}
+	for _, want := range []string{`id="message-target/id"`, `tabindex="-1"`, "autofocus", "old words"} {
+		if !strings.Contains(string(viewer), want) {
+			t.Errorf("focused viewer lacks %q: %s", want, viewer)
 		}
 	}
 }
