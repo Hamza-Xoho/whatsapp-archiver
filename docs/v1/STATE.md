@@ -99,9 +99,13 @@ Single status record for V1 (max 150 lines, update in place; history lives in gi
 - W4 reviewer follow-up, 29 Oct: reconnect wakes every configured worker (so an outage does not collapse backlog recovery to one downloader), and a failed media claim waits one minute before retrying instead of spinning on the still-due row. Red tests: 96aca06 and 647ad06; full `make check` passed before the green commit.
 - W4.5 CLI golden review, 29 Oct: `cmd/archiver/testdata/status.golden` was edited by hand (no `-update`); exactly two lines were added after history: the 24-hour and 7-day “media done within 5 min” figures. Both are `n/a (0/0)` because the legacy synthetic seed rows deliberately have `enqueued_at=0`; every prior line is unchanged.
 
-## In flight
+## W5 history and gaps
 
 - W5.2 golden review, 30 Oct: `cmd/archiver/testdata/status.golden` was edited by hand (no `-update`); exactly one line changed. The old aggregate `history: complete back to 2024-03-02, chunks 3, last chunk 2026-10-10 12:00 +03` became the per-sync ledger line `history FULL: complete, received 0, imported 3, last chunk 2026-10-10 12:00 +03`. Every other line is unchanged; per-chat history reach now comes from `chat_stats.oldest_history_ts` on the Chats UI.
+- W5.1-W5.3 done, 30 Oct: bounded history downloads are stripped before the durable spool, clean-chunk identity and allowlisted metadata are committed with the received ledger before acknowledgement, and the ordered importer resumes through `Pipeline.Ingest`; status is per sync type with an authoritative received-stage 48-hour stall clock and per-chat reach from `chat_stats`; Logging groups open gaps by cause and age while the `…6F66` source-ID closer and `…FCCF` reaction-target case stay pinned.
+- Whole-workstream and task reviews approved; targeted W5 mutations are 15/15 killed. Full `make check` passed; no deviations or open questions.
+
+## In flight
 
 - W0 step 3 (Hamza): done 26 Oct: practice instance unlinked on the phone and its process stopped (PID 288900); only the `SaudiSpyWithMyWifi` Wi-Fi profile left; stale DNS 192.168.68.1 gone. Reboot test still open (optional).
 - `sudo perf` on the practice PID is moot: the instance is stopped.
