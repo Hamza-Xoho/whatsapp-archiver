@@ -12,6 +12,20 @@
   color-scheme: light dark;
 }
 
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161715;
+    --panel: #1f201e;
+    --text: #e8e8e3;
+    --muted: #9a9a93;
+    --line: #33352f;
+    --accent: #5cc48c;
+    --warn: #e0a548;
+    --bad: #f08a80;
+  }
+}
+
+/* Explicit choices follow the system rule so equal-specificity declarations win the cascade. */
 [data-theme="light"] {
   --bg: #f7f7f5;
   --panel: #ffffff;
@@ -34,19 +48,6 @@
   --warn: #e8ad50;
   --bad: #ff948a;
   color-scheme: dark;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #161715;
-    --panel: #1f201e;
-    --text: #e8e8e3;
-    --muted: #9a9a93;
-    --line: #33352f;
-    --accent: #5cc48c;
-    --warn: #e0a548;
-    --bad: #f08a80;
-  }
 }
 
 * { box-sizing: border-box; }
