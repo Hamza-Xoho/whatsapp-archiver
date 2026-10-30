@@ -137,7 +137,7 @@ func timedPath(t *testing.T, h http.Handler, path string, budget time.Duration) 
 
 func edgePath(t *testing.T, body, edge string) string {
 	t.Helper()
-	re := regexp.MustCompile(`hx-get="([^"]+[?&](?:amp;)?edge=` + edge + `(?:[&"])[^"]*)"`)
+	re := regexp.MustCompile(`hx-get="([^"]*(?:\?|&amp;|&)edge=` + edge + `(?:&amp;[^"]*)?)"`)
 	match := re.FindStringSubmatch(body)
 	if len(match) != 2 {
 		t.Fatalf("viewer has no %s fragment path", edge)
