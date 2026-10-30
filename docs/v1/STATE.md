@@ -121,6 +121,13 @@ Single status record for V1 (max 150 lines, update in place; history lives in gi
 - Done 30 Oct: three-area shell, ordered guard/recover/timing middleware, page-scoped SSE, global htmx error/offline behavior, escaped chat paths with unknown-chat 404, responsive cards, system/light/dark theme, and legacy operational content folded into Logging. Red commits `c3c8d29` and test-alignment `1f0837a`; full `make check` passed and no golden files changed.
 - Review 30 Oct: no Critical findings; two Important findings fixed through red `f52e3b3` and green `742a4fe`. Panic timing now records the recovered 500 response, and explicit Light/Dark choices override the system preference. Full `make check` passed; no invariant deviations or open questions.
 
+## W6(b) chats list
+
+- Done 30 Oct: 50-row stable keyset pages, search/type/logging/new/gap/failed filters, page/all-filtered selection with stale-set review, weekly text/media estimates from `chat_stats`, per-row and bulk logging/media controls, htmx row swaps, no-JS redirects, acknowledgement, community child links and durable explicit-vs-inherited rules. Future children apply the parent's live rule before their first capture write and known children inherit on restart without a UI visit. Red/green commits: `e75ba39`/`33437db`, `4cad696`/`c2177f5`, `58f49b9`/`7a5141e`, `832edd3`/`93c5d23`.
+- Coverage: web acceptance includes paging/filter state, select-page/all-filtered snapshots, unavailable/available estimates, confirmation copy, custom media/video caps, row-only swaps, community expansion/direct links/explicit override/restart, and chosen-rule previews; ingest pins future-child exclusion before its first write. Store paging is a derived-table `LIMIT 51` query; estimates do not read raw `messages` or `media`. Full `make check` and `make check-fast` passed; no WhatsApp connection was made.
+- Devseed performance (300,000 messages/250 chats; five warmups then 30 runs): first page p50 13.34 ms, p95 27.65 ms, max 29.33 ms; filtered page p50 27.00 ms, p95 38.42 ms, max 38.63 ms; row swap p50 12.29 ms, p95 18.15 ms, max 19.20 ms; bulk preview p50 15.70 ms, p95 29.80 ms, max 30.90 ms. The filtered page's SQL-backed request path was slowest; all budgets (150/150/50/150 ms) passed.
+- Deviation: because V1 is unreleased and schema tests require version 1 only, `inherited_from` was added to `0001_v1.sql`; `Store.Open` idempotently adds it to archives created by earlier V1 builds without recording a version 2. No open questions.
+
 ## Rulings
 
 - (a) The `add-message-kind` skill (replaces `add-event-kind`) was written in W2(c).
