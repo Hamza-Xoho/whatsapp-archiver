@@ -105,7 +105,7 @@ func TestW6IDevPairerHTTPScenarioCoversEverySafeStateWithoutArchiveWrites(t *tes
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	p := newDevPairerWithTiming(ctx, devPairTiming{
-		Waiting: 5 * time.Millisecond, QR: 8 * time.Millisecond, Finish: 8 * time.Millisecond, Logout: 8 * time.Millisecond,
+		Waiting: 5 * time.Millisecond, QR: 8 * time.Millisecond, Finish: 8 * time.Millisecond, LoggedOutDelay: 8 * time.Millisecond,
 	})
 	data := filepath.Join(t.TempDir(), "pairing")
 	st, err := store.Open(filepath.Join(data, "archive.db"))
