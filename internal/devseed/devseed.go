@@ -246,11 +246,12 @@ func serveAndSimulate(ctx context.Context, dataDir string, st *store.Store, rule
 	defer cancel()
 	listening := make(chan struct{})
 	serverDone := make(chan error, 1)
+	pairer := newDevPairer(liveCtx)
 	ui := web.New(web.Deps{
 		Store: st, Rules: rules, Activity: bus, Config: cfg,
-		Pairer: newDevPairer(liveCtx),
+		Pairer: pairer,
 		Health: func() health.Snapshot {
-			return health.Snapshot{State: "connected", LastEvent: time.Now(), UpdatedAt: time.Now()}
+			return health.Snapshot{State: pairer.HealthState(), LastEvent: time.Now(), UpdatedAt: time.Now()}
 		},
 		Listening: func(string) { close(listening) },
 	})

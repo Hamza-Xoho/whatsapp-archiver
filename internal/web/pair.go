@@ -144,6 +144,9 @@ func (s *Server) pairView(ctx context.Context) (pairView, error) {
 	p.mu.Unlock()
 	if s.d.Health != nil {
 		v.LoggedOut = s.d.Health().State == "logged_out"
+		if v.LoggedOut {
+			v.JustPaired, v.Running, v.HasQR = false, false, false
+		}
 	}
 	if started, ok := s.d.Pairer.(interface{ PairingStarted() time.Time }); ok {
 		if at := started.PairingStarted(); !at.IsZero() {
