@@ -21,7 +21,7 @@ func TestStatusReportAndChatListReadChatStats(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := store.ChatStat{CanonicalJID: "5@s.whatsapp.net", Name: "Layla", MessageCount: 42, Oldest: 7, Newest: 99, OldestHistory: 123, MediaFailed: 1, MediaExpired: 2, MediaPending: 3, OpenGaps: 4}
+	want := store.ChatStat{CanonicalJID: "5@s.whatsapp.net", Name: "Layla", MessageCount: 42, Oldest: 7, Newest: 99, MediaFailed: 1, MediaExpired: 2, MediaPending: 3, OpenGaps: 4}
 	if len(r.Chats) != 1 || r.Chats[0] != want || r.Coverage.OldestByChat["5@s.whatsapp.net"] != 123 {
 		t.Fatalf("StatusReport = %+v, want the stored row %+v and oldest history 123", r, want)
 	}
