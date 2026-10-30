@@ -282,7 +282,7 @@ func TestAcknowledgeCoversAliases(t *testing.T) {
 
 func TestChatsPageLinkedInNav(t *testing.T) {
 	u := newChatsUI(t)
-	body, _, _ := get(t, u.handler(), "/")
+	body, _, _ := get(t, u.handler(), "/chats")
 	if !strings.Contains(string(body), `href="/chats"`) {
 		t.Fatal("no Chats link in the navigation")
 	}

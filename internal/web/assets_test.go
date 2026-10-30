@@ -45,9 +45,9 @@ func TestStylesheetIsServed(t *testing.T) {
 	}
 }
 
-// The layout loads the vendored files from this server, never a CDN, and opens the one SSE stream.
-func TestLayoutLoadsVendoredAssetsAndOpensTheStream(t *testing.T) {
-	body, code, ctype := get(t, New(Deps{}).Handler(), "/")
+// The Logging layout loads vendored assets from this server and opens its scoped SSE stream.
+func TestLayoutLoadsVendoredAssetsAndLoggingOpensTheStream(t *testing.T) {
+	body, code, ctype := get(t, New(Deps{}).Handler(), "/logging")
 	if code != http.StatusOK || !strings.HasPrefix(ctype, "text/html") {
 		t.Fatalf("status %d, Content-Type %q", code, ctype)
 	}
