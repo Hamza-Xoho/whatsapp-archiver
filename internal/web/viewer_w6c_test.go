@@ -124,6 +124,10 @@ func TestViewerFiltersDateJumpAndBothDirectionCursors(t *testing.T) {
 	if strings.Count(string(body), `hx-trigger="revealed"`) < 2 || !strings.Contains(string(body), `id="new-message-stream"`) || !strings.Contains(string(body), "new messages") {
 		t.Fatalf("middle page lacks two-way revealed loading or the away-from-edge counter: %s", body)
 	}
+	body, code, _ = get(t, u.handler(), "/chats/g@g.us?after=1761609700&after_id=m100")
+	if code != http.StatusOK || !strings.Contains(string(body), "body-101") || strings.Contains(string(body), "body-100") {
+		t.Fatalf("forward page skipped its nearest boundary message: %d %s", code, body)
+	}
 }
 
 func TestViewerInChatSearchHighlightsAndNavigatesSafely(t *testing.T) {
