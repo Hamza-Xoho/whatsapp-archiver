@@ -91,6 +91,16 @@ func TestHistorySpoolStripsSecretsUsesAllowlistAndHashesTheCleanChunk(t *testing
 	if strings.Contains(string(first[0].Blob), "first secret") || strings.Contains(first[0].Meta, "must not be stored") {
 		t.Fatalf("spooled row retains key material: meta=%s blob=%q", first[0].Meta, first[0].Blob)
 	}
+	if first[0].BlobFormat != store.BlobZlib {
+		t.Fatalf("spooled blob format=%q, want the stripped chunk to remain zlib-compressed", first[0].BlobFormat)
+	}
+	strippedAgain, err := ingest.StripHistorySecrets(first[0].Blob, first[0].BlobFormat)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(strippedAgain, first[0].Blob) {
+		t.Fatal("spooled zlib blob still contained key material")
+	}
 
 	// A resend whose only difference is stripped key material is the same chunk. The ID must therefore be computed
 	// from the stripped chunk, not from the downloaded input.
@@ -303,5 +313,44 @@ func TestHistorySpoolAcceptsUnknownProtobufFields(t *testing.T) {
 	}
 	if got := rows(t, st, "SELECT count(*) FROM messages"); strings.Join(got, ",") != "3" {
 		t.Fatalf("messages=%v", got)
+	}
+}
+
+// Moving history import out of whatsmeow's synchronous handler must not move it outside the event panic boundary.
+// One bad history item is retried from the durable spool, counted, and cannot take down capture.
+func TestHistorySpoolRecoversImporterPanicAndContinues(t *testing.T) {
+	st := testkit.Store(t)
+	health := &healthFake{}
+	writer := &panicWriter{Store: st, panics: 1}
+	p := ingest.NewPipeline(writer, ingest.NewFilter(nil, nil), &queueFake{}, health, quiet()).WithHistoryParser(historyParser())
+	spool := ingest.NewHistorySpool(writer, p, quiet())
+	if err := spool.Receive(t.Context(), spoolNotification(), threeMessageChunk().Data); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { defer close(done); spool.Run(ctx) }()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if got := rows(t, st, "SELECT imported_at IS NOT NULL FROM history_spool"); strings.Join(got, ",") == "1" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("history importer did not stop")
+	}
+	if got := rows(t, st, "SELECT imported_at IS NOT NULL FROM history_spool"); strings.Join(got, ",") != "1" {
+		t.Fatalf("spool row was not retried after panic: %v", got)
+	}
+	if health.panics != 1 {
+		t.Fatalf("recovered panics=%d, want 1", health.panics)
+	}
+	if got := rows(t, st, "SELECT count(*) FROM messages"); strings.Join(got, ",") != "3" {
+		t.Fatalf("messages=%v, want the retried chunk imported once", got)
 	}
 }
