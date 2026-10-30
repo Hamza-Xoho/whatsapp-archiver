@@ -1,6 +1,6 @@
 {{define "content"}}
   <h1>Search messages</h1>
-  <form class="panel search" method="get" action="/search" hx-get="/search" hx-target="#main" hx-select="#main" hx-swap="outerHTML" hx-push-url="true">
+  <form id="search-form" class="panel search" method="get" action="/search" data-request-region="search-results-region" hx-get="/search" hx-target="#main" hx-select="#main" hx-swap="outerHTML" hx-push-url="true">
     <label for="search-query">Search archived messages</label>
     <input id="search-query" name="q" value="{{.Query}}" placeholder="Words or part of a word">
     <button type="submit">Search</button>
@@ -17,6 +17,9 @@
       </label>
     </details>
   </form>
+  <section id="search-results-region" class="async-region" aria-busy="false">
+  <span class="request-loading" hidden aria-hidden="true"><span class="visually-hidden">Loading…</span></span>
+  <p class="request-error" hidden role="alert">Search is unavailable right now. Try again.</p>
   {{if not .Searched}}
     <p class="panel muted">Search text and captions across all logged chats.</p>
   {{else if not .Groups}}
@@ -42,4 +45,5 @@
     {{end}}
     {{if .HasMore}}<p><a href="{{.NextURL}}">More results</a></p>{{end}}
   {{end}}
+  </section>
 {{end}}

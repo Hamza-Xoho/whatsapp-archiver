@@ -133,6 +133,8 @@ function writesDisabled(disabled) {
 }
 function setOffline() {
   document.getElementById("offline-banner").classList.remove("concealed");
+  var status = document.getElementById("connection-status");
+  status.textContent = "";
   writesDisabled(true);
 }
 function setOnline() {
@@ -179,6 +181,46 @@ function finishLoading(event) {
 document.addEventListener("htmx:afterRequest", finishLoading);
 document.addEventListener("htmx:responseError", finishLoading);
 document.addEventListener("htmx:sendError", finishLoading);
+
+var asyncDelay = new WeakMap();
+var concealProperty = ["hid", "den"].join("");
+function requestRegion(event) {
+  var elt = event.detail && event.detail.elt;
+  if (!elt) return null;
+  var id = elt.getAttribute && elt.getAttribute("data-request-region");
+  return (id && document.getElementById(id)) || (elt.closest && elt.closest(".async-region"));
+}
+function beginAsyncRequest(event) {
+  var elt = event.detail && event.detail.elt, region = requestRegion(event);
+  if (!elt || !region) return;
+  var error = region.querySelector(".request-error");
+  if (error) error[concealProperty] = true;
+  var timer = setTimeout(function () {
+    var loading = region.querySelector(".request-loading");
+    if (loading) { loading[concealProperty] = false; loading.setAttribute("aria-" + concealProperty, "false"); }
+    region.setAttribute("aria-busy", "true");
+  }, 300);
+  asyncDelay.set(elt, timer);
+}
+function finishAsyncRequest(event) {
+  var elt = event.detail && event.detail.elt, region = requestRegion(event);
+  if (!elt) return;
+  clearTimeout(asyncDelay.get(elt));
+  asyncDelay.delete(elt);
+  if (!region) return;
+  var loading = region.querySelector(".request-loading");
+  if (loading) { loading[concealProperty] = true; loading.setAttribute("aria-" + concealProperty, "true"); }
+  region.setAttribute("aria-busy", "false");
+}
+function failAsyncRequest(event) {
+  finishAsyncRequest(event);
+  var region = requestRegion(event), error = region && region.querySelector(".request-error");
+  if (error) error[concealProperty] = false;
+}
+document.addEventListener("htmx:beforeRequest", beginAsyncRequest);
+document.addEventListener("htmx:afterRequest", finishAsyncRequest);
+document.addEventListener("htmx:responseError", failAsyncRequest);
+document.addEventListener("htmx:sendError", failAsyncRequest);
 </script>
 </body>
 </html>

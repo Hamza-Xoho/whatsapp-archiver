@@ -17,8 +17,8 @@
         {{if .ReactionCounts}}<div class="reactions">{{range .ReactionCounts}}<span aria-label="{{.Count}} reactions: {{.Emoji}}">{{.Emoji}} {{.Count}}</span>{{end}}</div>{{end}}
       </li>
 {{end}}
-{{define "older_edge"}}{{if .HasOlder}}<li class="edge-loader"><a href="{{.OlderURL}}" hx-get="{{.OlderFragmentURL}}" hx-trigger="revealed" hx-target="closest li" hx-swap="outerHTML" data-edge="older">Load older messages <span class="visually-hidden">Older</span></a></li>{{end}}{{end}}
-{{define "newer_edge"}}{{if .HasNewer}}<li class="edge-loader"><a href="{{.NewerURL}}" hx-get="{{.NewerFragmentURL}}" hx-trigger="revealed" hx-target="closest li" hx-swap="outerHTML" data-edge="newer">Load newer messages</a></li>{{end}}{{end}}
+{{define "older_edge"}}{{if .HasOlder}}<li class="edge-loader async-region" aria-busy="false"><a href="{{.OlderURL}}" hx-get="{{.OlderFragmentURL}}" hx-trigger="revealed" hx-target="closest li" hx-swap="outerHTML" data-edge="older">Load older messages <span class="visually-hidden">Older</span></a><span class="request-loading" hidden aria-hidden="true"><span class="visually-hidden">Loading…</span></span><p class="request-error" hidden role="alert">Older messages could not be loaded. <a href="{{.OlderURL}}">Try again</a></p></li>{{end}}{{end}}
+{{define "newer_edge"}}{{if .HasNewer}}<li class="edge-loader async-region" aria-busy="false"><a href="{{.NewerURL}}" hx-get="{{.NewerFragmentURL}}" hx-trigger="revealed" hx-target="closest li" hx-swap="outerHTML" data-edge="newer">Load newer messages</a><span class="request-loading" hidden aria-hidden="true"><span class="visually-hidden">Loading…</span></span><p class="request-error" hidden role="alert">Newer messages could not be loaded. <a href="{{.NewerURL}}">Try again</a></p></li>{{end}}{{end}}
 {{define "older_fragment"}}{{template "older_edge" .}}{{range .Messages}}{{template "bubble" .}}{{end}}{{end}}
 {{define "newer_fragment"}}{{range .Messages}}{{template "bubble" .}}{{end}}{{template "newer_edge" .}}{{end}}
 {{define "content"}}
