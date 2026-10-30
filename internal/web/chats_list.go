@@ -63,6 +63,41 @@ func (f chatFilters) values() url.Values {
 	return v
 }
 
+func filterChips(f chatFilters) []filterChip {
+	type activeFilter struct{ key, label string }
+	var active []activeFilter
+	if f.Query != "" {
+		active = append(active, activeFilter{"q", "Search: " + f.Query})
+	}
+	if f.Type != "" {
+		active = append(active, activeFilter{"type", "Type: " + f.Type})
+	}
+	if f.Logging != "" {
+		active = append(active, activeFilter{"logging", "Logging: " + f.Logging})
+	}
+	for _, item := range []struct {
+		key, label string
+		on         bool
+	}{
+		{"new", "Recently found", f.New}, {"gaps", "Has gaps", f.Gaps}, {"failed", "Failed media", f.Failed},
+	} {
+		if item.on {
+			active = append(active, activeFilter{item.key, item.label})
+		}
+	}
+	out := make([]filterChip, 0, len(active))
+	for _, item := range active {
+		values := f.values()
+		values.Del(item.key)
+		href := "/chats"
+		if query := values.Encode(); query != "" {
+			href += "?" + query
+		}
+		out = append(out, filterChip{Key: item.key, Label: item.label, Href: href})
+	}
+	return out
+}
+
 func normalizedChatType(typ, jid string) string {
 	switch typ {
 	case "community":
@@ -271,6 +306,11 @@ type rulePreviewData struct {
 	AffectedChildren          int
 }
 
+type plainRulePreviewData struct {
+	page
+	Preview rulePreviewData
+}
+
 func (s *Server) chatRulePreview(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxFormBytes)
 	if err := r.ParseForm(); err != nil {
@@ -317,7 +357,17 @@ func (s *Server) chatRulePreview(w http.ResponseWriter, r *http.Request) {
 		Media: r.PostForm.Get("media"), VideoMax: r.PostForm.Get("video_max_mb"), Downloads: r.PostForm["download"],
 		MediaSummary: mediaRuleSummary(r.PostForm)}
 	addEstimate(&data, estimate)
-	s.render(w, s.pages["chats"], "rule_preview", data)
+	s.renderRulePreview(w, r, data)
+}
+
+func (s *Server) renderRulePreview(w http.ResponseWriter, r *http.Request, data rulePreviewData) {
+	if r.Header.Get("HX-Request") != "" {
+		s.render(w, s.pages["chats"], "rule_preview", data)
+		return
+	}
+	s.render(w, s.pages["chats_preview"], "layout", plainRulePreviewData{
+		page: page{Title: "Review chat change", Current: "Chats"}, Preview: data,
+	})
 }
 
 func mediaRuleSummary(form url.Values) string {
@@ -367,7 +417,7 @@ func (s *Server) renderStalePreview(w http.ResponseWriter, r *http.Request, stal
 	addEstimate(&data, estimate)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusConflict)
-	s.render(w, s.pages["chats"], "rule_preview", data)
+	s.renderRulePreview(w, r, data)
 }
 
 func jidSet(jids []string) map[string]bool {

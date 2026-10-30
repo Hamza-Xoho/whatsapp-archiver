@@ -35,14 +35,17 @@ type chatChildView struct{ JID, Name string }
 
 type chatsData struct {
 	page
-	Filters    chatFilters
-	Rows       []chatRowView
-	MediaTypes []string
-	Total      int
-	Snapshot   string
-	Next, Prev string
-	HasFilters bool
+	Filters     chatFilters
+	Rows        []chatRowView
+	MediaTypes  []string
+	Total       int
+	Snapshot    string
+	Next, Prev  string
+	HasFilters  bool
+	FilterChips []filterChip
 }
+
+type filterChip struct{ Key, Label, Href string }
 
 // chats is GET /chats, the filtered, keyset-paged chat list. Like every GET it only reads.
 func (s *Server) chats(w http.ResponseWriter, r *http.Request) {
@@ -82,7 +85,7 @@ func (s *Server) chats(w http.ResponseWriter, r *http.Request) {
 	next, prev := pageLinks(filters, rawCursor, cursor, rows, more)
 	s.render(w, s.pages["chats"], "layout", chatsData{page: page{Title: "Chats", Current: "Chats"}, Filters: filters,
 		Rows: rows, MediaTypes: mediaTypes, Total: total, Snapshot: chatFilterSnapshot(filters, membership), Next: next, Prev: prev,
-		HasFilters: filters.active()})
+		HasFilters: filters.active(), FilterChips: filterChips(filters)})
 }
 
 // chatRows reads the derived chat list and small control tables. With only set, it returns just those rows.

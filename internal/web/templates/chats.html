@@ -1,12 +1,3 @@
-{{define "filter_hidden"}}
-  {{if .Query}}<input type="hidden" name="q" value="{{.Query}}">{{end}}
-  {{if .Type}}<input type="hidden" name="type" value="{{.Type}}">{{end}}
-  {{if .Logging}}<input type="hidden" name="logging_filter" value="{{.Logging}}">{{end}}
-  {{if .New}}<input type="hidden" name="new" value="1">{{end}}
-  {{if .Gaps}}<input type="hidden" name="gaps" value="1">{{end}}
-  {{if .Failed}}<input type="hidden" name="failed" value="1">{{end}}
-{{end}}
-
 {{define "chat_row"}}<tr id="{{.RowID}}"{{if .OOB}} hx-swap-oob="true"{{end}}>
   <td data-label="Select"><input class="chat-select" type="checkbox" name="jid[]" value="{{.CanonicalJID}}" form="bulk" aria-label="Select {{.DisplayName}}"></td>
   <td data-label="Chat"><a href="/chats/{{pathEscape .CanonicalJID}}"><bdi dir="auto">{{.DisplayName}}</bdi></a>{{if .New}} <span class="badge">New</span>{{end}}
@@ -35,22 +26,6 @@
 {{define "chat_rows"}}{{range .}}{{template "chat_row" .}}
 {{end}}{{end}}
 
-{{define "rule_preview"}}<section class="panel rule-preview" aria-labelledby="preview-title">
-  {{if .Changed}}<p class="warn">The filtered set changed. Review the new count and estimate before applying.</p>{{end}}
-  <h2 id="preview-title">{{if eq .Count 1}}Keep logging {{(index .Rows 0).DisplayName}}?{{else}}Change logging for {{.Count}} chats?{{end}}</h2>{{if gt .AffectedChildren 0}}<p>{{.AffectedChildren}} child chats affected</p>{{end}}
-  {{if .MediaSummary}}<p><strong>Chosen media rule:</strong> {{.MediaSummary}}</p>{{end}}
-  <p><strong>Projected per week</strong></p>
-  {{if .Unavailable}}<p>Text: Estimate unavailable<br>Media: Estimate unavailable</p>{{else}}<p>Text: {{.TextPerWeek}}<br>Media: {{.MediaPerWeek}}</p>{{end}}
-  <p class="muted">{{.Basis}}</p>
-  <form method="post" action="/chats/rules" hx-post="/chats/rules" hx-swap="none">
-    {{if ne .Scope "filtered"}}{{range .Rows}}<input type="hidden" name="jid[]" value="{{.CanonicalJID}}">{{end}}{{end}}
-    {{if .Scope}}<input type="hidden" name="scope" value="{{.Scope}}"><input type="hidden" name="snapshot" value="{{.Snapshot}}">{{template "filter_hidden" .Filters}}{{end}}
-    {{if .Logging}}<input type="hidden" name="logging" value="{{.Logging}}">{{end}}{{if .Media}}<input type="hidden" name="media" value="{{.Media}}">{{end}}
-    {{range .Downloads}}<input type="hidden" name="download" value="{{.}}">{{end}}{{if .VideoMax}}<input type="hidden" name="video_max_mb" value="{{.VideoMax}}">{{end}}
-    <button>{{if eq .Logging "on"}}Keep logging{{else}}Apply change{{end}}</button> <a href="/chats">Cancel</a>
-  </form>
-</section>{{end}}
-
 {{define "content"}}
   <div class="page-heading"><h1>{{.Title}}</h1><a href="/search">Search messages</a></div>
   <form class="panel search" method="get" action="/chats">
@@ -62,6 +37,7 @@
     </details>
     <button>Apply filters</button>{{if .HasFilters}} <a href="/chats">Clear filters</a>{{end}}
   </form>
+  {{if .FilterChips}}<nav class="filter-chips" aria-label="Active filters">{{range .FilterChips}}<a data-filter="{{.Key}}" href="{{.Href}}">{{.Label}} <span aria-hidden="true">×</span><span class="visually-hidden">Remove filter</span></a>{{end}}</nav>{{end}}
   <p role="status">{{.Total}} chats shown</p><div id="rule-preview"></div>
   {{if .Rows}}<form id="bulk" class="panel bulk" method="post" action="/chats/rules" hx-post="/chats/rules" hx-swap="none" onsubmit="if(this.logging.value==='off'&&!confirm('Stop logging these chats? Messages that arrive while logging is off are not saved.')){event.stopImmediatePropagation();return false}">
     <h2>Change selected chats</h2><label><input id="select-page" type="checkbox"> Select page</label><label><input type="checkbox" name="scope" value="filtered"> Select all {{.Total}} filtered</label>
