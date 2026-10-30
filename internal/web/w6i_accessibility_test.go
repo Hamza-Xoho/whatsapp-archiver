@@ -141,7 +141,7 @@ func TestW6IMobileTraceTargetsAndBidiIsolation(t *testing.T) {
 	}
 
 	preview, status := postForm(t, h, "/chats/rules/preview", url.Values{"jid[]": {chat}, "logging": {"on"}})
-	if status != http.StatusOK || !strings.Contains(preview, `<bdi dir="auto">عائلة الاختبار</bdi>`) {
+	if status != http.StatusOK || !strings.Contains(preview, `<bdi dir="auto">عائلة الاختبار?</bdi>`) {
 		t.Errorf("Arabic rule confirmation is not isolated: status=%d %s", status, preview)
 	}
 	export, code, _ := get(t, h, "/chats/"+chat+"/export")
