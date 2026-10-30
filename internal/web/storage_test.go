@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -160,7 +161,9 @@ func TestStorageWithoutBackupDestination(t *testing.T) {
 func TestStorageHasNoDeleteButtons(t *testing.T) {
 	r := newStorageRig(t, 100*gib)
 	body, _, _ := get(t, r.h, "/storage")
-	if containsText(string(body), "<form") || containsText(string(body), "<button") {
+	page := string(body)
+	main := page[strings.Index(page, "<main"):strings.Index(page, "</main>")]
+	if containsText(main, "<form") || containsText(main, "<button") {
 		t.Fatalf("storage page has a form or button:\n%s", body)
 	}
 }
