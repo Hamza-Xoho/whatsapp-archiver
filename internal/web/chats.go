@@ -47,7 +47,25 @@ type chatsData struct {
 // chats is GET /chats, the filtered, keyset-paged chat list. Like every GET it only reads.
 func (s *Server) chats(w http.ResponseWriter, r *http.Request) {
 	filters := parseChatFilters(r.URL.Query())
-	rows, err := s.chatRows(r.Context(), filters, nil, false)
+	rawCursor := r.URL.Query().Get("cursor")
+	cursor, err := decodeCursor(rawCursor)
+	if err != nil {
+		http.Error(w, "invalid page cursor", http.StatusBadRequest)
+		return
+	}
+	var list []store.ChatRow
+	var total int
+	var more bool
+	if s.d.Store != nil {
+		list, total, more, err = s.d.Store.ChatListPage(r.Context(), filters.storeFilter(), store.ChatListAfter{
+			JID: cursor.After, Last: cursor.Last, Messages: cursor.Messages,
+		}, chatsPageSize)
+		if err != nil {
+			http.Error(w, "the archive could not be read", http.StatusInternalServerError)
+			return
+		}
+	}
+	rows, err := s.chatRowViews(r.Context(), list, nil, false)
 	if err != nil {
 		http.Error(w, "the archive could not be read", http.StatusInternalServerError)
 		return
@@ -59,13 +77,9 @@ func (s *Server) chats(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "the archive could not be read", http.StatusInternalServerError)
 		return
 	}
-	pageRows, next, prev, err := paginateChats(rows, r.URL.Query().Get("cursor"), filters)
-	if err != nil {
-		http.Error(w, "invalid page cursor", http.StatusBadRequest)
-		return
-	}
+	next, prev := pageLinks(filters, rawCursor, cursor, rows, more)
 	s.render(w, s.pages["chats"], "layout", chatsData{page: page{Title: "Chats", Current: "Chats"}, Filters: filters,
-		Rows: pageRows, MediaTypes: mediaTypes, Total: len(rows), Snapshot: chatSnapshot(rows), Next: next, Prev: prev,
+		Rows: rows, MediaTypes: mediaTypes, Total: total, Snapshot: chatFilterSnapshot(filters, total), Next: next, Prev: prev,
 		HasFilters: filters.active()})
 }
 
@@ -74,9 +88,16 @@ func (s *Server) chatRows(ctx context.Context, filters chatFilters, only map[str
 	if s.d.Store == nil {
 		return nil, nil
 	}
-	list, err := s.d.Store.ChatList(ctx, filters.Query)
+	list, _, _, err := s.d.Store.ChatListPage(ctx, filters.storeFilter(), store.ChatListAfter{}, 10000)
 	if err != nil {
 		return nil, err
+	}
+	return s.chatRowViews(ctx, list, only, oob)
+}
+
+func (s *Server) chatRowViews(ctx context.Context, list []store.ChatRow, only map[string]bool, oob bool) ([]chatRowView, error) {
+	if s.d.Store == nil {
+		return nil, nil
 	}
 	controls, err := s.d.Store.ChatControls(ctx)
 	if err != nil {
@@ -116,9 +137,6 @@ func (s *Server) chatRows(ctx context.Context, filters chatFilters, only map[str
 			}
 		} else if control.Rule != nil {
 			label = "Own rule"
-		}
-		if !filters.match(c, typ) {
-			continue
 		}
 		kids := children[c.CanonicalJID]
 		confirm := "Stop logging this chat? Messages that arrive while logging is off are not saved."

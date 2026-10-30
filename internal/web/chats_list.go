@@ -80,6 +80,8 @@ func normalizedChatType(typ, jid string) string {
 
 type pageCursor struct {
 	After, Previous string
+	Last            int64
+	Messages        int
 }
 
 func encodeCursor(c pageCursor) string {
@@ -100,6 +102,30 @@ func decodeCursor(raw string) (pageCursor, error) {
 		return pageCursor{}, fmt.Errorf("bad cursor")
 	}
 	return c, nil
+}
+
+func (f chatFilters) storeFilter() store.ChatListFilter {
+	return store.ChatListFilter{Query: f.Query, Type: f.Type, Logging: f.Logging, New: f.New, Gaps: f.Gaps, Failed: f.Failed}
+}
+
+func pageLinks(filters chatFilters, raw string, cursor pageCursor, rows []chatRowView, more bool) (next, prev string) {
+	if more && len(rows) > 0 {
+		last := rows[len(rows)-1]
+		v := filters.values()
+		v.Set("cursor", encodeCursor(pageCursor{After: last.CanonicalJID, Last: last.Newest, Messages: last.MessageCount, Previous: raw}))
+		next = "/chats?" + v.Encode()
+	}
+	if raw != "" {
+		v := filters.values()
+		if cursor.Previous != "" {
+			v.Set("cursor", cursor.Previous)
+		}
+		prev = "/chats"
+		if encoded := v.Encode(); encoded != "" {
+			prev += "?" + encoded
+		}
+	}
+	return next, prev
 }
 
 func paginateChats(rows []chatRowView, raw string, filters chatFilters) ([]chatRowView, string, string, error) {
@@ -155,14 +181,20 @@ func chatSnapshot(rows []chatRowView) string {
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
+func chatFilterSnapshot(filters chatFilters, total int) string {
+	h := sha256.Sum256([]byte(filters.values().Encode() + "\n" + strconv.Itoa(total)))
+	return fmt.Sprintf("%x", h[:])
+}
+
 func (s *Server) filteredFormJIDs(r *http.Request) ([]string, error) {
 	filters := parsePostedChatFilters(r.PostForm)
 	rows, err := s.chatRows(r.Context(), filters, nil, false)
 	if err != nil {
 		return nil, fmt.Errorf("the archive could not be read")
 	}
-	if r.PostForm.Get("snapshot") == "" || r.PostForm.Get("snapshot") != chatSnapshot(rows) {
-		return nil, &staleFilterError{rows: rows, filters: filters, snapshot: chatSnapshot(rows)}
+	snapshot := chatFilterSnapshot(filters, len(rows))
+	if r.PostForm.Get("snapshot") == "" || r.PostForm.Get("snapshot") != snapshot {
+		return nil, &staleFilterError{rows: rows, filters: filters, snapshot: snapshot}
 	}
 	jids := make([]string, len(rows))
 	for i := range rows {
@@ -229,6 +261,7 @@ type rulePreviewData struct {
 	Scope, Snapshot           string
 	Filters                   chatFilters
 	Logging, Media, VideoMax  string
+	MediaSummary              string
 	Downloads                 []string
 	Changed                   bool
 	AffectedChildren          int
@@ -277,9 +310,27 @@ func (s *Server) chatRulePreview(w http.ResponseWriter, r *http.Request) {
 	}
 	data := rulePreviewData{Rows: rows, Count: len(change.jids), AffectedChildren: len(change.jids) - originalCount, Scope: r.PostForm.Get("scope"),
 		Snapshot: r.PostForm.Get("snapshot"), Filters: parsePostedChatFilters(r.PostForm), Logging: r.PostForm.Get("logging"),
-		Media: r.PostForm.Get("media"), VideoMax: r.PostForm.Get("video_max_mb"), Downloads: r.PostForm["download"]}
+		Media: r.PostForm.Get("media"), VideoMax: r.PostForm.Get("video_max_mb"), Downloads: r.PostForm["download"],
+		MediaSummary: mediaRuleSummary(r.PostForm)}
 	addEstimate(&data, estimate)
 	s.render(w, s.pages["chats"], "rule_preview", data)
+}
+
+func mediaRuleSummary(form url.Values) string {
+	switch form.Get("media") {
+	case "default":
+		return "Default media rule"
+	case "text-only":
+		return "Text only; no media"
+	case "custom":
+		summary := "Custom media: " + strings.Join(form["download"], ", ")
+		if cap := form.Get("video_max_mb"); cap != "" && slices.Contains(form["download"], "video") {
+			summary += "; videos up to " + cap + " MB"
+		}
+		return summary
+	default:
+		return ""
+	}
 }
 
 func addEstimate(data *rulePreviewData, estimate store.ChatEstimate) {
@@ -307,7 +358,8 @@ func (s *Server) renderStalePreview(w http.ResponseWriter, r *http.Request, stal
 	}
 	data := rulePreviewData{Rows: stale.rows, Count: len(stale.rows), Scope: "filtered", Snapshot: stale.snapshot,
 		Filters: stale.filters, Logging: r.PostForm.Get("logging"), Media: r.PostForm.Get("media"),
-		VideoMax: r.PostForm.Get("video_max_mb"), Downloads: r.PostForm["download"], Changed: true}
+		VideoMax: r.PostForm.Get("video_max_mb"), Downloads: r.PostForm["download"], Changed: true,
+		MediaSummary: mediaRuleSummary(r.PostForm)}
 	addEstimate(&data, estimate)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusConflict)
