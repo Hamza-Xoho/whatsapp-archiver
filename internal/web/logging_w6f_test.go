@@ -2,7 +2,6 @@ package web
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -223,12 +222,12 @@ func TestLoggingSQLAtScale(t *testing.T) {
 	if os.Getenv("W6F_DEVSEED_DATA") == "" {
 		t.Skip("covered with TestLoggingW6FAtScale")
 	}
-	t.Log(fmt.Sprintf("bounded section queries are independently timed by the handler test; data=%s", filepath.Base(os.Getenv("W6F_DEVSEED_DATA"))))
+	t.Logf("bounded section queries are independently timed by the handler test; data=%s", filepath.Base(os.Getenv("W6F_DEVSEED_DATA")))
 }
 
 type loggingPairer struct{ started time.Time }
 
-func (p loggingPairer) Paired() bool { return true }
+func (p loggingPairer) Paired() bool              { return true }
 func (p loggingPairer) PairingStarted() time.Time { return p.started }
 func (p loggingPairer) StartPairing(context.Context) (<-chan PairUpdate, error) {
 	return nil, nil
