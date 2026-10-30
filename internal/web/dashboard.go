@@ -42,6 +42,8 @@ type healthView struct {
 	State, StateClass, Detail string
 	Version, LastEvent        string
 	PhoneLastActive           string
+	SessionAge, LastEventAgo  string
+	PhoneActiveAgo            string
 	PhoneQuiet                bool
 	PhoneQuietFor             string
 	Panics                    int
@@ -176,6 +178,17 @@ func (s *Server) healthView(ctx context.Context, loc *time.Location) healthView 
 			v.Version += " (" + snap.VersionReason + ")"
 		}
 	}
+	if started, ok := s.d.Pairer.(interface{ PairingStarted() time.Time }); ok {
+		if at := started.PairingStarted(); !at.IsZero() {
+			v.SessionAge = sinceWords(max(s.d.Now().Sub(at), 0))
+		}
+	}
+	if !snap.LastEvent.IsZero() {
+		v.LastEventAgo = agoWords(s.d.Now().Sub(snap.LastEvent))
+	}
+	if !snap.PhoneLastActive.IsZero() {
+		v.PhoneActiveAgo = agoWords(s.d.Now().Sub(snap.PhoneLastActive))
+	}
 	// An unknown phone time is not a warning: the monitor counts quiet from its own start, the page has no start.
 	if limit := s.phoneQuietAfter(ctx); limit > 0 && !snap.PhoneLastActive.IsZero() {
 		if quiet := s.d.Now().Sub(snap.PhoneLastActive); quiet > limit {
@@ -210,10 +223,29 @@ func stateWords(state string) (label, class string) {
 		return "Connected", "ok"
 	case "disconnected":
 		return "Disconnected", "bad"
+	case "logged_out":
+		return "Logged out", "bad"
+	case "reconnecting":
+		return "Reconnecting", "bad"
+	case "degraded":
+		return "Degraded", "bad"
 	case "", "unknown":
 		return "Unknown", "warn"
 	}
 	return strings.ToUpper(state[:1]) + state[1:], "warn"
+}
+
+func agoWords(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	if d < time.Minute {
+		return fmt.Sprintf("%d seconds ago", int(d/time.Second))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%d minutes ago", int(d/time.Minute))
+	}
+	return sinceWords(d) + " ago"
 }
 
 func sinceWords(d time.Duration) string {

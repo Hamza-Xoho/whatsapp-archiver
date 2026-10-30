@@ -1,14 +1,14 @@
 {{define "logging_health"}}<section class="panel" id="health" hx-get="/partials/health" hx-trigger="sse:health" hx-swap="outerHTML">
   <h2>Connection</h2>
-  <p class="state {{.StateClass}}"><strong>{{.State}}</strong>{{if .Detail}} <span class="muted">{{.Detail}}</span>{{end}}</p>
+  <p class="state {{.StateClass}}"><strong>{{.State}}</strong>{{if eq .State "Logged out"}} · <a href="/pair">Pair again</a>{{end}}{{if .Detail}} <span class="muted">{{.Detail}}</span>{{end}}</p>
   {{if .PhoneQuiet}}<p class="warn" role="status">Your phone has not been active for {{.PhoneQuietFor}}. Open WhatsApp on your phone soon, or WhatsApp will unlink this archiver after 14 days of inactivity.</p>{{end}}
-  <dl class="facts"><dt>WhatsApp client version</dt><dd>{{.Version}}</dd><dt>Last event</dt><dd>{{.LastEvent}}</dd><dt>Phone last active</dt><dd>{{.PhoneLastActive}}</dd>{{if .Panics}}<dt>Recovered errors</dt><dd class="warn">{{.Panics}}</dd>{{end}}</dl>
+  <dl class="facts"><dt>WhatsApp client version</dt><dd>{{.Version}}</dd>{{if .SessionAge}}<dt>Session age</dt><dd>{{.SessionAge}}</dd>{{end}}<dt>Last event</dt><dd>{{if .LastEventAgo}}{{.LastEventAgo}} · {{end}}{{.LastEvent}}</dd><dt>Phone last active</dt><dd>{{if .PhoneActiveAgo}}{{.PhoneActiveAgo}} · {{end}}{{.PhoneLastActive}}</dd>{{if .Panics}}<dt>Recovered errors</dt><dd class="warn">{{.Panics}}</dd>{{end}}</dl>
 </section>{{end}}
 
 {{define "content"}}
 <h1>Logging</h1>
 <nav class="subnav" aria-label="Logging sections">
-  <a href="#overview">Overview</a><a href="#storage-backups">Storage &amp; backups</a><a href="#feed">Live feed</a><a href="#settings">Settings</a>
+  <a href="/logging" aria-current="page">Overview</a><a href="/logging/outages">Outages</a><a href="/logging/gaps-media">Gaps &amp; media</a><a href="/logging/history">History</a><a href="/logging/alerts">Alerts</a><a href="/logging/storage">Storage &amp; backups</a><a href="/logging/feed">Live feed</a><a href="/logging/settings">Settings</a>
 </nav>
 <section id="overview">
   {{template "logging_health" .Overview.Health}}

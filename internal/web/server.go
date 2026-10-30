@@ -124,18 +124,19 @@ func New(d Deps) *Server {
 		d:    d,
 		tmpl: base,
 		pages: map[string]*template.Template{
-			"dashboard":     pageTemplate(base, "dashboard"),
-			"logging":       pageTemplate(base, "logging"),
-			"chats":         pageTemplate(base, "rule_preview", "chats"),
-			"chats_preview": pageTemplate(base, "rule_preview", "chats_preview"),
-			"viewer":        pageTemplate(base, "viewer"),
-			"trace":         pageTemplate(base, "trace"),
-			"search":        pageTemplate(base, "search"),
-			"export":        pageTemplate(base, "export"),
-			"settings":      pageTemplate(base, "settings"),
-			"storage":       pageTemplate(base, "storage"),
-			"backups":       pageTemplate(base, "backups"),
-			"pair":          pageTemplate(base, "pair"),
+			"dashboard":       pageTemplate(base, "dashboard"),
+			"logging":         pageTemplate(base, "logging"),
+			"logging_section": pageTemplate(base, "logging_section"),
+			"chats":           pageTemplate(base, "rule_preview", "chats"),
+			"chats_preview":   pageTemplate(base, "rule_preview", "chats_preview"),
+			"viewer":          pageTemplate(base, "viewer"),
+			"trace":           pageTemplate(base, "trace"),
+			"search":          pageTemplate(base, "search"),
+			"export":          pageTemplate(base, "export"),
+			"settings":        pageTemplate(base, "settings"),
+			"storage":         pageTemplate(base, "storage"),
+			"backups":         pageTemplate(base, "backups"),
+			"pair":            pageTemplate(base, "pair"),
 		},
 		pair:        newPairing(),
 		static:      http.StripPrefix("/static/", fileOnly(http.FileServerFS(sub), sub)),
@@ -168,7 +169,9 @@ func (s *Server) routes(mux *http.ServeMux) {
 		http.Redirect(w, r, "/chats", http.StatusSeeOther)
 	})
 	mux.HandleFunc("GET /logging", s.logging)
+	mux.HandleFunc("GET /logging/{section}", s.loggingSection)
 	mux.HandleFunc("GET /partials/health", s.healthPartial)
+	mux.HandleFunc("GET /partials/feed", s.feedPartial)
 	mux.HandleFunc("GET /events", s.events)
 	mux.HandleFunc("GET /chats", s.chats)
 	mux.HandleFunc("POST /chats/rules/preview", s.chatRulePreview)
