@@ -9,9 +9,10 @@ import (
 
 type loggingData struct {
 	page
-	Overview dashboardData
-	Storage  storageData
-	Backups  backupsData
+	Overview              dashboardData
+	Storage               storageData
+	Backups               backupsData
+	StorageErr, BackupErr bool
 }
 
 // logging folds the former dashboard, storage, backups and settings screens into one operational area.
@@ -28,25 +29,17 @@ func (s *Server) logging(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	now := s.d.Now()
-	facts, err := s.storageCache.get(now, func() (storageFacts, error) { return s.storageFacts(ctx, now, loc) })
-	if err != nil {
-		http.Error(w, "the storage figures could not be read", http.StatusInternalServerError)
-		return
-	}
+	facts, storageErr := s.storageCache.get(now, func() (storageFacts, error) { return s.loggingStorage(ctx, now, loc) })
 	storage := facts.storageData
-	if min := s.diskFreeMinGB(ctx); min > 0 {
-		storage.Warning = projectionWarning(facts.free, facts.weekly, min)
+	if storageErr == nil {
+		if min := s.diskFreeMinGB(ctx); min > 0 {
+			storage.Warning = projectionWarning(facts.free, facts.weekly, min)
+		}
 	}
-	backups, err := s.backupsData(r)
-	if err != nil {
-		http.Error(w, "the settings could not be read", http.StatusInternalServerError)
-		return
-	}
+	backups, backupErr := s.loggingBackups(r)
 	data := loggingData{
-		page:     page{Title: "Logging", Current: "Logging", Live: true},
-		Overview: overview,
-		Storage:  storage,
-		Backups:  backups,
+		page: page{Title: "Logging", Current: "Logging", Live: true}, Overview: overview,
+		Storage: storage, Backups: backups, StorageErr: storageErr != nil, BackupErr: backupErr != nil,
 	}
 	s.render(w, s.pages["logging"], "layout", data)
 }

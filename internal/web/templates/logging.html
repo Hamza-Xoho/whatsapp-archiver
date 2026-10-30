@@ -22,9 +22,9 @@
 </section>
 
 <section class="panel"><h2><a href="/logging/storage">Storage &amp; backups</a></h2>
-  {{if .Storage.Warning}}<p class="warn" role="alert">{{.Storage.Warning}}</p>{{end}}
-  <h3>Space</h3><p>Archive {{.Storage.DB}} · media {{.Storage.Media}} · free {{.Storage.Free}}. <a href="/logging/storage">View storage details</a></p>
-  <h3>Nightly backup</h3><p>{{if .Backups.HasResult}}{{if .Backups.Succeeded}}Succeeded{{else}}Failed{{end}} at {{.Backups.ResultAt}}{{else}}No backup has run yet{{end}}. <a href="/logging/storage">View backup details</a></p>
+  {{if .StorageErr}}<p role="alert">Storage details are temporarily unavailable. <a href="/logging/storage">Try again</a></p>{{else}}{{if .Storage.Warning}}<p class="warn" role="alert">{{.Storage.Warning}}</p>{{end}}
+  <h3>Space</h3><p>Archive {{.Storage.DB}} · media {{.Storage.Media}} · free {{.Storage.Free}}. <a href="/logging/storage">View storage details</a></p>{{end}}
+  {{if .BackupErr}}<p role="alert">Backup details are temporarily unavailable. <a href="/logging/storage">Try again</a></p>{{else}}<h3>Nightly backup</h3><p>{{if .Backups.HasResult}}{{if .Backups.Succeeded}}Succeeded{{else}}Failed{{end}} at {{.Backups.ResultAt}}{{else}}No backup has run yet{{end}}. <a href="/logging/storage">View backup details</a></p>{{end}}
 </section>
 
 <section class="panel"><h2><a href="/logging/settings">Settings</a></h2><ul><li><a href="/logging/settings#media">Media rules</a></li><li><a href="/logging/settings#alerts">Alert thresholds</a></li><li><a href="/logging/settings#backup">Backup schedule</a></li></ul></section>

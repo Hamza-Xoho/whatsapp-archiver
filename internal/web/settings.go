@@ -185,7 +185,16 @@ func (s *Server) saveSetting(w http.ResponseWriter, r *http.Request) {
 		d.Backup, msg, err = s.saveBackup(r)
 	}
 	if err != nil {
-		http.Error(w, "the setting could not be saved", http.StatusInternalServerError)
+		msg = "The setting could not be saved. Your previous setting is still in use."
+		switch section {
+		case "media":
+			d.Media.Err = msg
+		case "alerts":
+			d.Alerts.Err = msg
+		case "backup":
+			d.Backup.Err = msg
+		}
+		s.renderSettingResult(w, r, section, d, http.StatusInternalServerError)
 		return
 	}
 	if msg == "" {
@@ -214,7 +223,12 @@ func (s *Server) saveSetting(w http.ResponseWriter, r *http.Request) {
 	case "backup":
 		d.Backup.Err = msg
 	}
-	w.WriteHeader(http.StatusUnprocessableEntity)
+	s.renderSettingResult(w, r, section, d, http.StatusUnprocessableEntity)
+}
+
+func (s *Server) renderSettingResult(w http.ResponseWriter, r *http.Request, section string, d settingsData, status int) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
 	if loggingSettingsRequest(r) {
 		if r.Header.Get("HX-Request") == "true" {
 			s.renderLoggingSettingsFragment(w, section, d)
@@ -241,16 +255,14 @@ func (s *Server) saveHeartbeatSetting(w http.ResponseWriter, r *http.Request, re
 	if remove {
 		if r.PostForm.Get("confirm") != "yes" {
 			msg = "Confirm heartbeat removal before continuing."
-		} else if err := s.d.Store.RemoveHeartbeatURL(r.Context()); err != nil {
-			http.Error(w, "the setting could not be saved", http.StatusInternalServerError)
-			return
+		} else if err := s.removeHeartbeatURL(r.Context()); err != nil {
+			msg = "The heartbeat endpoint could not be removed. The previous endpoint is still in use."
 		}
 	} else if value := strings.TrimSpace(r.PostForm.Get("heartbeat_url")); value != "" {
 		if err := validateHeartbeatURL(value); err != nil {
 			msg = "Heartbeat URL must be an http or https URL with a network host."
-		} else if err = s.d.Store.SetHeartbeatURL(r.Context(), value); err != nil {
-			http.Error(w, "the setting could not be saved", http.StatusInternalServerError)
-			return
+		} else if err = s.setHeartbeatURL(r.Context(), value); err != nil {
+			msg = "The heartbeat endpoint could not be saved. The previous endpoint is still in use."
 		}
 	}
 	if msg != "" {
@@ -260,7 +272,12 @@ func (s *Server) saveHeartbeatSetting(w http.ResponseWriter, r *http.Request, re
 			return
 		}
 		d.Settings.Heartbeat.Err = msg
-		w.WriteHeader(http.StatusUnprocessableEntity)
+		status := http.StatusUnprocessableEntity
+		if strings.Contains(msg, "previous endpoint is still in use") {
+			status = http.StatusInternalServerError
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(status)
 		if r.Header.Get("HX-Request") == "true" && loggingSettingsRequest(r) {
 			s.renderLoggingSettingsFragment(w, "heartbeat", d.Settings)
 		} else {
@@ -360,7 +377,7 @@ func (s *Server) saveMedia(r *http.Request) (mediaSection, string, error) {
 	if err := config.ValidateMediaRules(rules); err != nil {
 		return f, upperFirst(err.Error()), nil
 	}
-	return f, "", s.d.Store.SetMediaRules(r.Context(), rules)
+	return f, "", s.setMediaRules(r.Context(), rules)
 }
 
 func (s *Server) saveAlerts(r *http.Request) (alertsSection, string, error) {
@@ -384,7 +401,7 @@ func (s *Server) saveAlerts(r *http.Request) (alertsSection, string, error) {
 	if err := config.ValidateAlertThresholds(a); err != nil {
 		return f, upperFirst(err.Error()), nil
 	}
-	return f, "", s.d.Store.SetAlertThresholds(r.Context(), a)
+	return f, "", s.setAlertThresholds(r.Context(), a)
 }
 
 func (s *Server) saveBackup(r *http.Request) (backupSection, string, error) {
@@ -396,7 +413,7 @@ func (s *Server) saveBackup(r *http.Request) (backupSection, string, error) {
 	if err := config.ValidateBackupSchedule(f.Time, keep); err != nil {
 		return f, upperFirst(err.Error()), nil
 	}
-	return f, "", s.d.Store.SetBackupSchedule(r.Context(), config.BackupConfig{Time: f.Time, Keep: keep})
+	return f, "", s.setBackupSchedule(r.Context(), config.BackupConfig{Time: f.Time, Keep: keep})
 }
 
 func upperFirst(s string) string {

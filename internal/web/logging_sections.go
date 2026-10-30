@@ -80,6 +80,7 @@ func (s *Server) loggingSection(w http.ResponseWriter, r *http.Request) {
 			page: page{Title: "Logging", Current: "Logging"}, Section: section,
 			Heading: loggingHeading(section), Retry: "/logging/" + section, Error: true,
 		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusInternalServerError)
 	}
 	if section == "settings" {

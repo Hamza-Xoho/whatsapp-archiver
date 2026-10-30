@@ -97,6 +97,15 @@ type Server struct {
 	// testAlertAt throttles the test alert button.
 	testAlertMu sync.Mutex
 	testAlertAt time.Time
+	// Narrow function seams keep failure handling deterministic in tests while
+	// production still calls the one Store writer and the normal read models.
+	loggingStorage     func(context.Context, time.Time, *time.Location) (storageFacts, error)
+	loggingBackups     func(*http.Request) (backupsData, error)
+	setMediaRules      func(context.Context, config.MediaRules) error
+	setAlertThresholds func(context.Context, config.AlertConfig) error
+	setBackupSchedule  func(context.Context, config.BackupConfig) error
+	setHeartbeatURL    func(context.Context, string) error
+	removeHeartbeatURL func(context.Context) error
 	// pair is the browser pairing's state.
 	pair *pairing
 }
@@ -141,6 +150,14 @@ func New(d Deps) *Server {
 		pair:        newPairing(),
 		static:      http.StripPrefix("/static/", fileOnly(http.FileServerFS(sub), sub)),
 		healthEvery: 15 * time.Second,
+	}
+	s.loggingStorage, s.loggingBackups = s.storageFacts, s.backupsData
+	if d.Store != nil {
+		s.setMediaRules = d.Store.SetMediaRules
+		s.setAlertThresholds = d.Store.SetAlertThresholds
+		s.setBackupSchedule = d.Store.SetBackupSchedule
+		s.setHeartbeatURL = d.Store.SetHeartbeatURL
+		s.removeHeartbeatURL = d.Store.RemoveHeartbeatURL
 	}
 	return s
 }
