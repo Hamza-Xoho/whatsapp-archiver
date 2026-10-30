@@ -31,7 +31,7 @@ type textPart struct {
 type viewMsg struct {
 	store.ViewMessage
 	ChatJID, Time, Day, From, DOMID, QuoteDOMID, Ephemeral, MapURL string
-	NewDay, CurrentMatch                                           bool
+	NewDay, CurrentMatch, Autofocus                                bool
 	Body, Original                                                 []textPart
 	Location                                                       *store.LocationDetails
 	Contact                                                        *store.ContactDetails
@@ -54,6 +54,7 @@ type viewerData struct {
 // viewer is the typed, bounded chat reader. Its URL owns cursors, filters, date jumps and in-chat search.
 func (s *Server) viewer(w http.ResponseWriter, r *http.Request) {
 	jid := r.PathValue("jid")
+	legacyFocusID := r.URL.Query().Get("at")
 	for _, key := range []string{"before", "after"} {
 		if raw := r.URL.Query().Get(key); raw != "" {
 			if n, err := strconv.ParseInt(raw, 10, 64); err != nil || n < 0 {
@@ -85,6 +86,9 @@ func (s *Server) viewer(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+	if query.FocusID == "" {
+		query.FocusID = legacyFocusID
 	}
 	matches, matchIndex, err := s.viewerSearch(ctx, jid, r.URL.Query(), &query)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -182,6 +186,10 @@ func (s *Server) viewer(w http.ResponseWriter, r *http.Request) {
 	for _, m := range msgs {
 		v := makeViewMessage(loc, m, data.Query, m.ID == currentMatch)
 		v.ChatJID = jid
+		if legacyFocusID != "" && m.ID == legacyFocusID {
+			v.DOMID = "message-" + m.ID
+			v.Autofocus = true
+		}
 		if v.From == "" {
 			v.From = m.Sender
 		}

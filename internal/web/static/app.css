@@ -168,6 +168,13 @@ td.num { font-variant-numeric: tabular-nums; }
 .msg.deleted .text { text-decoration: line-through; }
 .msg .media { max-width: 18rem; max-height: 18rem; display: block; margin-top: 0.3rem; }
 .reactions span { margin-right: 0.3rem; }
+.search input { max-width: 24rem; min-height: 44px; }
+.search details { margin-top: 0.75rem; }
+.search details label { display: inline-block; margin: 0.35rem 1rem 0.35rem 0; }
+.search-results { list-style: none; margin: 0; padding: 0; }
+.search-results li { padding: 0.6rem 0; border-bottom: 1px solid var(--line); }
+.search-results .meta { color: var(--muted); margin: 0; }
+.search-context { display: -webkit-box; margin: 0.25rem 0; overflow: hidden; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 @media (max-width: 40rem) {
   .top { align-items: stretch; }
   .brand { flex-basis: 100%; }

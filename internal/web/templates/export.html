@@ -1,0 +1,19 @@
+{{define "content"}}
+  <h1>Export {{.Name}}</h1>
+  {{if ne .Name .JID}}<p><bdi>{{.JID}}</bdi></p>{{end}}
+  <p>All archived messages are selected by default. Choose dates to export a range.</p>
+  <form class="panel" method="get" action="/chats/{{pathEscape .JID}}/export/download">
+    <label>From date <input type="date" name="from" value="{{.From}}"></label>
+    <label>To date <input type="date" name="to" value="{{.To}}"></label>
+    <fieldset><legend>Format</legend>
+      <label><input type="radio" name="format" value="json" checked> Typed JSON</label>
+      <label><input type="radio" name="format" value="html"> Self-contained HTML</label>
+      <label><input type="radio" name="format" value="txt"> WhatsApp text</label>
+      <label><input type="radio" name="format" value="zip"> WhatsApp ZIP with media</label>
+    </fieldset>
+    <p class="muted">HTML embeds media up to 10 MiB each and 100 MiB total. Larger or unavailable files are listed or linked.</p>
+    <p>Preparing export… This page may be closed after the browser download begins.</p>
+    <button type="submit">Export chat</button>
+  </form>
+  <p><a href="/chats/{{pathEscape .JID}}">Back to chat</a></p>
+{{end}}

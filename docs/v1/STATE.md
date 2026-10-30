@@ -1,11 +1,9 @@
 Single status record for V1 (max 150 lines, update in place; history lives in git and the archived phase log).
-
 ## W6(h) synthetic seed and simulator
 
 - Done 29 Oct: `archiver devseed` creates deterministic Arabic/English data through `ingest.Pipeline.Ingest`, with all 16 message kinds, LID/phone aliases, gaps, outages and seven small media fixtures; `--simulate-live <rate>` serves the seeded UI and appends through the UI's activity bus until SIGINT, so SSE receives every event. The 5-chat/2k test pins exact kind counts and incremental-vs-RebuildDerived state. `.claude/launch.json` has static and live-5/s entries for `data/devseed` on 127.0.0.1:8090.
 - Measured clean 300k seed (250 chats, seed 42, no race): 5m53.6s, 143 MiB after close; 18,750 of each kind, 250 open gaps, two outages. Synthetic-only SQLite tuning uses `synchronous=OFF` with bounded 10k-page WAL checkpoints; normal capture is unchanged.
 - Review fixes 29 Oct (red `df2cdb4`, corrected concurrency assertion `b93a6e6`, green `69d2f3e`): media rows now carry absolute paths accepted by the media server; the fixtures are real PNG, Ogg/Opus and MP4 files (verified with `ffprobe`); simulator runs use collision-free message IDs, so the 16-message live launch stores immediately on an existing 300k seed. Race tests cover path/signature validity and the existing-seed restart. Full `make check` passed.
-
 ## Done
 
 - Phases 0-2 finished and deployed: a87a30f on ryzen since 2026-10-20 (old log: `docs/reviews/2026-10-26-progress-phase0-2-archive.md`).
@@ -131,6 +129,15 @@ Single status record for V1 (max 150 lines, update in place; history lives in gi
 - Done 30 Oct: typed WhatsApp-like bubbles, safe media/thumbnail controls, day groups, quotes, reactions, edits/deletes, polls, locations, contacts, markers, URL filters, two-way 100-message keysets, live-edge SSE append, date/message jumps and folded in-chat search; trace stays the Details destination. No golden file changed.
 - Warm release build on the 250-chat/300k devseed (chat `100145@lid`, 1,288 messages; five warm-ups + 30 runs): initial p50/p95 31.5/35.6 ms, older 28.7/32.8 ms, newer 22.4/25.8 ms; 57 KiB responses. The page-select query was slowest at about 10 ms (indexed canonical lookup plus bounded window/order); all are below 150 ms.
 - Review 30 Oct: no Critical findings; Important findings fixed through red `8360d5f` and `2180f4e`, green `769f2bf`. Live SSE now resumes by insert sequence without duplicates or same-second misses; both keyset edges load through revealed htmx fragments without dropping the forward boundary; away pages count new messages; image originals lazy-load after thumbnails; unavailable media links to Details; poll totals, exact date-gap copy, inert missing quotes, precise folded highlights and focused headings are present. Full `make check` passed; no invariant deviations or open questions. Minor follow-ups are a populated sender selector and `dir="auto"` on collapsed vCard/document-name text.
+
+## W6(d) global search
+
+- Implemented on `v1/w6de-search-export`: whole-query folded phrase routing, canonical filters/keyset paging, edit-row resolution, rich unfolded context, safe folded highlights, grouped `/search` results and message jumps. Review regressions cover punctuation, negative FTS rowids, detail/filename context and escaped segments; dense newest-first optimization is trigram-only so 1–2 rune `search_fts` terms retain Unicode word-token semantics. No golden file changed.
+- Actual W6(h) seed (250 canonical chats, 300,000 messages, seed 42), warm cache, query `archive message`, 5 warmups + 30 measured `Store.Search` calls after the review fixes: p50 5.170 ms, p95 6.508 ms, slowest 6.771 ms (under 300 ms). Dense unfiltered searches use the global message-time index after bounded FTS routing; sparse/filtered/edit searches remain FTS-first.
+- Final reviewer pass: broad punctuation candidates and repeated edits can no longer starve an older exact phrase; search is linked from Chats, lands and focuses the matching viewer message, retains prior results through htmx loading/error/offline states, and uses the specified recoverable error copy. Red commits `9d2d0df`, `dce82dd`; green `43f2551`; full `make check` passed.
+## W6(e) chat export
+- Streamed per-chat typed JSON, self-contained escaped HTML, WhatsApp `_chat.txt`, and ZIP-with-media exports use canonical alias paging plus a bounded chronological message/event merge. Review fixes include explicit timestamp-zero cursors, globally unique event keys, date-scoped top-level event collections, orphan/chat events, meaningful kind details, exact timezone/sender/body round trips, cancellation checks, direct-streamed manifests, stateless collision-safe transcript/ZIP naming, stored thumbnails, native safe media tags, precise bounded-embed omissions and inert HTML/SVG. No golden file changed.
+- Final reviewer pass: HTML now shows JSON-equivalent provenance and counts, omitted-media links remain absolute when the file is opened after download, archive names are length-bounded before ZIP headers, and pre-stream failures use the specified recoverable copy. Red `dce82dd`; green `43f2551`; full `make check` passed. Deferred Minor: a file that disappears between the ZIP manifest pass and media pass can be silently omitted from the completed archive.
 
 ## Rulings
 

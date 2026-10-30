@@ -3,7 +3,7 @@
       {{if .NewDay}}<li class="day-separator"><time>{{.Day}}</time></li>{{end}}
       {{$msg := .}}
       <li class="msg bubble {{if .FromMe}}outgoing{{else}}incoming{{end}}{{if .Deleted}} deleted{{end}}"{{if .CurrentMatch}} aria-current="true"{{end}}>
-        <h2 id="{{.DOMID}}" class="meta" tabindex="-1"><bdi class="name" dir="auto">{{.From}}</bdi> <time>{{.Time}}</time> <a class="muted" href="/chats/{{pathEscape .ChatJID}}/m/{{pathEscape .ID}}">Details</a></h2>
+        <h2 id="{{.DOMID}}" class="meta" tabindex="-1"{{if .Autofocus}} autofocus{{end}}><bdi class="name" dir="auto">{{.From}}</bdi> <time>{{.Time}}</time> <a class="muted" href="/chats/{{pathEscape .ChatJID}}/m/{{pathEscape .ID}}">Details</a></h2>
         {{if .QuotedID}}{{if .QuotedArchived}}<a class="quote" href="/chats/{{pathEscape .ChatJID}}?focus={{urlquery .QuotedID}}#{{.QuoteDOMID}}">Reply to <bdi dir="auto">{{if .QuotedSenderName}}{{.QuotedSenderName}}{{else}}{{.QuotedSender}}{{end}}</bdi>: <span dir="auto">{{.QuotedText}}</span></a>{{else}}<div class="quote">Reply to <bdi dir="auto">{{if .QuotedSenderName}}{{.QuotedSenderName}}{{else}}{{.QuotedSender}}{{end}}</bdi>: <span dir="auto">Original message is not archived</span></div>{{end}}{{end}}
         {{if .Deleted}}<p class="warn">This message was deleted <span class="visually-hidden">Deleted by the sender.</span></p><details><summary>Show deleted text</summary><div class="text" dir="auto">{{template "parts" .Body}}</div></details>{{else if .Body}}<div class="text" dir="auto">{{template "parts" .Body}}</div>{{end}}
         {{if .EditedText}}<span class="badge">Edited</span><details class="original"><summary>Original text</summary><span dir="auto">{{template "parts" .Original}}</span></details>{{end}}
@@ -29,7 +29,7 @@
     <p><a href="/chats">← Chats</a></p>
     <h1 dir="auto">{{.Name}}</h1>
     {{if ne .Name .JID}}<p class="chat"><bdi>{{.JID}}</bdi></p>{{end}}
-    <nav class="viewer-actions" aria-label="Viewer actions"><a href="#viewer-search">Search</a> <a href="#jump-date">Jump to date</a> <span aria-disabled="true">Export</span></nav>
+    <nav class="viewer-actions" aria-label="Viewer actions"><a href="#viewer-search">Search</a> <a href="#jump-date">Jump to date</a> <a href="/chats/{{pathEscape .JID}}/export">Export</a></nav>
   </header>
   <form id="viewer-search" class="panel viewer-filters" method="get">
     <label>Search this chat <input name="q" value="{{.Query}}" placeholder="Words or part of a word"></label>
