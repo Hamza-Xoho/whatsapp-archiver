@@ -121,6 +121,11 @@ Single status record for V1 (max 150 lines, update in place; history lives in gi
 - Done 30 Oct: three-area shell, ordered guard/recover/timing middleware, page-scoped SSE, global htmx error/offline behavior, escaped chat paths with unknown-chat 404, responsive cards, system/light/dark theme, and legacy operational content folded into Logging. Red commits `c3c8d29` and test-alignment `1f0837a`; full `make check` passed and no golden files changed.
 - Review 30 Oct: no Critical findings; two Important findings fixed through red `f52e3b3` and green `742a4fe`. Panic timing now records the recovered 500 response, and explicit Light/Dark choices override the system preference. Full `make check` passed; no invariant deviations or open questions.
 
+## W6(c) viewer
+
+- Done 30 Oct: typed WhatsApp-like bubbles, safe media/thumbnail controls, day groups, quotes, reactions, edits/deletes, polls, locations, contacts, markers, URL filters, two-way 100-message keysets, live-edge SSE append, date/message jumps and folded in-chat search; trace stays the Details destination. No golden file changed.
+- Warm release build on the 250-chat/300k devseed (chat `100145@lid`, 1,288 messages; five warm-ups + 30 runs): initial p50/p95 31.5/35.6 ms, older 28.7/32.8 ms, newer 22.4/25.8 ms; 57 KiB responses. The page-select query was slowest at about 10 ms (indexed canonical lookup plus bounded window/order); all are below 150 ms.
+
 ## Rulings
 
 - (a) The `add-message-kind` skill (replaces `add-event-kind`) was written in W2(c).
