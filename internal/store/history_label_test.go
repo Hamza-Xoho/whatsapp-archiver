@@ -3,10 +3,43 @@ package store_test
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"testing"
 
 	"whatsapp-archiver/internal/store"
 )
+
+// W5.2: status keeps each sync type and each durable ledger stage separate. A received chunk is visible before the
+// asynchronous importer finishes it, while imported coverage remains distinguishable.
+func TestHistoryCoverageReportsEachSyncTypeAndLedgerStage(t *testing.T) {
+	s := open(t)
+	ctx := context.Background()
+	spoolID, _, err := s.SpoolReceive(ctx, store.Spool{ChunkID: "f2", SyncType: "FULL", Progress: 57, ReceivedAt: 200, BlobFormat: store.BlobRaw, Blob: []byte("x")}, store.HistoryChunk{ID: "f2", SyncType: "FULL", ChunkOrder: 2, Progress: 57, ReceivedAt: 200})
+	if err != nil {
+		t.Fatal(err)
+	}
+	insertSyncChunk(t, s, "f1", "FULL", 1, 30, 100)
+	insertSyncChunk(t, s, "b1", "INITIAL_BOOTSTRAP", 0, 100, 50)
+	if err = s.SpoolImported(ctx, spoolID, 201, store.HistoryChunk{ID: "f2", SyncType: "FULL", ChunkOrder: 2, Progress: 57, ReceivedAt: 200}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = s.SpoolReceive(ctx, store.Spool{ChunkID: "r1", SyncType: "RECENT", Progress: 20, ReceivedAt: 300, BlobFormat: store.BlobRaw, Blob: []byte("x")}, store.HistoryChunk{ID: "r1", SyncType: "RECENT", Progress: 20, ReceivedAt: 300}); err != nil {
+		t.Fatal(err)
+	}
+
+	c, err := s.HistoryCoverage(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []store.SyncCoverage{
+		{SyncType: "FULL", ReceivedChunks: 1, ImportedChunks: 2, LastProgress: 57, LastChunkTime: 200},
+		{SyncType: "INITIAL_BOOTSTRAP", ImportedChunks: 1, LastProgress: 100, LastChunkTime: 50, Complete: true},
+		{SyncType: "RECENT", ReceivedChunks: 1, LastProgress: 20, LastChunkTime: 300},
+	}
+	if !reflect.DeepEqual(c.Syncs, want) {
+		t.Fatalf("sync coverage = %+v, want %+v", c.Syncs, want)
+	}
+}
 
 // insertChunks stores one history chunk per progress value, in the order given (received order, not progress order).
 func insertChunks(t *testing.T, s *store.Store, progress ...int) {

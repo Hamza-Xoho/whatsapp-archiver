@@ -88,6 +88,19 @@ func TestChatListUsesParticipantNameForDirectChats(t *testing.T) {
 	}
 }
 
+func TestChatListShowsHistoryBackToFromDerivedStats(t *testing.T) {
+	u := newChatsUI(t)
+	m := testkit.Message("family@g.us", "history-1", time.Date(2021, 3, 4, 12, 0, 0, 0, time.UTC))
+	m.Source = "history"
+	if _, err := u.st.InsertMessage(t.Context(), m); err != nil {
+		t.Fatal(err)
+	}
+	got := u.page(t, "/chats")
+	if !strings.Contains(got, "History back to 4 Mar 2021") {
+		t.Fatalf("chat row lacks derived history reach: %s", got)
+	}
+}
+
 func TestChatListFilter(t *testing.T) {
 	u := newChatsUI(t)
 	u.message(t, "1@g.us", "a")
