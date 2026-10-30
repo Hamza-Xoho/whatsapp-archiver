@@ -49,27 +49,28 @@ type Snapshot struct {
 	LastBackupPath string    `json:"last_backup_path"`
 }
 type Monitor struct {
-	mu         sync.Mutex
-	transition sync.Mutex // serializes state changes with their durable ledger writes
-	cfg        *config.Config
-	limits     func() config.AlertConfig // live thresholds; nil: cfg.Alerts
-	n          Notifier
-	clock      Clock
-	diskFree   func(string) (uint64, error)
-	version    func() string
-	reason     func() string
-	snapshot   Snapshot
-	gate       *alertGate
-	started    time.Time // baseline for rules whose event has not been seen yet
-	downSince  time.Time // when the connection was last lost; zero while connected
-	lostAt     time.Time // when this process logged "connection lost"; zero until it has
-	queue      chan alert
-	log        *slog.Logger
-	bus        *activity.Bus // nil: nothing is published
-	ledger     ConnectionLedger
-	outbox     AlertStore
-	wakeAlert  chan struct{}
-	heartbeat  *http.Client
+	mu           sync.Mutex
+	transition   sync.Mutex // serializes state changes with their durable ledger writes
+	cfg          *config.Config
+	limits       func() config.AlertConfig // live thresholds; nil: cfg.Alerts
+	n            Notifier
+	clock        Clock
+	diskFree     func(string) (uint64, error)
+	version      func() string
+	reason       func() string
+	snapshot     Snapshot
+	gate         *alertGate
+	started      time.Time // baseline for rules whose event has not been seen yet
+	downSince    time.Time // when the connection was last lost; zero while connected
+	lostAt       time.Time // when this process logged "connection lost"; zero until it has
+	queue        chan alert
+	log          *slog.Logger
+	bus          *activity.Bus // nil: nothing is published
+	ledger       ConnectionLedger
+	outbox       AlertStore
+	wakeAlert    chan struct{}
+	heartbeat    *http.Client
+	heartbeatURL func() string
 }
 type alert struct{ title, body string }
 
@@ -157,6 +158,13 @@ func (m *Monitor) WithHeartbeatClient(client *http.Client) *Monitor {
 		clone.Timeout = 15 * time.Second
 	}
 	m.heartbeat = &clone
+	return m
+}
+
+// WithHeartbeatURL makes each heartbeat read the current write-only setting.
+// It does not mutate the shared config and must be called before Run.
+func (m *Monitor) WithHeartbeatURL(url func() string) *Monitor {
+	m.heartbeatURL = url
 	return m
 }
 func (m *Monitor) Seen(t time.Time, fromMe bool) {
@@ -368,97 +376,6 @@ func (m *Monitor) enqueueAlert(key, kind, title, body string) bool {
 	return true
 }
 
-func (m *Monitor) runAlertOutbox(ctx context.Context) {
-	ticker := time.NewTicker(time.Minute)
-	defer ticker.Stop()
-	heartbeat := time.NewTicker(5 * time.Minute)
-	defer heartbeat.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-m.wakeAlert:
-			_ = m.sendDueAlerts(ctx)
-		case <-ticker.C:
-			_ = m.sendDueAlerts(ctx)
-		case <-heartbeat.C:
-			if err := m.pingHeartbeat(ctx); err != nil {
-				m.log.Error("heartbeat ping failed", "err", logsafe.RedactURLs(err.Error()))
-			}
-		}
-	}
-}
-
-func (m *Monitor) pingHeartbeat(ctx context.Context) error {
-	if m.cfg.Alerts.HeartbeatURL == "" || m.heartbeat == nil {
-		return nil
-	}
-	m.mu.Lock()
-	state, lastEvent := m.snapshot.State, m.snapshot.LastEvent
-	m.mu.Unlock()
-	limits := m.cfg.Alerts
-	if m.limits != nil {
-		limits = m.limits()
-	}
-	if state != "connected" || lastEvent.IsZero() || limits.NoEventsAfter <= 0 || m.clock.Now().Sub(lastEvent) > limits.NoEventsAfter {
-		return nil
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, m.cfg.Alerts.HeartbeatURL, nil)
-	if err != nil {
-		return err
-	}
-	resp, err := m.heartbeat.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("heartbeat status %s", resp.Status)
-	}
-	return nil
-}
-
-// sendDueAlerts drains queued rows in id order. A failed oldest row stops the
-// pass, so its recovery can never overtake it.
-func (m *Monitor) sendDueAlerts(ctx context.Context) error {
-	for {
-		a, ok, err := m.outbox.OldestQueuedAlert(ctx)
-		if err != nil || !ok {
-			return err
-		}
-		now := m.clock.Now()
-		if a.NextAttemptAt > now.Unix() {
-			return nil
-		}
-		if m.n == nil {
-			if err = m.outbox.AlertSkipped(ctx, a.ID); err != nil {
-				return err
-			}
-			continue
-		}
-		body := a.Body
-		if now.Unix()-a.RaisedAt >= 60 {
-			body += fmt.Sprintf("\nraised %s, delivered late", time.Unix(a.RaisedAt, 0).UTC().Format("15:04"))
-		}
-		if err = m.n.Notify(ctx, a.Title, body); err != nil {
-			safe := logsafe.RedactNtfy(logsafe.RedactURLs(err.Error()), m.ntfyURL())
-			next := now.Add(alertRetryBackoff(a.Attempts)).Unix()
-			if storeErr := m.outbox.AlertFailed(context.WithoutCancel(ctx), a.ID, safe, next); storeErr != nil {
-				return storeErr
-			}
-			m.log.Error("alert not sent", "title", a.Title, "err", safe)
-			return err
-		}
-		if err = m.outbox.AlertSent(context.WithoutCancel(ctx), a.ID, now.Unix()); err != nil {
-			return err
-		}
-	}
-}
-
-func alertRetryBackoff(attempts int) time.Duration {
-	backoff := time.Minute << min(attempts, 6)
-	return min(backoff, time.Hour)
-}
 func (m *Monitor) check() {
 	m.mu.Lock()
 	now := m.clock.Now()
@@ -507,46 +424,6 @@ func orStart(t, start time.Time) time.Time {
 		return start
 	}
 	return t
-}
-
-// notify queues an alert for Run's sender without blocking and reports whether it was queued;
-// when the queue is full the alert is dropped.
-func (m *Monitor) notify(title, body string) bool {
-	if m.n == nil {
-		return true
-	}
-	select {
-	case m.queue <- alert{title, body}:
-		return true
-	default:
-		m.log.Error("alert dropped: queue full", "title", title, "body", body)
-		return false
-	}
-}
-
-// sendAlerts hands queued alerts to the notifier with Run's context. Once ctx ends it passes on what is
-// still queued with the ended context (a real send then fails at once) and returns.
-func (m *Monitor) sendAlerts(ctx context.Context) {
-	for {
-		select {
-		case a := <-m.queue:
-			m.send(ctx, a)
-		case <-ctx.Done():
-			for {
-				select {
-				case a := <-m.queue:
-					m.send(ctx, a)
-				default:
-					return
-				}
-			}
-		}
-	}
-}
-func (m *Monitor) send(ctx context.Context, a alert) {
-	if err := m.n.Notify(ctx, a.title, a.body); err != nil {
-		m.log.Error("alert not sent", "title", a.title, "err", logsafe.RedactNtfy(err.Error(), m.ntfyURL()))
-	}
 }
 
 const alertEvery = 6 * time.Hour

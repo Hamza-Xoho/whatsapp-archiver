@@ -29,6 +29,7 @@ type loggingSectionData struct {
 	Backups                 backupsData
 	Feed                    []feedItem
 	FeedChat, FeedKind      string
+	Settings                settingsData
 }
 
 type loggingOutageView struct {
@@ -69,7 +70,11 @@ func (s *Server) loggingSection(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(http.StatusInternalServerError)
 	}
-	s.render(w, s.pages["logging_section"], "layout", data)
+	templateName := "layout"
+	if section == "settings" {
+		templateName = "settings_layout"
+	}
+	s.render(w, s.pages["logging_section"], templateName, data)
 }
 
 func validLoggingSection(section string) bool {
@@ -188,9 +193,11 @@ func (s *Server) loggingSectionData(r *http.Request, section string) (loggingSec
 	case "feed":
 		data.Feed = s.recentFiltered(nil, loc, data.FeedChat, data.FeedKind)
 	case "settings":
-		if _, readErr := s.settingsData(r.Context()); readErr != nil {
+		settings, readErr := s.settingsData(r.Context())
+		if readErr != nil {
 			return data, readErr
 		}
+		data.Settings = settings
 	}
 	return data, nil
 }

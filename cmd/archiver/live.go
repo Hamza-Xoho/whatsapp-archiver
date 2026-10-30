@@ -80,6 +80,25 @@ func (l liveSettings) backup() config.BackupConfig {
 	return b
 }
 
+// heartbeatURL is read for each ping. Once config has been imported, absence
+// means that the dashboard explicitly removed the URL; older archives fall
+// back to config.yaml until their first import.
+func (l liveSettings) heartbeatURL() string {
+	value, ok, err := l.st.HeartbeatURL(context.Background())
+	if err != nil {
+		l.log.Warn("heartbeat setting not read, using config.yaml", "err", err)
+		return l.cfg.Alerts.HeartbeatURL
+	}
+	if ok {
+		return value
+	}
+	imported, err := l.st.ConfigImported(context.Background())
+	if err == nil && imported {
+		return ""
+	}
+	return l.cfg.Alerts.HeartbeatURL
+}
+
 // warnIgnoredExclusions logs one warning per config.yaml exclude entry that the archive's rules (through aliases, as
 // capture applies them) do not exclude: after the import the dashboard owns the chat rules, so such an entry does
 // nothing. The JID is named only by the last 4 characters of its user part.
