@@ -29,7 +29,7 @@
     <p><a href="/chats">← Chats</a></p>
     <h1 dir="auto">{{.Name}}</h1>
     {{if ne .Name .JID}}<p class="chat"><bdi>{{.JID}}</bdi></p>{{end}}
-    <nav class="viewer-actions" aria-label="Viewer actions"><a href="#viewer-search">Search</a> <a href="#jump-date">Jump to date</a> <span aria-disabled="true">Export</span></nav>
+    <nav class="viewer-actions" aria-label="Viewer actions"><a href="#viewer-search">Search</a> <a href="#jump-date">Jump to date</a> <a href="/chats/{{pathEscape .JID}}/export">Export</a></nav>
   </header>
   <form id="viewer-search" class="panel viewer-filters" method="get">
     <label>Search this chat <input name="q" value="{{.Query}}" placeholder="Words or part of a word"></label>

@@ -122,6 +122,7 @@ func New(d Deps) *Server {
 			"viewer":        pageTemplate(base, "viewer"),
 			"trace":         pageTemplate(base, "trace"),
 			"search":        pageTemplate(base, "search"),
+			"export":        pageTemplate(base, "export"),
 			"settings":      pageTemplate(base, "settings"),
 			"storage":       pageTemplate(base, "storage"),
 			"backups":       pageTemplate(base, "backups"),
@@ -168,6 +169,8 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /chats/{jid}", s.viewer)
 	mux.HandleFunc("GET /chats/{jid}/events", s.viewerEvents)
 	mux.HandleFunc("GET /chats/{jid}/m/{id}", s.trace)
+	mux.HandleFunc("GET /chats/{jid}/export", s.exportPage)
+	mux.HandleFunc("GET /chats/{jid}/export/download", s.exportDownload)
 	mux.HandleFunc("GET /search", s.search)
 	mux.HandleFunc("GET /media", s.media)
 	mux.HandleFunc("GET /media/thumb", s.mediaThumb)
