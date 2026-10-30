@@ -11,9 +11,9 @@
   <section class="panel">
     <h2>Message</h2>
     <dl class="facts">
-      <dt>Chat</dt><dd>{{.ChatJID}}</dd>
-      <dt>Message id</dt><dd>{{.ID}}</dd>
-      <dt>Sender</dt><dd>{{.SenderJID}}</dd>
+      <dt>Chat</dt><dd><bdi>{{.ChatJID}}</bdi></dd>
+      <dt>Message id</dt><dd><bdi>{{.ID}}</bdi></dd>
+      <dt>Sender</dt><dd><bdi>{{.SenderJID}}</bdi></dd>
       <dt>Sent</dt><dd>{{$.Time}}</dd>
       <dt>Archived</dt><dd>{{$.Received}}</dd>
       <dt>Arrived as</dt><dd>{{.Source}}</dd>
@@ -21,7 +21,7 @@
       {{if .QuotedID}}<dt>Reply to</dt><dd><a href="/chats/{{pathEscape $.JID}}/m/{{pathEscape .QuotedID}}">{{.QuotedID}}</a></dd>{{end}}
       {{if $.MediaKind}}<dt>Media</dt><dd>{{$.MediaKind}}</dd>{{end}}
       <dt>Original record</dt><dd>{{$.Raw}}</dd>
-      <dt>Text</dt><dd class="text">{{if .Text}}{{.Text}}{{else}}{{.Caption}}{{end}}</dd>
+      <dt>Text</dt><dd class="text" dir="auto">{{if .Text}}{{.Text}}{{else}}{{.Caption}}{{end}}</dd>
     </dl>
   </section>
   {{end}}
@@ -29,10 +29,10 @@
   <section class="panel">
     <h2>What happened to it</h2>
     {{if .Events}}
-    <table>
+    <table class="trace-events">
       <thead><tr><th>When</th><th>What</th><th>By</th><th>Details</th></tr></thead>
       <tbody>
-      {{range .Events}}<tr><td>{{.Time}}</td><td>{{.Kind}}</td><td class="chat">{{.SenderJID}}</td><td>{{if .NewText}}{{.NewText}}{{else}}{{.Value}}{{end}}</td></tr>
+      {{range .Events}}<tr><td data-label="When">{{.Time}}</td><td data-label="What">{{.Kind}}</td><td data-label="By" class="chat"><bdi>{{.SenderJID}}</bdi></td><td data-label="Details" dir="auto">{{if .NewText}}{{.NewText}}{{else}}{{.Value}}{{end}}</td></tr>
       {{end}}
       </tbody>
     </table>

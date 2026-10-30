@@ -1,5 +1,5 @@
 {{define "content"}}
-  <h1>Export {{.Name}}</h1>
+  <h1>Export <bdi dir="auto">{{.Name}}</bdi></h1>
   {{if ne .Name .JID}}<p><bdi>{{.JID}}</bdi></p>{{end}}
   <p>All archived messages are selected by default. Choose dates to export a range.</p>
   <form class="panel" method="get" action="/chats/{{pathEscape .JID}}/export/download">

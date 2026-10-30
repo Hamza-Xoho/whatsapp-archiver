@@ -164,6 +164,7 @@ td.num { font-variant-numeric: tabular-nums; }
 .filters > summary, .row-rule > summary, .community > summary { cursor: pointer; min-height: 44px; padding: 0.6rem 0; }
 .pagination { display: flex; justify-content: space-between; gap: 1rem; margin: 1rem 0; }
 .pagination a { display: inline-flex; min-height: 44px; align-items: center; padding: 0 0.75rem; }
+.viewer-actions a, .page-controls a, .match-nav a { display: inline-flex; min-height: 44px; align-items: center; }
 .rule-preview { border-color: var(--accent); }
 .row-rule { display: inline-block; }
 .messages { list-style: none; margin: 0; padding: 0; }
@@ -196,6 +197,11 @@ td.num { font-variant-numeric: tabular-nums; }
   .chats td { border: 0; padding: 0.3rem; }
   .chats td::before { content: attr(data-label); display: inline-block; min-width: 7rem; margin-right: 0.5rem; color: var(--muted); font-weight: 600; }
   .chats td.actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  .trace-events thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .trace-events, .trace-events tbody, .trace-events tr, .trace-events td { display: block; width: 100%; }
+  .trace-events tr { margin-bottom: 1rem; padding: 0.5rem; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
+  .trace-events td { border: 0; padding: 0.3rem; }
+  .trace-events td::before { content: attr(data-label); display: inline-block; min-width: 6rem; margin-right: 0.5rem; color: var(--muted); font-weight: 600; }
   body:has(.chat-select:checked) .bulk { position: sticky; bottom: 0; z-index: 5; box-shadow: 0 -0.25rem 1rem #0004; }
   .filters { display: block; }
   .filters label { display: block; margin: 0.4rem 0; }
