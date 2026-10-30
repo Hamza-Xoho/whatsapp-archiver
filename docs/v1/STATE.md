@@ -104,6 +104,7 @@ Single status record for V1 (max 150 lines, update in place; history lives in gi
 - W5.2 golden review, 30 Oct: `cmd/archiver/testdata/status.golden` was edited by hand (no `-update`); exactly one line changed. The old aggregate `history: complete back to 2024-03-02, chunks 3, last chunk 2026-10-10 12:00 +03` became the per-sync ledger line `history FULL: complete, received 0, imported 3, last chunk 2026-10-10 12:00 +03`. Every other line is unchanged; per-chat history reach now comes from `chat_stats.oldest_history_ts` on the Chats UI.
 - W5.1-W5.3 done, 30 Oct: bounded history downloads are stripped before the durable spool, clean-chunk identity and allowlisted metadata are committed with the received ledger before acknowledgement, and the ordered importer resumes through `Pipeline.Ingest`; status is per sync type with an authoritative received-stage 48-hour stall clock and per-chat reach from `chat_stats`; Logging groups open gaps by cause and age while the `…6F66` source-ID closer and `…FCCF` reaction-target case stay pinned.
 - Whole-workstream and task reviews approved; targeted W5 mutations are 15/15 killed. Full `make check` passed; no deviations or open questions.
+- W5 reviewer follow-up, 30 Oct: the asynchronous importer now keeps each chunk inside the shared event-handler panic boundary, so a panicking history write is counted and retried instead of terminating capture; stripped spool blobs remain zlib-compressed as schema R9 requires. Red `41f51aa`, green `3c3bb52`; full `make check` passed.
 
 ## In flight
 
