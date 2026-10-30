@@ -7,7 +7,11 @@ import (
 	"testing"
 	"time"
 
+	"go.mau.fi/whatsmeow/proto/waE2E"
+	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
+	"google.golang.org/protobuf/proto"
+	"whatsapp-archiver/internal/config"
 	"whatsapp-archiver/internal/ingest"
 	"whatsapp-archiver/internal/store"
 )
@@ -28,6 +32,18 @@ func (communityQueue) Decide(context.Context, *store.Media) error  { return nil 
 func (communityQueue) Wake()                                       {}
 func (communityQueue) OnRetry(context.Context, *events.MediaRetry) {}
 
+type ruleCheckingQueue struct {
+	rules *ingest.RuleSet
+	got   *config.MediaRules
+}
+
+func (q *ruleCheckingQueue) Decide(_ context.Context, media *store.Media) error {
+	q.got = q.rules.Media(media.ChatJID)
+	return nil
+}
+func (*ruleCheckingQueue) Wake()                                       {}
+func (*ruleCheckingQueue) OnRetry(context.Context, *events.MediaRetry) {}
+
 type communityHealth struct{}
 
 func (communityHealth) Seen(time.Time, bool)    {}
@@ -46,5 +62,41 @@ func TestFutureCommunityChildIsExcludedBeforeItsFirstWrite(t *testing.T) {
 	}
 	if w.writes != 0 {
 		t.Fatalf("future child wrote %d batches before inheriting the stopped community; want 0", w.writes)
+	}
+}
+
+func TestJoinedGroupCarriesCommunityParentBeforeFirstMessage(t *testing.T) {
+	rules := ingest.NewRuleSet([]store.ChatRule{{JID: "community@g.us", Logging: false}})
+	w := &communityWriter{}
+	p := ingest.NewPipeline(w, ingest.NewFilter(rules, nil), communityQueue{}, communityHealth{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	p.Handle(&events.JoinedGroup{GroupInfo: types.GroupInfo{JID: jid("child@g.us"),
+		GroupLinkedParent: types.GroupLinkedParent{LinkedParentJID: jid("community@g.us")}}})
+	p.Handle(messageEvent("child@g.us", "first", &waE2E.Message{Conversation: proto.String("hello")}))
+	if w.writes != 0 {
+		t.Fatalf("real JoinedGroup/message path wrote %d child batches before applying the community rule; want 0", w.writes)
+	}
+}
+
+func TestCommunityDiscoveryPreservesExplicitChildRule(t *testing.T) {
+	parentMedia := &config.MediaRules{Download: []string{}}
+	childMedia := &config.MediaRules{Download: []string{"image"}}
+	rules := ingest.NewRuleSet([]store.ChatRule{
+		{JID: "community@g.us", Logging: false, Media: parentMedia},
+		{JID: "child@g.us", Logging: true, Media: childMedia},
+	})
+	w := &communityWriter{}
+	q := &ruleCheckingQueue{rules: rules}
+	p := ingest.NewPipeline(w, ingest.NewFilter(rules, nil), q, communityHealth{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	r := ingest.Result{Kind: ingest.KindMessage, Chat: store.Chat{JID: "child@g.us", ParentJID: "community@g.us"},
+		Message: &store.Message{ChatJID: "child@g.us", ID: "first", Kind: "image", Source: "live", RawProto: []byte("x")},
+		Media:   &store.Media{ChatJID: "child@g.us", MessageID: "first", Type: "image"}, Received: time.Unix(1, 0)}
+	if err := p.Ingest(t.Context(), r); err != nil {
+		t.Fatal(err)
+	}
+	if w.writes != 1 {
+		t.Fatalf("explicitly enabled child wrote %d batches; want 1", w.writes)
+	}
+	if q.got == nil || len(q.got.Download) != 1 || q.got.Download[0] != "image" {
+		t.Fatalf("media rule after discovery = %+v; want child's own image rule", q.got)
 	}
 }

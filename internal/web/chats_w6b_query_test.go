@@ -4,8 +4,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
+
+	"whatsapp-archiver/internal/store"
 )
 
 func TestChatsUsesBoundedStorePageAndDerivedEstimate(t *testing.T) {
@@ -40,5 +43,28 @@ func TestRulePreviewNamesChosenMediaRule(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Errorf("preview does not state %q in chosen rule: %s", want, text)
 		}
+	}
+}
+
+func TestFilteredSnapshotDetectsSameCountMembershipChange(t *testing.T) {
+	u := newChatsUI(t)
+	namedChat(t, u, "one@s.whatsapp.net", "One", "direct", "", dashNow)
+	namedChat(t, u, "two@s.whatsapp.net", "Two", "group", "", dashNow.Add(-1))
+	page := rawChatsPage(t, u, "/chats?type=direct")
+	snapshot := regexp.MustCompile(`name="snapshot" value="([^"]+)"`).FindStringSubmatch(page)
+	if len(snapshot) != 2 {
+		t.Fatalf("snapshot missing: %s", page)
+	}
+	if err := u.st.UpsertChat(t.Context(), store.Chat{JID: "one@s.whatsapp.net", Name: "One", Type: "group"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := u.st.UpsertChat(t.Context(), store.Chat{JID: "two@s.whatsapp.net", Name: "Two", Type: "direct"}); err != nil {
+		t.Fatal(err)
+	}
+	body, code := postForm(t, u.handler(), "/chats/rules/preview", url.Values{
+		"scope": {"filtered"}, "snapshot": {snapshot[1]}, "type": {"direct"}, "logging": {"off"},
+	})
+	if code != http.StatusConflict || !strings.Contains(visibleText(body), "filtered set changed") {
+		t.Fatalf("same-count membership swap = %d, %s; want stale-set review", code, visibleText(body))
 	}
 }
