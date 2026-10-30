@@ -17,11 +17,14 @@ type loggingSectionData struct {
 	Section, Heading, Retry string
 	Error                   bool
 	Outages                 []loggingOutageView
+	OutageToday             string
+	OutageLongest           string
 	Gaps                    []loggingGapView
 	MediaStates             []store.LoggingCount
 	MediaClasses            []store.LoggingCount
 	MediaReasons            []store.LoggingMediaReason
 	Media24, Media7         string
+	MediaFailures           bool
 	HistorySyncs            []loggingSyncView
 	SpoolBacklog            int
 	SpoolErrors             int
@@ -36,26 +39,29 @@ type loggingSectionData struct {
 
 type loggingOutageView struct {
 	State, Started, Ended, Duration, Cause string
-	Errors, Preview, Completed             int
+	Errors                                 int
+	Preview, Completed                     string
 }
 
 type loggingGapView struct {
-	CanonicalJID, TargetID, Cause, Age string
-	PostOutage                         bool
+	CanonicalJID, TargetID, Cause, Age, Oldest string
+	PostOutage                                 bool
+	Count                                      int
 }
 
 type loggingSyncView struct {
 	store.SyncCoverage
-	Stalled bool
+	Stalled                bool
+	OldestText, NewestText string
 }
 
 type loggingHistoryChatView struct {
-	CanonicalJID, Name, Oldest string
+	CanonicalJID, Name, State string
 }
 
 type loggingAlertView struct {
-	Title, Kind, State, Raised, Delivery string
-	Attempts                             int
+	Title, Kind, State, Raised, Delivered, Late string
+	Attempts                                    int
 }
 
 func (s *Server) loggingSection(w http.ResponseWriter, r *http.Request) {
@@ -136,6 +142,7 @@ func (s *Server) loggingSectionData(r *http.Request, section string) (loggingSec
 		if readErr != nil {
 			return data, readErr
 		}
+		data.OutageToday, data.OutageLongest = outageSummary(rows, now, loc)
 		for _, row := range rows {
 			end, duration := "In progress", now.Sub(time.Unix(row.StartedAt, 0))
 			if row.EndedAt > 0 {
@@ -143,17 +150,14 @@ func (s *Server) loggingSectionData(r *http.Request, section string) (loggingSec
 			}
 			data.Outages = append(data.Outages, loggingOutageView{State: titleWords(row.State), Started: view.FormatUnix(loc, row.StartedAt),
 				Ended: end, Duration: durationWords(duration), Cause: causeWords(row.CauseClass), Errors: row.ErrorCount,
-				Preview: optionalCount(row.OfflinePreviewMsgs), Completed: optionalCount(row.OfflineCompletedCount)})
+				Preview: optionalCountWords(row.OfflinePreviewMsgs), Completed: optionalCountWords(row.OfflineCompletedCount)})
 		}
 	case "gaps-media":
 		gaps, readErr := s.d.Store.LoggingGaps(r.Context(), 200)
 		if readErr != nil {
 			return data, readErr
 		}
-		for _, gap := range gaps {
-			data.Gaps = append(data.Gaps, loggingGapView{CanonicalJID: gap.CanonicalJID, TargetID: gap.TargetID,
-				Cause: gapCauseWords(gap.Cause), Age: agoWords(now.Sub(time.Unix(gap.ReceivedAt, 0))), PostOutage: gap.PostOutage})
-		}
+		data.Gaps = groupLoggingGaps(gaps, now)
 		media, readErr := s.d.Store.LoggingMedia(r.Context(), 50)
 		if readErr != nil {
 			return data, readErr
@@ -161,6 +165,7 @@ func (s *Server) loggingSectionData(r *http.Request, section string) (loggingSec
 		data.MediaStates = labelledCounts(media.States)
 		data.MediaClasses = labelledCounts(media.ErrorClasses)
 		data.MediaReasons = safeMediaReasons(media.Reasons)
+		data.MediaFailures = hasMediaFailures(media)
 		timeliness, readErr := s.d.Store.MediaTimeliness(r.Context(), now)
 		if readErr != nil {
 			return data, readErr
@@ -174,12 +179,21 @@ func (s *Server) loggingSectionData(r *http.Request, section string) (loggingSec
 		}
 		for _, sync := range history.Syncs {
 			data.HistorySyncs = append(data.HistorySyncs, loggingSyncView{SyncCoverage: sync,
-				Stalled: !sync.Complete && sync.LastChunkTime > 0 && !now.Before(time.Unix(sync.LastChunkTime, 0).Add(48*time.Hour))})
+				Stalled:    !sync.Complete && sync.LastChunkTime > 0 && !now.Before(time.Unix(sync.LastChunkTime, 0).Add(48*time.Hour)),
+				OldestText: optionalUnix(loc, sync.Oldest), NewestText: optionalUnix(loc, sync.Newest)})
 		}
 		data.SpoolBacklog, data.SpoolErrors = history.SpoolBacklog, history.SpoolErrors
+		complete := anyCompleteSync(history.Syncs)
 		for _, chat := range history.Chats {
+			state := "No history received"
+			if chat.HasHistory {
+				state = "History received back to " + view.FormatUnix(loc, chat.OldestHistory)
+				if complete {
+					state = "Complete — history received back to " + view.FormatUnix(loc, chat.OldestHistory)
+				}
+			}
 			data.HistoryChats = append(data.HistoryChats, loggingHistoryChatView{CanonicalJID: chat.CanonicalJID,
-				Name: chat.Name, Oldest: view.FormatUnix(loc, chat.OldestHistory)})
+				Name: chat.Name, State: state})
 		}
 	case "alerts":
 		alerts, readErr := s.d.Store.LoggingAlerts(r.Context(), 200)
@@ -187,15 +201,15 @@ func (s *Server) loggingSectionData(r *http.Request, section string) (loggingSec
 			return data, readErr
 		}
 		for _, alert := range alerts {
-			delivery := ""
+			delivered, lateText := "", ""
 			if alert.SentAt > 0 {
-				delivery = "Delivered"
+				delivered = view.FormatUnix(loc, alert.SentAt)
 				if late := time.Duration(alert.SentAt-alert.RaisedAt) * time.Second; late >= time.Minute {
-					delivery += " " + durationWords(late) + " late"
+					lateText = durationWords(late) + " late"
 				}
 			}
 			data.Alerts = append(data.Alerts, loggingAlertView{Title: alert.Title, Kind: titleWords(alert.Kind),
-				State: titleWords(alert.State), Raised: view.FormatUnix(loc, alert.RaisedAt), Delivery: delivery, Attempts: alert.Attempts})
+				State: titleWords(alert.State), Raised: view.FormatUnix(loc, alert.RaisedAt), Delivered: delivered, Late: lateText, Attempts: alert.Attempts})
 		}
 	case "storage":
 		facts, readErr := s.storageCache.get(now, func() (storageFacts, error) { return s.storageFacts(r.Context(), now, loc) })
@@ -334,13 +348,6 @@ func causeWords(value string) string {
 		return "DNS"
 	}
 	return titleWords(value)
-}
-
-func optionalCount(value *int64) int {
-	if value == nil {
-		return 0
-	}
-	return int(*value)
 }
 
 func durationWords(d time.Duration) string {

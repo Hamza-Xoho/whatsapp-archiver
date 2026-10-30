@@ -127,6 +127,7 @@ func (s *Store) loggingCounts(ctx context.Context, query string) ([]LoggingCount
 type LoggingHistoryChat struct {
 	CanonicalJID, Name string
 	OldestHistory      int64
+	HasHistory         bool
 }
 
 type LoggingHistoryReport struct {
@@ -145,14 +146,15 @@ func (s *Store) LoggingHistory(ctx context.Context, chatLimit int) (LoggingHisto
 		return out, fmt.Errorf("read logging spool counts: %w", err)
 	}
 	chatLimit = boundedLoggingLimit(chatLimit, 250)
-	rows, err := s.read.QueryContext(ctx, `SELECT canonical,name,oldest_history_ts FROM chat_stats WHERE oldest_history_ts IS NOT NULL ORDER BY oldest_history_ts,canonical LIMIT ?`, chatLimit)
+	rows, err := s.read.QueryContext(ctx, `SELECT canonical,name,COALESCE(oldest_history_ts,0),oldest_history_ts IS NOT NULL
+ FROM chat_stats ORDER BY oldest_history_ts IS NULL,oldest_history_ts,canonical LIMIT ?`, chatLimit)
 	if err != nil {
 		return out, fmt.Errorf("read logging history chats: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var row LoggingHistoryChat
-		if err = rows.Scan(&row.CanonicalJID, &row.Name, &row.OldestHistory); err != nil {
+		if err = rows.Scan(&row.CanonicalJID, &row.Name, &row.OldestHistory, &row.HasHistory); err != nil {
 			return out, err
 		}
 		out.Chats = append(out.Chats, row)
