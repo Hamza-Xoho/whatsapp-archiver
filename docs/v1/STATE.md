@@ -139,6 +139,10 @@ Single status record for V1 (max 150 lines, update in place; history lives in gi
 - Streamed per-chat typed JSON, self-contained escaped HTML, WhatsApp `_chat.txt`, and ZIP-with-media exports use canonical alias paging plus a bounded chronological message/event merge. Review fixes include explicit timestamp-zero cursors, globally unique event keys, date-scoped top-level event collections, orphan/chat events, meaningful kind details, exact timezone/sender/body round trips, cancellation checks, direct-streamed manifests, stateless collision-safe transcript/ZIP naming, stored thumbnails, native safe media tags, precise bounded-embed omissions and inert HTML/SVG. No golden file changed.
 - Final reviewer pass: HTML now shows JSON-equivalent provenance and counts, omitted-media links remain absolute when the file is opened after download, archive names are length-bounded before ZIP headers, and pre-stream failures use the specified recoverable copy. Red `dce82dd`; green `43f2551`; full `make check` passed. Deferred Minor: a file that disappears between the ZIP manifest pass and media pass can be silently omitted from the completed archive.
 
+## W6(g) pairing
+
+- Done 30 Oct: initial/renewed QR flow, cancellation, safe failures, linked-device advice and process-observed session age; voluntary and LoggedOut re-pair reset only the whatsmeow device store and resume in the same process, leaving the archive and media untouched. Fake-boundary tests are `eb0e84b`, implementation `0aa1be2`; full `make check` passed and no golden files changed.
+
 ## Rulings
 
 - (a) The `add-message-kind` skill (replaces `add-event-kind`) was written in W2(c).
