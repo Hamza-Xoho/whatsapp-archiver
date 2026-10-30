@@ -1,13 +1,18 @@
 package web
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 
+	"whatsapp-archiver/internal/activity"
 	"whatsapp-archiver/internal/store"
 	"whatsapp-archiver/internal/testkit"
 )
@@ -48,7 +53,7 @@ func TestViewerRendersTypedMessagesEventsAndBidiSafely(t *testing.T) {
 		t.Fatalf("viewer status %d", code)
 	}
 	body := string(raw)
-	for _, want := range []string{`dir="auto"`, "مرحبا بالعالم", "View once", "24 hours", "28 October 2025", "Riyadh", "Central", "Open map", `rel="noopener noreferrer"`, "Aisha", "Show vCard", "Lunch?", "Pizza", "1 vote", "Results may be incomplete"} {
+	for _, want := range []string{`dir="auto"`, "مرحبا بالعالم", "View once", "24 hours", "28 October 2025", "Riyadh", "Central", "Open map", `rel="noopener noreferrer"`, "Aisha", "Show vCard", "Lunch?", "Pizza", "1 vote", "1 archived vote", "Results may be incomplete"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("viewer lacks %q: %s", want, body)
 		}
@@ -81,6 +86,12 @@ func TestViewerQuotedJumpReactionCountsAndDeletedDefault(t *testing.T) {
 	if body, code, _ := get(t, u.handler(), "/chats/g@g.us?focus=missing"); code != http.StatusNotFound || !strings.Contains(string(body), "404") {
 		t.Fatalf("foreign/missing focus = %d %s, want 404", code, body)
 	}
+	u.typedMessage(t, store.Message{ID: "missing-reply", Kind: "text", Text: "answer two", QuotedID: "not-archived", QuotedSender: "9@lid", Timestamp: 103})
+	raw, _, _ = get(t, u.handler(), "/chats/g@g.us")
+	body = string(raw)
+	if !strings.Contains(body, "Original message is not archived") || strings.Contains(body, `focus=not-archived`) {
+		t.Fatalf("missing quote must be inert rather than a broken jump: %s", body)
+	}
 }
 
 func TestViewerFiltersDateJumpAndBothDirectionCursors(t *testing.T) {
@@ -102,9 +113,16 @@ func TestViewerFiltersDateJumpAndBothDirectionCursors(t *testing.T) {
 	if code != http.StatusOK || !strings.Contains(string(body), `id="message-`) || !strings.Contains(string(body), "nearest archived message") {
 		t.Fatalf("date jump = %d %s", code, body)
 	}
+	body, code, _ = get(t, u.handler(), "/chats/g@g.us?date=2025-10-27")
+	if code != http.StatusOK || !strings.Contains(string(body), "No message is archived on that date") {
+		t.Fatalf("missing-date jump = %d %s", code, body)
+	}
 	body, code, _ = get(t, u.handler(), "/chats/g@g.us?before=1761609706&before_id=m106")
 	if code != http.StatusOK || !strings.Contains(string(body), "Load newer messages") || !strings.Contains(string(body), "Load older messages") {
 		t.Fatalf("middle page has no two-way controls: %d %s", code, body)
+	}
+	if strings.Count(string(body), `hx-trigger="revealed"`) < 2 || !strings.Contains(string(body), `id="new-message-stream"`) || !strings.Contains(string(body), "new messages") {
+		t.Fatalf("middle page lacks two-way revealed loading or the away-from-edge counter: %s", body)
 	}
 }
 
@@ -117,6 +135,12 @@ func TestViewerInChatSearchHighlightsAndNavigatesSafely(t *testing.T) {
 	got := string(body)
 	if code != http.StatusOK || !strings.Contains(got, "1 of 2") || !strings.Contains(got, "Next match") || !strings.Contains(got, `<mark>`) || !strings.Contains(got, `aria-current="true"`) {
 		t.Fatalf("search navigation = %d %s", code, got)
+	}
+	if !strings.Contains(got, `<mark>مرحبا`) || strings.Contains(got, `<mark>before`) {
+		t.Fatalf("search must mark only the folded match: %s", got)
+	}
+	if !regexp.MustCompile(`id="message-[ab]"[^>]*tabindex="-1"`).MatchString(got) {
+		t.Fatalf("current search heading is not programmatically focusable: %s", got)
 	}
 	if strings.Contains(got, "<script>alert") || !strings.Contains(got, "&lt;script&gt;") {
 		t.Fatalf("highlight injected unescaped content: %s", got)
@@ -132,12 +156,16 @@ func TestViewerUsesStoredThumbnailAndNativeMediaControls(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	u.typedMessage(t, store.Message{ID: "pending", Kind: "image", Timestamp: 200})
+	if err := testkit.InsertMedia(t.Context(), u.st, store.Media{ChatJID: "g@g.us", MessageID: "pending", Type: "image", State: "pending"}); err != nil {
+		t.Fatal(err)
+	}
 	raw, code, _ := get(t, u.handler(), "/chats/g@g.us")
 	if code != http.StatusOK {
 		t.Fatalf("viewer status %d", code)
 	}
 	body := string(raw)
-	for _, want := range []string{`src="/media/thumb?chat=g%40g.us&amp;id=image"`, `loading="lazy"`, `<video`, `<audio`, `preload="metadata"`, `download`, "document.safe", "42.0 B"} {
+	for _, want := range []string{`src="/media/thumb?chat=g%40g.us&amp;id=image"`, `data-original="/media?chat=g%40g.us&amp;id=image"`, `loading="lazy"`, `<video`, `<audio`, `preload="metadata"`, `download`, "document.safe", "42.0 B", "Waiting to download", `/chats/g@g.us/m/pending`} {
 		if !strings.Contains(body, want) {
 			t.Errorf("viewer lacks %q: %s", want, body)
 		}
@@ -146,6 +174,70 @@ func TestViewerUsesStoredThumbnailAndNativeMediaControls(t *testing.T) {
 	if w.Code != http.StatusOK || w.Body.String() != "thumb" || w.Header().Get("Content-Type") != "image/jpeg" {
 		t.Fatalf("thumbnail = %d %q %q", w.Code, w.Body.String(), w.Header().Get("Content-Type"))
 	}
+}
+
+func TestViewerSSEUsesAStableLiveCursorAndResumesWithoutDuplicates(t *testing.T) {
+	u := newChatsUI(t)
+	u.typedMessage(t, store.Message{ID: "z", Kind: "text", Text: "initial", Timestamp: 100})
+	bus := activity.NewBus(500)
+	s := New(Deps{Store: u.st, Rules: u.rules, Config: u.cfg, Activity: bus})
+	srv := httptest.NewServer(s.Handler())
+	t.Cleanup(srv.Close)
+
+	page, err := srv.Client().Get(srv.URL + "/chats/g@g.us")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := io.ReadAll(page.Body)
+	_ = page.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`sse-connect="([^"]+)"`).FindStringSubmatch(string(raw))
+	if m == nil {
+		t.Fatalf("viewer has no SSE URL: %s", raw)
+	}
+	stream, cancel := openViewerStream(t, srv, m[1], nil)
+	u.typedMessage(t, store.Message{ID: "a", Kind: "text", Text: "same-second lower id", Timestamp: 100})
+	bus.Publish(activity.Event{Kind: "message", Chat: "g@g.us", Detail: "text"})
+	first := next(t, stream, "viewer", 2*time.Second)
+	cancel()
+	if first.id == "" || !strings.Contains(first.data, "same-second lower id") {
+		t.Fatalf("first live event = %#v", first)
+	}
+
+	u.typedMessage(t, store.Message{ID: "b", Kind: "text", Text: "after reconnect", Timestamp: 100})
+	resumed, stop := openViewerStream(t, srv, m[1], http.Header{"Last-Event-ID": {first.id}})
+	defer stop()
+	got := next(t, resumed, "viewer", 2*time.Second)
+	if !strings.Contains(got.data, "after reconnect") || strings.Contains(got.data, "same-second lower id") {
+		t.Fatalf("resumed live event = %#v", got)
+	}
+}
+
+func openViewerStream(t *testing.T, srv *httptest.Server, path string, header http.Header) (<-chan sseEvent, context.CancelFunc) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL+path, nil)
+	if err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	for key, values := range header {
+		req.Header[key] = values
+	}
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		cancel()
+		_ = resp.Body.Close()
+		t.Fatalf("viewer stream status %d", resp.StatusCode)
+	}
+	t.Cleanup(func() { cancel(); _ = resp.Body.Close() })
+	return readEvents(ctx, resp.Body), cancel
 }
 
 func getMediaPath(t *testing.T, h http.Handler, path string) *httptest.ResponseRecorder {
