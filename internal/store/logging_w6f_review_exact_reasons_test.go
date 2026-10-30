@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func TestLoggingMediaReasonTaxonomyCountsEveryApplicableRowExactly(t *testing.T) {
+func TestLoggingMediaReasonTaxonomyAtScaleCountsEveryApplicableRowExactly(t *testing.T) {
 	s := openInternal(t)
 	_, err := s.write.ExecContext(t.Context(), `WITH RECURSIVE n(i) AS (
  VALUES(0) UNION ALL SELECT i+1 FROM n WHERE i<29999

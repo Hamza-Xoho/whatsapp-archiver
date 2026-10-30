@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func TestLoggingMediaAggregatesThreeHundredThousandRowsWithinBudget(t *testing.T) {
+func TestLoggingMediaAtScaleAggregatesThreeHundredThousandRowsWithinBudget(t *testing.T) {
 	s := openInternal(t)
 	_, err := s.write.ExecContext(t.Context(), `WITH RECURSIVE n(i) AS (
  VALUES(0) UNION ALL SELECT i+1 FROM n WHERE i<299999
@@ -43,7 +43,7 @@ FROM n`)
 	t.Logf("300k media rows aggregated in %v", took)
 }
 
-func TestLoggingGapGroupingDoesNotScanPeriodsPerGap(t *testing.T) {
+func TestLoggingGapGroupingAtScaleDoesNotScanPeriodsPerGap(t *testing.T) {
 	s := openInternal(t)
 	if _, err := s.write.ExecContext(t.Context(), `INSERT INTO chats(jid,type) VALUES('dense@g.us','group');
 INSERT INTO chat_canonical(alias,canonical) VALUES('dense@g.us','dense@g.us')`); err != nil {
