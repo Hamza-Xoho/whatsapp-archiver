@@ -115,15 +115,16 @@ func New(d Deps) *Server {
 		d:    d,
 		tmpl: base,
 		pages: map[string]*template.Template{
-			"dashboard": pageTemplate(base, "dashboard"),
-			"logging":   pageTemplate(base, "logging"),
-			"chats":     pageTemplate(base, "chats"),
-			"viewer":    pageTemplate(base, "viewer"),
-			"trace":     pageTemplate(base, "trace"),
-			"settings":  pageTemplate(base, "settings"),
-			"storage":   pageTemplate(base, "storage"),
-			"backups":   pageTemplate(base, "backups"),
-			"pair":      pageTemplate(base, "pair"),
+			"dashboard":     pageTemplate(base, "dashboard"),
+			"logging":       pageTemplate(base, "logging"),
+			"chats":         pageTemplate(base, "rule_preview", "chats"),
+			"chats_preview": pageTemplate(base, "rule_preview", "chats_preview"),
+			"viewer":        pageTemplate(base, "viewer"),
+			"trace":         pageTemplate(base, "trace"),
+			"settings":      pageTemplate(base, "settings"),
+			"storage":       pageTemplate(base, "storage"),
+			"backups":       pageTemplate(base, "backups"),
+			"pair":          pageTemplate(base, "pair"),
 		},
 		pair:        newPairing(),
 		static:      http.StripPrefix("/static/", fileOnly(http.FileServerFS(sub), sub)),
@@ -135,8 +136,12 @@ func New(d Deps) *Server {
 // pageTemplate is the layout with one page's templates/<name>.html on top. Pages cannot share a template set: each
 // defines its own "content" block, and the last one parsed would win. Every page is therefore a clone of the layout
 // parsed with its own file. Add a page by creating templates/<name>.html and listing it in New.
-func pageTemplate(layout *template.Template, name string) *template.Template {
-	return template.Must(template.Must(layout.Clone()).ParseFS(templateFiles, "templates/"+name+".html"))
+func pageTemplate(layout *template.Template, names ...string) *template.Template {
+	files := make([]string, len(names))
+	for i, name := range names {
+		files[i] = "templates/" + name + ".html"
+	}
+	return template.Must(template.Must(layout.Clone()).ParseFS(templateFiles, files...))
 }
 
 // Handler is every route behind the host and origin guard.
@@ -155,7 +160,9 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /partials/health", s.healthPartial)
 	mux.HandleFunc("GET /events", s.events)
 	mux.HandleFunc("GET /chats", s.chats)
+	mux.HandleFunc("POST /chats/rules/preview", s.chatRulePreview)
 	mux.HandleFunc("POST /chats/rules", s.chatRules)
+	mux.HandleFunc("POST /chats/rules/inherit", s.chatRuleInherit)
 	mux.HandleFunc("POST /chats/ack", s.chatAck)
 	mux.HandleFunc("GET /chats/{jid}", s.viewer)
 	mux.HandleFunc("GET /chats/{jid}/m/{id}", s.trace)

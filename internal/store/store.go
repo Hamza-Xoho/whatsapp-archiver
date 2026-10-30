@@ -135,12 +135,46 @@ func Open(path string) (*Store, error) {
 		_ = write.Close()
 		return nil, err
 	}
+	if err = ensureV1Columns(write); err != nil {
+		_ = write.Close()
+		return nil, err
+	}
 	read, err := sql.Open("sqlite", dsn+"&mode=ro")
 	if err != nil {
 		_ = write.Close()
 		return nil, fmt.Errorf("open archive reader: %w", err)
 	}
 	return &Store{write: write, read: read, path: path}, nil
+}
+
+// ensureV1Columns upgrades archives created by an earlier V1 build without changing their schema version. V1 is not
+// yet released, and its migration remains version 1; fresh archives already contain these columns.
+func ensureV1Columns(db *sql.DB) error {
+	rows, err := db.Query(`PRAGMA table_info(chat_rules)`)
+	if err != nil {
+		return fmt.Errorf("inspect chat rules schema: %w", err)
+	}
+	found := false
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, typ string
+		var defaultValue any
+		if err = rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &primaryKey); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("inspect chat rules column: %w", err)
+		}
+		found = found || name == "inherited_from"
+	}
+	if err = rows.Close(); err != nil {
+		return fmt.Errorf("inspect chat rules schema: %w", err)
+	}
+	if found {
+		return nil
+	}
+	if _, err = db.Exec(`ALTER TABLE chat_rules ADD COLUMN inherited_from TEXT NOT NULL DEFAULT ''`); err != nil {
+		return fmt.Errorf("upgrade chat rules inheritance: %w", err)
+	}
+	return nil
 }
 
 // checkSchema refuses an archive from before V1 (R16). Such an archive lists version 1 in schema_version, so the new

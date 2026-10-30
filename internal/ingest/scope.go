@@ -13,6 +13,9 @@ func NewFilter(rules *RuleSet, aliases func(string) ([]string, error)) *Filter {
 	return &Filter{rules: rules, aliases: aliases}
 }
 
+// DiscoverCommunityChild applies the parent's live rule before the child's first capture decision.
+func (f *Filter) DiscoverCommunityChild(child, parent string) { f.rules.Discover(child, parent) }
+
 // Keep reports whether an event of this chat and kind is archived. A failed alias lookup is an error and never an
 // answer: guessing "keep" would store an excluded chat seen under its other alias, so callers retry until it succeeds.
 func (f *Filter) Keep(chatJID string, kind Kind) (bool, error) {

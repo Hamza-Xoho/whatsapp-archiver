@@ -23,10 +23,11 @@ const (
 // ChatRule is the per-chat setting. Logging false means the chat is not stored. Media nil means the global media
 // rules apply. A rule is keyed on the JID as given (CON-7); its aliases are resolved by the reader.
 type ChatRule struct {
-	JID       string
-	Logging   bool
-	Media     *config.MediaRules
-	UpdatedAt int64
+	JID           string
+	Logging       bool
+	Media         *config.MediaRules
+	InheritedFrom string
+	UpdatedAt     int64
 }
 
 // ChatSeen is a chat's first sighting. A chat is new until it is acknowledged.
@@ -49,7 +50,43 @@ type backupSchedule struct {
 }
 
 func (s *Store) ChatRules(ctx context.Context) ([]ChatRule, error) {
-	rows, err := s.read.QueryContext(ctx, `SELECT jid,logging,media,updated_at FROM chat_rules ORDER BY jid`)
+	rules, err := s.ExplicitChatRules(ctx)
+	if err != nil {
+		return nil, err
+	}
+	byJID := make(map[string]ChatRule, len(rules))
+	for _, rule := range rules {
+		byJID[rule.JID] = rule
+	}
+	rows, err := s.read.QueryContext(ctx, `SELECT jid,parent_jid FROM chats WHERE parent_jid<>'' ORDER BY jid`)
+	if err != nil {
+		return nil, fmt.Errorf("query community children: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var jid, parent string
+		if err = rows.Scan(&jid, &parent); err != nil {
+			return nil, fmt.Errorf("scan community child: %w", err)
+		}
+		if _, exists := byJID[jid]; exists {
+			continue
+		}
+		if parentRule, ok := byJID[parent]; ok {
+			copy := parentRule
+			copy.JID, copy.InheritedFrom = jid, parent
+			rules = append(rules, copy)
+			byJID[jid] = copy
+		}
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("read community children: %w", err)
+	}
+	return rules, nil
+}
+
+// ExplicitChatRules returns stored rows without synthesizing rules for newly discovered community children.
+func (s *Store) ExplicitChatRules(ctx context.Context) ([]ChatRule, error) {
+	rows, err := s.read.QueryContext(ctx, `SELECT jid,logging,media,inherited_from,updated_at FROM chat_rules ORDER BY jid`)
 	if err != nil {
 		return nil, fmt.Errorf("query chat rules: %w", err)
 	}
@@ -58,7 +95,7 @@ func (s *Store) ChatRules(ctx context.Context) ([]ChatRule, error) {
 	for rows.Next() {
 		var r ChatRule
 		var media string
-		if err = rows.Scan(&r.JID, &r.Logging, &media, &r.UpdatedAt); err != nil {
+		if err = rows.Scan(&r.JID, &r.Logging, &media, &r.InheritedFrom, &r.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("scan chat rule: %w", err)
 		}
 		if media != "" {
@@ -99,7 +136,7 @@ func (s *Store) SetChatRules(ctx context.Context, rules []ChatRule) error {
 		if at == 0 {
 			at = now
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO chat_rules(jid,logging,media,updated_at) VALUES(?,?,?,?) ON CONFLICT(jid) DO UPDATE SET logging=excluded.logging,media=excluded.media,updated_at=excluded.updated_at`, r.JID, r.Logging, media, at); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO chat_rules(jid,logging,media,inherited_from,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(jid) DO UPDATE SET logging=excluded.logging,media=excluded.media,inherited_from=excluded.inherited_from,updated_at=excluded.updated_at`, r.JID, r.Logging, media, r.InheritedFrom, at); err != nil {
 			return fmt.Errorf("write chat rule %s: %w", r.JID, classify(err))
 		}
 		// A rule may name a chat the archive has not stored yet; reads join on chat_canonical (schema 4.1), and the

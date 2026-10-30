@@ -12,11 +12,15 @@ import (
 
 // RuleSet is the live set of chat rules the capture path reads. Replace swaps it whole, so the next event sees the
 // new rules without a restart. A nil RuleSet has no rules: every chat is logged with the global media rules.
-type RuleSet struct{ cur atomic.Pointer[ruleState] }
+type RuleSet struct {
+	cur atomic.Pointer[ruleState]
+	mu  sync.Mutex
+}
 
 type ruleState struct {
 	excluded map[string]struct{}
 	media    map[string]*config.MediaRules
+	explicit map[string]struct{}
 }
 
 func NewRuleSet(rules []store.ChatRule) *RuleSet {
@@ -27,8 +31,13 @@ func NewRuleSet(rules []store.ChatRule) *RuleSet {
 
 // Replace installs rules as the full rule set.
 func (r *RuleSet) Replace(rules []store.ChatRule) {
-	st := &ruleState{excluded: map[string]struct{}{}, media: map[string]*config.MediaRules{}}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	st := &ruleState{excluded: map[string]struct{}{}, media: map[string]*config.MediaRules{}, explicit: map[string]struct{}{}}
 	for _, rule := range rules {
+		if rule.InheritedFrom == "" {
+			st.explicit[rule.JID] = struct{}{}
+		}
 		if !rule.Logging {
 			st.excluded[rule.JID] = struct{}{}
 		}
@@ -38,6 +47,45 @@ func (r *RuleSet) Replace(rules []store.ChatRule) {
 		}
 	}
 	r.cur.Store(st)
+}
+
+// Discover gives a community child its parent's current effective rule before capture decides whether to write the
+// child's first event. The copy is replaced by the next durable rule refresh.
+func (r *RuleSet) Discover(child, parent string) {
+	if r == nil || child == "" || parent == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	old := r.cur.Load()
+	if old == nil {
+		return
+	}
+	if _, explicit := old.explicit[child]; explicit {
+		return
+	}
+	next := &ruleState{excluded: make(map[string]struct{}, len(old.excluded)+1), media: make(map[string]*config.MediaRules, len(old.media)+1), explicit: make(map[string]struct{}, len(old.explicit))}
+	for jid := range old.excluded {
+		next.excluded[jid] = struct{}{}
+	}
+	for jid, media := range old.media {
+		next.media[jid] = media
+	}
+	for jid := range old.explicit {
+		next.explicit[jid] = struct{}{}
+	}
+	if _, excluded := old.excluded[parent]; excluded {
+		next.excluded[child] = struct{}{}
+	} else {
+		delete(next.excluded, child)
+	}
+	if media := old.media[parent]; media != nil {
+		copy := *media
+		next.media[child] = &copy
+	} else {
+		delete(next.media, child)
+	}
+	r.cur.Store(next)
 }
 
 // Excluded reports whether logging is off for the chat with exactly this JID. Aliases are the Filter's job.

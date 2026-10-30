@@ -81,7 +81,11 @@ func (p *Pipeline) importHistory(ctx context.Context, evt *events.HistorySync, w
 		if conv == nil {
 			continue
 		}
-		chat := conv.GetID()
+		directory := historyChat(conv)
+		chat := directory.JID
+		if directory.ParentJID != "" {
+			p.filter.DiscoverCommunityChild(chat, directory.ParentJID)
+		}
 		keepChat := false
 		if chat != "" {
 			if keepChat, err = p.keep(ctx, chat, KindMessage); err != nil {
@@ -90,9 +94,13 @@ func (p *Pipeline) importHistory(ctx context.Context, evt *events.HistorySync, w
 		}
 		if keepChat {
 			if upErr := p.persist(ctx, "upsert history chat", func() error {
-				_, upErr := p.writer.Apply(ctx, store.Batch{Chat: &store.Chat{JID: chat, Name: conv.GetName()}})
+				_, upErr := p.writer.Apply(ctx, store.Batch{Chat: &directory})
 				return upErr
 			}); upErr != nil {
+				return stored, skipped, upErr
+			}
+		} else if chatHasDirectoryMetadata(directory) {
+			if upErr := p.persistExcludedChatMetadata(ctx, directory); upErr != nil {
 				return stored, skipped, upErr
 			}
 		}
@@ -158,6 +166,16 @@ func (p *Pipeline) importHistory(ctx context.Context, evt *events.HistorySync, w
 		p.historyImported(now, chunk, stored, skipped)
 	}
 	return
+}
+
+func historyChat(conv *waHistorySync.Conversation) store.Chat {
+	chat := store.Chat{JID: conv.GetID(), Name: conv.GetName(), ParentJID: conv.GetParentGroupID()}
+	if conv.GetIsParentGroup() {
+		chat.Type = "community"
+	} else if chat.ParentJID != "" {
+		chat.Type = "group"
+	}
+	return chat
 }
 
 func (p *Pipeline) historyImported(now time.Time, chunk store.HistoryChunk, stored, skipped int) {

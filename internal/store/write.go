@@ -274,11 +274,14 @@ func (w batch) jids() []string {
 
 // upsertChat reports whether the row was inserted or changed.
 func upsertChat(ctx context.Context, tx *sql.Tx, c Chat) (bool, error) {
-	// A write that changes nothing is skipped: the row is touched only when the name (an empty one never erases a
-	// known one), the type or the parent differs.
+	// A write that changes nothing is skipped. Sparse message events carry only the JID, so an empty name, type or
+	// parent never erases directory metadata learned from history or group events.
 	res, err := tx.ExecContext(ctx, `INSERT INTO chats(jid,name,type,parent_jid) VALUES(?1,?2,?3,?4)
- ON CONFLICT(jid) DO UPDATE SET name=COALESCE(NULLIF(excluded.name,''),chats.name),type=excluded.type,parent_jid=excluded.parent_jid
- WHERE COALESCE(NULLIF(excluded.name,''),chats.name) IS NOT chats.name OR excluded.type IS NOT chats.type OR excluded.parent_jid IS NOT chats.parent_jid`,
+	 ON CONFLICT(jid) DO UPDATE SET name=COALESCE(NULLIF(excluded.name,''),chats.name),
+	 type=COALESCE(NULLIF(excluded.type,''),chats.type),parent_jid=COALESCE(NULLIF(excluded.parent_jid,''),chats.parent_jid)
+	 WHERE COALESCE(NULLIF(excluded.name,''),chats.name) IS NOT chats.name
+	 OR COALESCE(NULLIF(excluded.type,''),chats.type) IS NOT chats.type
+	 OR COALESCE(NULLIF(excluded.parent_jid,''),chats.parent_jid) IS NOT chats.parent_jid`,
 		c.JID, c.Name, c.Type, c.ParentJID)
 	if err != nil {
 		return false, fmt.Errorf("upsert chat %s: %w", c.JID, classify(err))

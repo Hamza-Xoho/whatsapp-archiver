@@ -57,7 +57,8 @@ type stateChange struct {
 // FromChatEvent normalises a group or chat app-state event. A GroupInfo that changes participants (join, leave,
 // promote, demote) is KindParticipants, even when it also changes other fields; its Value keeps all of them.
 func FromChatEvent(evt any, received time.Time) (Result, bool) {
-	var chat types.JID
+	var chat, parent types.JID
+	var directory store.Chat
 	var sender *types.JID
 	var ts time.Time
 	var payload any
@@ -99,6 +100,14 @@ func FromChatEvent(evt any, received time.Time) (Result, bool) {
 		payload = c
 	case *events.JoinedGroup: // carries no WhatsApp timestamp
 		chat, sender, kind = e.JID, e.Sender, KindGroupInfo
+		parent = e.LinkedParentJID
+		if e.IsParent {
+			directory.Name = e.Name
+			directory.Type = "community"
+		} else if !parent.IsEmpty() {
+			directory.Name = e.Name
+			directory.Type = "group"
+		}
 		c := groupChange{Notify: e.Notify, Sender: jidString(sender), Reason: e.Reason, Type: e.Type, Name: &e.Name, Version: e.ParticipantVersionID, CreateKey: string(e.CreateKey)}
 		if !e.GroupCreated.IsZero() {
 			c.Created = e.GroupCreated.Unix()
@@ -128,8 +137,9 @@ func FromChatEvent(evt any, received time.Time) (Result, bool) {
 		unix, ms = ts.Unix(), ts.UnixMilli() // the ID uses milliseconds so toggles within one second stay distinct
 	}
 	c := chat.String()
+	directory.JID, directory.ParentJID = c, parent.String()
 	ce := store.ChatEvent{ChatJID: c, Kind: string(kind), EventID: stableID(c, string(kind), string(value), strconv.FormatInt(ms, 10)), SenderJID: jidString(sender), Timestamp: unix, ReceivedAt: received.Unix(), Value: string(value), RawProto: raw}
-	return Result{Kind: kind, Chat: store.Chat{JID: c}, ChatEvent: &ce, Received: received}, true
+	return Result{Kind: kind, Chat: directory, ChatEvent: &ce, Received: received}, true
 }
 
 func jids(list []types.JID) []string {

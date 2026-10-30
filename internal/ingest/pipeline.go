@@ -21,6 +21,10 @@ type Writer interface {
 	InsertIDMapping(context.Context, store.IDMapping) (bool, error)
 }
 
+type chatDirectoryWriter interface {
+	UpsertChat(context.Context, store.Chat) error
+}
+
 // MediaQueue is the media workers as ingest sees them. Decide applies the media rules to a row about to be stored
 // (state, reason, queue time); a failed rule read is an error and decides nothing. The row is then stored by Apply in
 // the same transaction as its message, and Wake tells the workers it exists.
@@ -264,7 +268,13 @@ func (p *Pipeline) ingest(ctx context.Context, r Result, publish bool) error {
 			return err
 		}
 	}
+	if r.Chat.ParentJID != "" {
+		p.filter.DiscoverCommunityChild(r.Chat.JID, r.Chat.ParentJID)
+	}
 	if keep, excluded, err := p.decide(ctx, r.Chat.JID, r.Kind); err != nil || !keep {
+		if err == nil && excluded && chatHasDirectoryMetadata(r.Chat) {
+			err = p.persistExcludedChatMetadata(ctx, r.Chat)
+		}
 		if err == nil && excluded && publish { // status posts and never-stored kinds are refused silently
 			p.publish(r, false)
 		}
@@ -297,6 +307,19 @@ func (p *Pipeline) ingest(ctx context.Context, r Result, publish bool) error {
 		p.publish(r, true)
 	}
 	return nil
+}
+
+func chatHasDirectoryMetadata(chat store.Chat) bool {
+	return chat.ParentJID != ""
+}
+
+func (p *Pipeline) persistExcludedChatMetadata(ctx context.Context, chat store.Chat) error {
+	directory, ok := p.writer.(chatDirectoryWriter)
+	if !ok {
+		return nil
+	}
+	safe := store.Chat{JID: chat.JID, Type: chat.Type, ParentJID: chat.ParentJID}
+	return p.persist(ctx, "store excluded chat directory metadata", func() error { return directory.UpsertChat(ctx, safe) })
 }
 
 // batchOf is the one transaction an event is written in: its chat and sender directory rows, the message, event or chat
