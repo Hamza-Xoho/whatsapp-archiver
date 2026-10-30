@@ -17,6 +17,7 @@ type loggingSectionData struct {
 	Section, Heading, Retry string
 	Error                   bool
 	Outages                 []loggingOutageView
+	OutageDays              []store.OutageDay
 	OutageToday             string
 	OutageLongest           string
 	Gaps                    []loggingGapView
@@ -29,6 +30,9 @@ type loggingSectionData struct {
 	SpoolBacklog            int
 	SpoolErrors             int
 	HistoryChats            []loggingHistoryChatView
+	HistoryTotal            int
+	HistoryHasMore          bool
+	HistoryNext             string
 	Alerts                  []loggingAlertView
 	Storage                 storageData
 	Backups                 backupsData
@@ -142,7 +146,16 @@ func (s *Server) loggingSectionData(r *http.Request, section string) (loggingSec
 		if readErr != nil {
 			return data, readErr
 		}
-		data.OutageToday, data.OutageLongest = outageSummary(rows, now, loc)
+		summary, readErr := s.d.Store.OutageSummary(r.Context(), now, loc, 7)
+		if readErr != nil {
+			return data, readErr
+		}
+		data.OutageDays = summary.Days
+		if len(summary.Days) > 0 {
+			minutes := summary.Days[len(summary.Days)-1].Minutes
+			data.OutageToday = fmt.Sprintf("%d %s", minutes, plural(minutes, "minute", "minutes"))
+		}
+		data.OutageLongest = durationWords(summary.Longest)
 		for _, row := range rows {
 			end, duration := "In progress", now.Sub(time.Unix(row.StartedAt, 0))
 			if row.EndedAt > 0 {
@@ -153,11 +166,16 @@ func (s *Server) loggingSectionData(r *http.Request, section string) (loggingSec
 				Preview: optionalCountWords(row.OfflinePreviewMsgs), Completed: optionalCountWords(row.OfflineCompletedCount)})
 		}
 	case "gaps-media":
-		gaps, readErr := s.d.Store.LoggingGaps(r.Context(), 200)
+		gaps, readErr := s.d.Store.LoggingGapGroups(r.Context())
 		if readErr != nil {
 			return data, readErr
 		}
-		data.Gaps = groupLoggingGaps(gaps, now)
+		for _, gap := range gaps {
+			data.Gaps = append(data.Gaps, loggingGapView{CanonicalJID: gap.Representative.CanonicalJID,
+				TargetID: gap.Representative.TargetID, Cause: gapCauseWords(gap.Cause),
+				Age:    agoWords(now.Sub(time.Unix(gap.Representative.ReceivedAt, 0))),
+				Oldest: agoWords(now.Sub(time.Unix(gap.OldestReceivedAt, 0))), PostOutage: gap.PostOutage, Count: gap.Count})
+		}
 		media, readErr := s.d.Store.LoggingMedia(r.Context(), 50)
 		if readErr != nil {
 			return data, readErr
@@ -173,7 +191,7 @@ func (s *Server) loggingSectionData(r *http.Request, section string) (loggingSec
 		data.Media24 = view.PercentageCount(timeliness.DayDone, timeliness.DayTotal)
 		data.Media7 = view.PercentageCount(timeliness.WeekDone, timeliness.WeekTotal)
 	case "history":
-		history, readErr := s.d.Store.LoggingHistory(r.Context(), 250)
+		history, readErr := s.d.Store.LoggingHistoryPage(r.Context(), 250, strings.TrimSpace(r.URL.Query().Get("after")))
 		if readErr != nil {
 			return data, readErr
 		}
@@ -183,13 +201,16 @@ func (s *Server) loggingSectionData(r *http.Request, section string) (loggingSec
 				OldestText: optionalUnix(loc, sync.Oldest), NewestText: optionalUnix(loc, sync.Newest)})
 		}
 		data.SpoolBacklog, data.SpoolErrors = history.SpoolBacklog, history.SpoolErrors
-		complete := anyCompleteSync(history.Syncs)
+		data.HistoryTotal, data.HistoryHasMore = history.TotalChats, history.HasMore
+		if history.HasMore {
+			data.HistoryNext = "/logging/history?after=" + url.QueryEscape(history.NextAfter)
+		}
 		for _, chat := range history.Chats {
-			state := "No history received"
+			state := "No history messages archived"
 			if chat.HasHistory {
 				state = "History received back to " + view.FormatUnix(loc, chat.OldestHistory)
-				if complete {
-					state = "Complete — history received back to " + view.FormatUnix(loc, chat.OldestHistory)
+				if history.AuthoritativeComplete {
+					state = "History complete back to " + view.FormatUnix(loc, chat.OldestHistory)
 				}
 			}
 			data.HistoryChats = append(data.HistoryChats, loggingHistoryChatView{CanonicalJID: chat.CanonicalJID,
