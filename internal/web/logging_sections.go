@@ -72,6 +72,12 @@ func (s *Server) loggingSection(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(http.StatusInternalServerError)
 	}
+	if section == "settings" {
+		switch saved := strings.SplitN(r.URL.Query().Get("saved"), "#", 2)[0]; saved {
+		case "media", "alerts", "backup", "heartbeat":
+			data.Settings.Saved = saved
+		}
+	}
 	s.render(w, s.pages["logging_section"], "layout", data)
 }
 
@@ -211,6 +217,10 @@ func (s *Server) loggingSectionData(r *http.Request, section string) (loggingSec
 		settings, readErr := s.settingsData(r.Context())
 		if readErr != nil {
 			return data, readErr
+		}
+		switch saved := strings.SplitN(r.URL.Query().Get("saved"), "#", 2)[0]; saved {
+		case "media", "alerts", "backup", "heartbeat":
+			settings.Saved = saved
 		}
 		data.Settings = settings
 	}

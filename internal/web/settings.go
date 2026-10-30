@@ -53,6 +53,7 @@ type settingsData struct {
 	Alerts    alertsSection
 	Backup    backupSection
 	Heartbeat heartbeatSection
+	Alert     *alertResult
 	Saved     string // the section just saved: media, alerts or backup
 	// InUse says what applies now, whatever a rejected form shows: one line per section.
 	MediaInUse, AlertsInUse, BackupInUse string
@@ -188,6 +189,20 @@ func (s *Server) saveSetting(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if msg == "" {
+		if loggingSettingsRequest(r) {
+			if r.Header.Get("HX-Request") == "true" {
+				fresh, readErr := s.settingsData(r.Context())
+				if readErr != nil {
+					http.Error(w, "the settings could not be read", http.StatusInternalServerError)
+					return
+				}
+				fresh.Saved = section
+				s.renderLoggingSettingsFragment(w, section, fresh)
+				return
+			}
+			http.Redirect(w, r, "/logging/settings?saved="+section+"#"+section, http.StatusSeeOther)
+			return
+		}
 		http.Redirect(w, r, "/settings?saved="+section+"#"+section, http.StatusSeeOther)
 		return
 	}
@@ -200,6 +215,15 @@ func (s *Server) saveSetting(w http.ResponseWriter, r *http.Request) {
 		d.Backup.Err = msg
 	}
 	w.WriteHeader(http.StatusUnprocessableEntity)
+	if loggingSettingsRequest(r) {
+		if r.Header.Get("HX-Request") == "true" {
+			s.renderLoggingSettingsFragment(w, section, d)
+			return
+		}
+		data := loggingSectionData{page: page{Title: "Logging", Current: "Logging"}, Section: "settings", Settings: d}
+		s.render(w, s.pages["logging_section"], "layout", data)
+		return
+	}
 	s.render(w, s.pages["settings"], "layout", d)
 }
 
@@ -237,10 +261,42 @@ func (s *Server) saveHeartbeatSetting(w http.ResponseWriter, r *http.Request, re
 		}
 		d.Settings.Heartbeat.Err = msg
 		w.WriteHeader(http.StatusUnprocessableEntity)
-		s.render(w, s.pages["logging_section"], "layout", d)
+		if r.Header.Get("HX-Request") == "true" && loggingSettingsRequest(r) {
+			s.renderLoggingSettingsFragment(w, "heartbeat", d.Settings)
+		} else {
+			s.render(w, s.pages["logging_section"], "layout", d)
+		}
+		return
+	}
+	if r.Header.Get("HX-Request") == "true" && loggingSettingsRequest(r) {
+		d, err := s.settingsData(r.Context())
+		if err != nil {
+			http.Error(w, "the settings could not be read", http.StatusInternalServerError)
+			return
+		}
+		d.Saved = "heartbeat"
+		s.renderLoggingSettingsFragment(w, "heartbeat", d)
 		return
 	}
 	http.Redirect(w, r, "/logging/settings?saved=heartbeat#heartbeat", http.StatusSeeOther)
+}
+
+func loggingSettingsRequest(r *http.Request) bool {
+	for _, raw := range []string{r.Header.Get("HX-Current-URL"), r.Referer()} {
+		u, err := url.Parse(raw)
+		if err == nil && u.Path == "/logging/settings" {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Server) renderLoggingSettingsFragment(w http.ResponseWriter, section string, d settingsData) {
+	name := "logging_settings_" + section
+	if section == "heartbeat-remove" {
+		name = "logging_settings_heartbeat"
+	}
+	s.render(w, s.pages["logging_section"], name, d)
 }
 
 func validateHeartbeatURL(value string) error {
