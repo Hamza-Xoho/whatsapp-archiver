@@ -186,8 +186,8 @@ func (s *Server) healthView(ctx context.Context, loc *time.Location) healthView 
 	v.State, v.StateClass = stateWords(snap.State)
 	if snap.Version != "" {
 		v.Version = snap.Version
-		if snap.VersionReason != "" {
-			v.Version += " (" + snap.VersionReason + ")"
+		if reason := safeVersionReason(snap.VersionReason); reason != "" {
+			v.Version += " (" + reason + ")"
 		}
 	}
 	if started, ok := s.d.Pairer.(interface{ PairingStarted() time.Time }); ok {
@@ -208,6 +208,22 @@ func (s *Server) healthView(ctx context.Context, loc *time.Location) healthView 
 		}
 	}
 	return v
+}
+
+func safeVersionReason(reason string) string {
+	reason = strings.ToLower(strings.TrimSpace(reason))
+	switch {
+	case reason == "latest":
+		return "latest"
+	case reason == "built-in", reason == "builtin":
+		return "built-in"
+	case strings.Contains(reason, "override"):
+		return "override"
+	case strings.Contains(reason, "lookup"), strings.Contains(reason, "failed"), strings.Contains(reason, "error"):
+		return "lookup failed"
+	default:
+		return ""
+	}
 }
 
 // safeHealthDetail reduces transport-owned error text to controlled copy. A

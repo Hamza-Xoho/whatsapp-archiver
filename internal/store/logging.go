@@ -67,6 +67,8 @@ type LoggingGapGroup struct {
 	Representative   LoggingGap
 }
 
+const loggingGapGroupsQuery = `SELECT c.canonical,e.chat_jid,e.target_id,e.cause,e.received_at ` + loggingOpenGapsFrom
+
 // LoggingGapGroups aggregates every open gap, then resolves at most one safe
 // representative per closed cause/post-outage bucket. Event causes are a
 // closed enum, so the representative reads are bounded independently of the
@@ -80,7 +82,7 @@ func (s *Store) LoggingGapGroups(ctx context.Context) ([]LoggingGapGroup, error)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.read.QueryContext(ctx, `SELECT c.canonical,e.chat_jid,e.target_id,e.cause,e.received_at `+loggingOpenGapsFrom)
+	rows, err := s.read.QueryContext(ctx, loggingGapGroupsQuery)
 	if err != nil {
 		return nil, fmt.Errorf("read logging gap groups: %w", err)
 	}
@@ -156,9 +158,11 @@ func (s *Store) LoggingGaps(ctx context.Context, limit int) ([]LoggingGap, error
 	return out, nil
 }
 
+const loggingOutageRangeQuery = `SELECT ended_at FROM connection_periods
+ WHERE ended_at IS NOT NULL AND ended_at>=?`
+
 func (s *Store) loggingOutageEnds(ctx context.Context, oldest int64) ([]int64, error) {
-	rows, err := s.read.QueryContext(ctx, `SELECT ended_at FROM connection_periods
- WHERE ended_at IS NOT NULL AND ended_at>=? ORDER BY ended_at`, oldest-120)
+	rows, err := s.read.QueryContext(ctx, loggingOutageRangeQuery, oldest-120)
 	if err != nil {
 		return nil, fmt.Errorf("read logging outage range: %w", err)
 	}
@@ -171,7 +175,11 @@ func (s *Store) loggingOutageEnds(ctx context.Context, oldest int64) ([]int64, e
 		}
 		ends = append(ends, end)
 	}
-	return ends, rows.Err()
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	slices.Sort(ends)
+	return ends, nil
 }
 
 func loggingPostOutage(ends []int64, at int64) bool {
@@ -189,59 +197,64 @@ type LoggingMediaReport struct {
 	Reasons              []LoggingMediaReason
 }
 
+const loggingMediaCountsQuery = `SELECT state,COUNT(*) FROM media INDEXED BY media_pick GROUP BY state`
+
+const loggingMediaReasonsQuery = `SELECT COUNT(*),
+ COUNT(*) FILTER (WHERE error_class='network'),COUNT(*) FILTER (WHERE error_class='expired'),
+ COUNT(*) FILTER (WHERE error_class='gone'),COUNT(*) FILTER (WHERE error_class='key'),COUNT(*) FILTER (WHERE error_class='other'),
+ COUNT(*) FILTER (WHERE error_class='network' AND (instr(reason,'dns')>0 OR instr(reason,'DNS')>0)),
+ COUNT(*) FILTER (WHERE error_class='network' AND instr(reason,'dns')=0 AND instr(reason,'DNS')=0
+  AND (instr(reason,'timeout')>0 OR instr(reason,'deadline')>0)),
+ COUNT(*) FILTER (WHERE error_class='network' AND instr(reason,'dns')=0 AND instr(reason,'DNS')=0
+  AND instr(reason,'timeout')=0 AND instr(reason,'deadline')=0
+  AND (instr(reason,'network')>0 OR instr(reason,'connection')>0))
+ FROM media INDEXED BY media_pick
+ WHERE state IN ('failed','expired','retry_requested')`
+
 // LoggingMedia groups narrow indexed/scalar columns and never reads paths,
-// media URLs, thumbnails, hashes, retry paths or protobufs.
+// media URLs, thumbnails, hashes, retry paths, raw reasons or protobufs.
 func (s *Store) LoggingMedia(ctx context.Context, reasonLimit int) (LoggingMediaReport, error) {
 	states, classes := map[string]int{}, map[string]int{}
-	rows, err := s.read.QueryContext(ctx, `SELECT state,COUNT(*),COUNT(*) FILTER (WHERE error_class='network'),
- COUNT(*) FILTER (WHERE error_class='expired'),COUNT(*) FILTER (WHERE error_class='gone'),
- COUNT(*) FILTER (WHERE error_class='key'),COUNT(*) FILTER (WHERE error_class='other')
-	 FROM media INDEXED BY media_pick GROUP BY state`)
+	reasons := map[string]int{}
+	rows, err := s.read.QueryContext(ctx, loggingMediaCountsQuery)
 	if err != nil {
 		return LoggingMediaReport{}, fmt.Errorf("read logging media counts: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var state string
-		var count, network, expired, gone, key, other int
-		if err = rows.Scan(&state, &count, &network, &expired, &gone, &key, &other); err != nil {
+		var count int
+		if err = rows.Scan(&state, &count); err != nil {
 			return LoggingMediaReport{}, fmt.Errorf("scan logging media counts: %w", err)
 		}
 		states[state] += count
-		for name, n := range map[string]int{"network": network, "expired": expired, "gone": gone, "key": key, "other": other} {
-			if n > 0 {
-				classes[name] += n
-			}
-		}
 	}
 	if err = rows.Err(); err != nil {
 		return LoggingMediaReport{}, err
 	}
-	reasonLimit = boundedLoggingLimit(reasonLimit, 50)
-	// Reasons are diagnostic examples, not ledger totals. Sample at most 5,000
-	// recent scheduler-index entries; the exact state/class totals above remain
-	// complete. The web layer maps every sample to controlled safe copy.
-	sampleLimit := min(max(reasonLimit*100, 1000), 5000)
-	reasonRows, err := s.read.QueryContext(ctx, `SELECT reason FROM media INDEXED BY media_pick
-	 WHERE state IN ('failed','expired','retry_requested') AND reason<>'' LIMIT ?`, sampleLimit)
-	if err != nil {
+	var applicable, network, expired, gone, key, other, dns, timeout, networkReason int
+	if err = s.read.QueryRowContext(ctx, loggingMediaReasonsQuery).Scan(
+		&applicable, &network, &expired, &gone, &key, &other, &dns, &timeout, &networkReason); err != nil {
 		return LoggingMediaReport{}, fmt.Errorf("read logging media reasons: %w", err)
 	}
-	defer func() { _ = reasonRows.Close() }()
-	reasons := make(map[string]int)
-	for reasonRows.Next() {
-		var reason string
-		if err = reasonRows.Scan(&reason); err != nil {
-			return LoggingMediaReport{}, fmt.Errorf("scan logging media reason: %w", err)
+	for name, count := range map[string]int{"network": network, "expired": expired, "gone": gone, "key": key, "other": other} {
+		if count > 0 {
+			classes[name] = count
 		}
-		reasons[reason]++
 	}
-	if err = reasonRows.Err(); err != nil {
-		return LoggingMediaReport{}, err
-	}
+	reasons["DNS lookup failed"] = dns
+	reasons["Request timed out"] = timeout
+	reasons["Media expired"] = expired
+	reasons["Media unavailable"] = gone
+	reasons["Media key unavailable"] = key
+	reasons["Network request failed"] = networkReason
+	reasons["Download failed"] = applicable - expired - gone - key - dns - timeout - networkReason
+	_ = reasonLimit // retained for API compatibility; the closed taxonomy has eight rows.
 	out := LoggingMediaReport{States: sortedLoggingCounts(states), ErrorClasses: sortedLoggingCounts(classes)}
 	for reason, count := range reasons {
-		out.Reasons = append(out.Reasons, LoggingMediaReason{Reason: reason, Count: count})
+		if count > 0 {
+			out.Reasons = append(out.Reasons, LoggingMediaReason{Reason: reason, Count: count})
+		}
 	}
 	slices.SortFunc(out.Reasons, func(a, b LoggingMediaReason) int {
 		if a.Count != b.Count {
@@ -249,9 +262,6 @@ func (s *Store) LoggingMedia(ctx context.Context, reasonLimit int) (LoggingMedia
 		}
 		return compareStrings(a.Reason, b.Reason)
 	})
-	if len(out.Reasons) > reasonLimit {
-		out.Reasons = out.Reasons[:reasonLimit]
-	}
 	return out, nil
 }
 
