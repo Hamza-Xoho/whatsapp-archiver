@@ -28,6 +28,16 @@ func (s *failImportedStore) SpoolImported(context.Context, int64, int64, store.H
 	return errors.New("injected imported-marker failure")
 }
 
+type countingTodoStore struct {
+	*store.Store
+	todo chan struct{}
+}
+
+func (s *countingTodoStore) SpoolTodo(ctx context.Context, limit int) ([]store.Spool, error) {
+	s.todo <- struct{}{}
+	return s.Store.SpoolTodo(ctx, limit)
+}
+
 func spoolNotification() *waE2E.HistorySyncNotification {
 	return &waE2E.HistorySyncNotification{
 		SyncType:                     waE2E.HistorySyncType_FULL.Enum(),
@@ -157,6 +167,70 @@ func TestHistorySpoolPublishesSuccessOnlyAfterImportedMarkerCommits(t *testing.T
 	}
 	if strings.Contains(logs.String(), "history chunk imported") {
 		t.Fatalf("logged successful import before imported marker committed: %s", logs.String())
+	}
+}
+
+func TestHistorySpoolPublishesSuccessAfterImportedMarkerCommits(t *testing.T) {
+	st := testkit.Store(t)
+	bus := activity.NewBus(10)
+	var logs bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&logs, nil))
+	p := ingest.NewPipeline(st, ingest.NewFilter(nil, nil), &queueFake{}, &healthFake{}, log).WithHistoryParser(historyParser()).WithActivity(bus)
+	spool := ingest.NewHistorySpool(st, p, log)
+	if err := spool.Receive(t.Context(), spoolNotification(), threeMessageChunk().Data); err != nil {
+		t.Fatal(err)
+	}
+	if imported, err := spool.ImportNext(t.Context()); err != nil || !imported {
+		t.Fatalf("import=(%v,%v), want committed success", imported, err)
+	}
+	events := bus.Recent()
+	if len(events) != 1 || events[0].Kind != "history_chunk" || !strings.Contains(events[0].Detail, "3 messages") {
+		t.Fatalf("activity=%+v, want one successful history chunk", events)
+	}
+	if !strings.Contains(logs.String(), "history chunk imported") {
+		t.Fatalf("success log missing after marker commit: %s", logs.String())
+	}
+	if got := rows(t, st, "SELECT imported_at IS NOT NULL FROM history_spool"); strings.Join(got, ",") != "1" {
+		t.Fatalf("imported marker=%v, want committed", got)
+	}
+}
+
+func TestDuplicateHistorySpoolReceiveDoesNotWakeIdleImporter(t *testing.T) {
+	st := testkit.Store(t)
+	counting := &countingTodoStore{Store: st, todo: make(chan struct{}, 8)}
+	p := historyPipeline(st, ingest.NewFilter(nil, nil), &queueFake{})
+	spool := ingest.NewHistorySpool(counting, p, quiet())
+	n, hs := spoolNotification(), threeMessageChunk().Data
+	if err := spool.Receive(t.Context(), n, hs); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() { defer close(done); spool.Run(ctx) }()
+	// One poll imports the row, one observes the empty queue, and one follows the original buffered wake. The importer
+	// is then blocked. A duplicate must not create a fourth poll.
+	for range 3 {
+		select {
+		case <-counting.todo:
+		case <-time.After(5 * time.Second):
+			cancel()
+			<-done
+			t.Fatal("importer did not become idle")
+		}
+	}
+	if err := spool.Receive(t.Context(), n, hs); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-counting.todo:
+		t.Fatal("duplicate spool row woke the idle importer and caused an extra store poll")
+	case <-time.After(250 * time.Millisecond):
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("importer did not stop")
 	}
 }
 

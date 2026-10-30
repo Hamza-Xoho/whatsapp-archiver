@@ -187,6 +187,16 @@ func TestOversizeHistoryIsNotDownloadedSpooledOrAcked(t *testing.T) {
 	}
 }
 
+func TestInlineHistoryPayloadHasItsOwnByteCap(t *testing.T) {
+	n := &waE2E.HistorySyncNotification{
+		FileLength:                        proto.Uint64(1), // a dishonest declaration must not disable the inline cap
+		InitialHistBootstrapInlinePayload: make([]byte, historyMaxBlobBytes+1),
+	}
+	if _, err := boundedHistoryBlob(t.Context(), nil, n); !errors.Is(err, errHistoryTooLarge) {
+		t.Fatalf("boundedHistoryBlob error=%v, want errHistoryTooLarge", err)
+	}
+}
+
 // Any other download error is retried by redelivery: no ack.
 func TestHistoryDownloadErrorIsNotAcked(t *testing.T) {
 	c := historyClient(nil, time.Minute, func(context.Context, *waE2E.HistorySyncNotification) (*waHistorySync.HistorySync, error) {
