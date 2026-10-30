@@ -90,6 +90,43 @@ func TestHistoryNotificationIsNotAckedUntilItsChunkIsStored(t *testing.T) {
 	}
 }
 
+// ADR-37: once a spool receiver is configured, the history chunk no longer enters the synchronous event handler.
+// The notification is acknowledged only after Receive durably spooled it and the marker message was archived.
+func TestHistoryNotificationIsAckedAfterSpoolAndDoesNotEnterTheLiveHandler(t *testing.T) {
+	hs := &waHistorySync.HistorySync{SyncType: waHistorySync.HistorySync_FULL.Enum(), ChunkOrder: proto.Uint32(3)}
+	notif := historyNotification(true)
+	order := []string{}
+	c := historyClient(nil, time.Minute, func(context.Context, *waE2E.HistorySyncNotification) (*waHistorySync.HistorySync, error) {
+		order = append(order, "download")
+		return hs, nil
+	}).WithHistorySpool(func(_ context.Context, n *waE2E.HistorySyncNotification, got *waHistorySync.HistorySync) error {
+		order = append(order, "spool")
+		if n != notif.Message.GetProtocolMessage().GetHistorySyncNotification() || got != hs {
+			t.Fatal("spool receiver did not get the downloaded notification and chunk")
+		}
+		return nil
+	})
+	acked := c.historyHandler(t.Context(), func(evt any) bool {
+		if _, ok := evt.(*events.HistorySync); ok {
+			t.Fatal("history import still runs inside the live event handler")
+		}
+		order = append(order, "marker")
+		return true
+	})(notif)
+	if !acked || strings.Join(order, ",") != "download,spool,marker" {
+		t.Fatalf("acked=%v order=%v, want download, spool, marker, ack", acked, order)
+	}
+
+	spoolErr := errors.New("archive write failed")
+	c.WithHistorySpool(func(context.Context, *waE2E.HistorySyncNotification, *waHistorySync.HistorySync) error {
+		return spoolErr
+	})
+	called := false
+	if c.historyHandler(t.Context(), func(any) bool { called = true; return true })(notif) || called {
+		t.Fatal("failed spool was acknowledged or passed to the live handler")
+	}
+}
+
 // Only our own phone sends history; a notification from anyone else is not downloaded (whatsmeow ignores it too), and
 // every other event reaches the handler unchanged.
 func TestOnlyOwnHistoryNotificationIsDownloaded(t *testing.T) {
