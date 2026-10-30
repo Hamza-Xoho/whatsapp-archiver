@@ -84,3 +84,35 @@ func TestW6IAsyncRegionsAndRepeatedReconnectAnnouncements(t *testing.T) {
 		}
 	}
 }
+
+func TestW6IPairingQRRenewalAndOfflinePresentation(t *testing.T) {
+	f := newFakePairer(t, false)
+	h := newPairUI(t, f).Handler()
+	if response := samePost(t, h, "/pair/start", true); response.StatusCode != http.StatusSeeOther {
+		t.Fatalf("start pairing status = %d", response.StatusCode)
+	}
+	f.send(PairUpdate{QR: "2@first-safe-fake"})
+	first := waitPage(t, h, `data-qr-seq="1"`)
+	for _, want := range []string{
+		`id="qr-status"`, `role="status"`, `aria-live="polite"`, `aria-atomic="true"`,
+		"A new QR code is ready.", `class="qr-frame"`, `class="qr-expired"`,
+	} {
+		if !strings.Contains(first, want) {
+			t.Errorf("first fake QR lacks %q", want)
+		}
+	}
+	if count := strings.Count(first, `id="qr-status"`); count != 1 {
+		t.Errorf("QR page has %d renewal status nodes, want 1", count)
+	}
+
+	f.send(PairUpdate{QR: "2@second-safe-fake"})
+	second := waitPage(t, h, `data-qr-seq="2"`)
+	if !strings.Contains(second, "A new QR code is ready.") || strings.Count(second, `id="qr-status"`) != 1 {
+		t.Errorf("renewed QR does not keep one stable polite status node")
+	}
+	for _, want := range []string{"expirePairingQR", "pair-offline", "QR code expired while live updates are paused"} {
+		if !strings.Contains(second, want) {
+			t.Errorf("pairing offline contract lacks %q", want)
+		}
+	}
+}
