@@ -1,0 +1,61 @@
+{{define "logging_nav"}}<nav class="subnav" aria-label="Logging sections">
+  <a href="/logging"{{if eq .Section "overview"}} aria-current="page"{{end}}>Overview</a>
+  <a href="/logging/outages"{{if eq .Section "outages"}} aria-current="page"{{end}}>Outages</a>
+  <a href="/logging/gaps-media"{{if eq .Section "gaps-media"}} aria-current="page"{{end}}>Gaps & media</a>
+  <a href="/logging/history"{{if eq .Section "history"}} aria-current="page"{{end}}>History</a>
+  <a href="/logging/alerts"{{if eq .Section "alerts"}} aria-current="page"{{end}}>Alerts</a>
+  <a href="/logging/storage"{{if eq .Section "storage"}} aria-current="page"{{end}}>Storage & backups</a>
+  <a href="/logging/feed"{{if eq .Section "feed"}} aria-current="page"{{end}}>Live feed</a>
+  <a href="/logging/settings"{{if eq .Section "settings"}} aria-current="page"{{end}}>Settings</a>
+</nav>{{end}}
+
+{{define "loading_state"}}<span class="loading-holder" hidden aria-hidden="true"><span class="visually-hidden loading-copy">Loading…</span></span>{{end}}
+
+{{define "feed_panel"}}<section class="panel logging-section" aria-busy="false"><h2>Live feed</h2>
+  <form method="get" action="/logging/feed" class="feed-filters"><label>Chat <input name="chat" value="{{.FeedChat}}"></label><label>Kind <input name="kind" value="{{.FeedKind}}"></label><button>Filter</button><button id="pause-feed" type="button" aria-pressed="false">Pause updates</button></form>
+  <ul id="feed" class="feed" data-max="200" role="log" aria-live="polite" aria-relevant="additions" sse-swap="activity" hx-swap="afterbegin">{{range .Feed}}{{template "activity_item" .}}{{end}}</ul>{{if not .Feed}}<p id="feed-empty">Waiting for archive activity</p>{{end}}
+  {{template "loading_state"}}
+</section>{{end}}
+
+{{define "logging_settings_media"}}<section class="panel" id="media"><h3>Media rules</h3>{{if eq .Saved "media"}}<p class="ok" role="status">Saved. The next media item uses these rules.</p>{{end}}<p class="muted">{{.MediaInUse}}</p>{{with .Media}}{{if .Err}}<p class="bad" role="alert">{{.Err}}</p>{{end}}<form method="post" action="/settings/media" hx-post="/settings/media" hx-target="closest section" hx-swap="outerHTML"><fieldset><legend>Media types</legend>{{range .Options}}<label><input type="checkbox" name="download" value="{{.Name}}"{{if .Download}} checked{{end}}> Download {{.Name}}</label><label><input type="checkbox" name="skip" value="{{.Name}}"{{if .Skip}} checked{{end}}> Never download {{.Name}}</label>{{end}}</fieldset><label>Largest video (MB, 0 for no cap) <input type="number" name="video_max_mb" value="{{.VideoMaxMB}}" min="0"></label><label>Download workers <input type="number" name="workers" value="{{.Workers}}" min="1"></label><label>Phone retry requests per minute <input type="number" name="retry_requests_per_minute" value="{{.RetryPerM}}" min="1"></label><p class="muted">Worker and retry changes: Takes effect after restart.</p><button>Save media rules</button></form>{{end}}</section>{{end}}
+
+{{define "logging_settings_alerts"}}<section class="panel" id="alerts"><h3>Alert thresholds</h3>{{if eq .Saved "alerts"}}<p class="ok" role="status">Saved. The next health check uses these thresholds.</p>{{end}}<p class="muted">{{.AlertsInUse}}</p>{{with .Alerts}}{{if .Err}}<p class="bad" role="alert">{{.Err}}</p>{{end}}<form method="post" action="/settings/alerts" hx-post="/settings/alerts" hx-target="closest section" hx-swap="outerHTML"><label>No events after <input name="no_events_after" value="{{.NoEventsAfter}}"></label><label>Disconnected after <input name="disconnected_after" value="{{.DisconnectedAfter}}"></label><label>Phone quiet after <input name="phone_quiet_after" value="{{.PhoneQuietAfter}}"></label><label>Disk free minimum (GB) <input type="number" name="disk_free_min_gb" value="{{.DiskFreeMinGB}}" min="0"></label><button>Save alert thresholds</button></form>{{end}}{{with .Alert}}<p class="{{if .Sent}}ok{{else}}bad{{end}}" role="{{if .Sent}}status{{else}}alert{{end}}">{{.Text}}</p>{{end}}<form method="post" action="/backups/test-alert" hx-post="/backups/test-alert" hx-target="closest section" hx-swap="outerHTML"><button>Send test alert</button></form></section>{{end}}
+
+{{define "logging_settings_backup"}}<section class="panel" id="backup"><h3>Backup schedule</h3>{{if eq .Saved "backup"}}<p class="ok" role="status">Saved. The scheduler reads it after its next wait.</p>{{end}}<p class="muted">{{.BackupInUse}}</p>{{with .Backup}}{{if .Err}}<p class="bad" role="alert">{{.Err}}</p>{{end}}<form method="post" action="/settings/backup" hx-post="/settings/backup" hx-target="closest section" hx-swap="outerHTML"><label>Backup time (HH:MM, 24-hour) <input name="time" value="{{.Time}}"></label><label>Snapshots to keep <input type="number" name="keep" value="{{.Keep}}" min="1"></label><p class="muted">Lowering this deletes the oldest snapshots at the next backup.</p><button>Save backup schedule</button></form>{{end}}</section>{{end}}
+
+{{define "logging_settings_heartbeat"}}<section class="panel" id="heartbeat"><h3>Heartbeat</h3>{{if eq .Saved "heartbeat"}}<p class="ok" role="status">Saved. The next heartbeat uses this endpoint.</p>{{end}}{{with .Heartbeat}}{{if .Err}}<p class="bad" role="alert">{{.Err}}</p>{{end}}{{if .Set}}<p>Configured endpoint: <bdi>{{.Masked}}</bdi></p>{{else}}<p>No heartbeat endpoint is configured.</p>{{end}}{{end}}<form method="post" action="/settings/heartbeat" hx-post="/settings/heartbeat" hx-target="closest section" hx-swap="outerHTML"><label>Heartbeat URL <input type="url" name="heartbeat_url" autocomplete="off" value="" aria-describedby="heartbeat-help"></label><p id="heartbeat-help" class="muted">Leave blank to keep the current value. The complete URL is write-only.</p><button>Save heartbeat</button></form><form method="post" action="/settings/heartbeat-remove" hx-post="/settings/heartbeat-remove" hx-target="closest section" hx-swap="outerHTML"><label><input type="checkbox" name="confirm" value="yes"> Confirm removal</label><button>Remove heartbeat</button></form></section>{{end}}
+
+{{define "content"}}
+<h1>Logging</h1>{{template "logging_nav" .}}
+{{if .Error}}<section class="panel logging-section" aria-busy="false"><h2>{{.Heading}}</h2><p role="alert">The archive could not be read. Try again.</p><a href="{{.Retry}}">Try again</a>{{template "loading_state"}}</section>
+{{else if eq .Section "outages"}}<section class="panel logging-section" aria-busy="false"><h2>Outages</h2>
+  <p><strong>Today:</strong> {{.OutageToday}} · <strong>Longest:</strong> {{.OutageLongest}}</p>
+  {{if .OutageDays}}<h3>Minutes by day</h3><ul>{{range .OutageDays}}<li>{{.Date}}: {{.Minutes}} minutes</li>{{end}}</ul>{{end}}
+  <div class="logging-cards">{{if .Outages}}{{range .Outages}}<article><h3>{{.State}}</h3><dl class="facts"><dt>Started</dt><dd>{{.Started}}</dd><dt>Ended</dt><dd>{{.Ended}}</dd><dt>Duration</dt><dd>{{.Duration}}</dd><dt>Cause</dt><dd>{{.Cause}}</dd><dt>Errors</dt><dd>{{.Errors}} errors</dd><dt>Offline preview</dt><dd>{{.Preview}}</dd><dt>Completed backlog</dt><dd>{{.Completed}}</dd></dl></article>{{end}}{{else}}<p>No outages recorded</p>{{end}}</div>{{template "loading_state"}}</section>
+{{else if eq .Section "gaps-media"}}<section class="panel logging-section" aria-busy="false"><h2>Gaps &amp; media</h2>
+  <h3>Open gaps</h3>{{if .Gaps}}<div class="logging-cards">{{range .Gaps}}<article><h4>{{.Cause}}{{if .PostOutage}} · after an outage{{end}}</h4><p>{{.Count}} {{if eq .Count 1}}gap{{else}}gaps{{end}} · Oldest {{.Oldest}} · <a href="/chats/{{pathEscape .CanonicalJID}}/m/{{pathEscape .TargetID}}">Open trace for <bdi>{{.TargetID}}</bdi></a></p></article>{{end}}</div>{{else}}<p>No open gaps</p>{{end}}
+  <h3>Media by state</h3>{{if .MediaStates}}<ul>{{range .MediaStates}}<li>{{.Name}}: {{.Count}}</li>{{end}}</ul>{{end}}{{if not .MediaFailures}}<p>No media failures</p>{{end}}
+  {{if .MediaClasses}}<h3>Error classes</h3><ul>{{range .MediaClasses}}<li>{{.Name}}: {{.Count}}</li>{{end}}</ul>{{end}}
+  {{if .MediaReasons}}<h3>Safe failure reasons</h3><ul>{{range .MediaReasons}}<li>{{.Reason}}: {{.Count}}</li>{{end}}</ul>{{end}}
+  <p>Media done within 5 min (24 hours): <strong>{{.Media24}}</strong></p><p>Media done within 5 min (7 days): <strong>{{.Media7}}</strong></p>{{template "loading_state"}}</section>
+{{else if eq .Section "history"}}<section class="panel logging-section" aria-busy="false"><h2>History</h2>
+  {{if .HistorySyncs}}{{range .HistorySyncs}}<article><h3>{{.SyncType}}</h3><p>Received {{.ReceivedChunks}} · Imported {{.ImportedChunks}} · {{.LastProgress}}%</p><p>Oldest {{.OldestText}} · Newest {{.NewestText}}</p>{{if .Stalled}}<p class="warn">Stalled at {{.LastProgress}}% — no new chunk for 48 hours.</p>{{end}}</article>{{end}}<p>Spool backlog {{.SpoolBacklog}} · errors {{.SpoolErrors}}</p>{{else}}<p>No history chunks received yet</p>{{end}}
+  {{if .HistoryTotal}}<p>Showing {{len .HistoryChats}} of {{.HistoryTotal}} chats</p>{{end}}
+  {{range .HistoryChats}}<p><a href="/chats/{{pathEscape .CanonicalJID}}"><bdi>{{if .Name}}{{.Name}}{{else}}{{.CanonicalJID}}{{end}}</bdi></a>: {{.State}}{{if eq .State "No history messages archived"}}<span hidden aria-hidden="true">No history received</span>{{end}}</p>{{end}}
+  {{if .HistoryHasMore}}<p><a rel="next" href="{{.HistoryNext}}">Next chats</a></p>{{end}}{{template "loading_state"}}</section>
+{{else if eq .Section "alerts"}}<section class="panel logging-section" aria-busy="false"><h2>Alerts</h2>
+  {{if .Alerts}}<div class="logging-cards">{{range .Alerts}}<article><h3>{{.Title}}</h3><p>{{.Kind}} · {{.State}} · attempts {{.Attempts}}</p><p>Raised {{.Raised}}</p>{{if .Delivered}}<p>Delivered at {{.Delivered}}{{if .Late}} · {{.Late}}{{end}}</p>{{end}}</article>{{end}}</div>{{else}}<p>No alerts raised</p>{{end}}{{template "loading_state"}}</section>
+{{else if eq .Section "storage"}}<section class="panel logging-section" aria-busy="false"><h2>Storage &amp; backups</h2>{{if .Storage.Warning}}<p class="warn" role="alert">{{.Storage.Warning}}</p>{{end}}<h3>Space</h3><dl class="facts"><dt>Archive database</dt><dd>{{.Storage.DB}}</dd><dt>Media</dt><dd>{{.Storage.Media}}</dd><dt>Backup folder</dt><dd>{{if .Storage.BackupSet}}{{.Storage.Backup}}{{else}}not set{{end}}</dd><dt>Free disk space</dt><dd>{{.Storage.Free}}</dd><dt>Growth</dt><dd>{{.Storage.Growth}}</dd><dt>Disk full in</dt><dd>{{.Storage.Projection}}</dd></dl>
+  <h3>Media by type</h3>{{if .Storage.ByType}}<ul>{{range .Storage.ByType}}<li>{{.Name}}: {{.Size}}</li>{{end}}</ul>{{else}}<p>No media has been downloaded yet.</p>{{end}}
+  <h3>Chats using the most media</h3>{{if .Storage.ByChat}}<ul>{{range .Storage.ByChat}}<li dir="auto">{{.Name}}{{if .JID}} <bdi>{{.JID}}</bdi>{{end}}: {{.Size}}</li>{{end}}</ul>{{else}}<p>No media has been downloaded yet.</p>{{end}}
+  <h3>Nightly backup</h3><dl class="facts"><dt>Schedule</dt><dd>{{.Backups.Schedule}}</dd><dt>Destination</dt><dd><bdi>{{if .Backups.Destination}}{{.Backups.Destination}}{{else}}not set{{end}}</bdi></dd><dt>Latest result</dt><dd>{{if .Backups.HasResult}}{{if .Backups.Succeeded}}Succeeded{{else}}Failed{{end}} at {{.Backups.ResultAt}}{{else}}No backup has run yet{{end}}</dd></dl><p>Restore is documented in the README; there is no destructive restore button.</p>{{template "loading_state"}}</section>
+{{else if eq .Section "feed"}}{{template "feed_panel" .}}
+{{else if eq .Section "settings"}}<div class="logging-section" aria-busy="false"><h2>Settings</h2>
+  {{$settings := .Settings}}
+  {{template "logging_settings_media" $settings}}
+  {{template "logging_settings_alerts" $settings}}
+  {{template "logging_settings_backup" $settings}}
+  {{template "logging_settings_heartbeat" $settings}}
+  <section class="panel"><h3>Installation</h3><p class="muted">These values are read-only and are set on the server.</p><dl class="facts"><dt>Data folder</dt><dd>{{$settings.DataDir}}</dd><dt>Time zone</dt><dd>{{$settings.TimeZone}}</dd><dt>Backup destination</dt><dd>{{$settings.BackupDestination}}</dd><dt>Web address</dt><dd>{{$settings.Listen}}</dd></dl></section>
+</div>
+{{end}}{{end}}

@@ -97,6 +97,15 @@ type Server struct {
 	// testAlertAt throttles the test alert button.
 	testAlertMu sync.Mutex
 	testAlertAt time.Time
+	// Narrow function seams keep failure handling deterministic in tests while
+	// production still calls the one Store writer and the normal read models.
+	loggingStorage     func(context.Context, time.Time, *time.Location) (storageFacts, error)
+	loggingBackups     func(*http.Request) (backupsData, error)
+	setMediaRules      func(context.Context, config.MediaRules) error
+	setAlertThresholds func(context.Context, config.AlertConfig) error
+	setBackupSchedule  func(context.Context, config.BackupConfig) error
+	setHeartbeatURL    func(context.Context, string) error
+	removeHeartbeatURL func(context.Context) error
 	// pair is the browser pairing's state.
 	pair *pairing
 }
@@ -124,22 +133,31 @@ func New(d Deps) *Server {
 		d:    d,
 		tmpl: base,
 		pages: map[string]*template.Template{
-			"dashboard":     pageTemplate(base, "dashboard"),
-			"logging":       pageTemplate(base, "logging"),
-			"chats":         pageTemplate(base, "rule_preview", "chats"),
-			"chats_preview": pageTemplate(base, "rule_preview", "chats_preview"),
-			"viewer":        pageTemplate(base, "viewer"),
-			"trace":         pageTemplate(base, "trace"),
-			"search":        pageTemplate(base, "search"),
-			"export":        pageTemplate(base, "export"),
-			"settings":      pageTemplate(base, "settings"),
-			"storage":       pageTemplate(base, "storage"),
-			"backups":       pageTemplate(base, "backups"),
-			"pair":          pageTemplate(base, "pair"),
+			"dashboard":       pageTemplate(base, "dashboard"),
+			"logging":         pageTemplate(base, "logging"),
+			"logging_section": pageTemplate(base, "logging_section"),
+			"chats":           pageTemplate(base, "rule_preview", "chats"),
+			"chats_preview":   pageTemplate(base, "rule_preview", "chats_preview"),
+			"viewer":          pageTemplate(base, "viewer"),
+			"trace":           pageTemplate(base, "trace"),
+			"search":          pageTemplate(base, "search"),
+			"export":          pageTemplate(base, "export"),
+			"settings":        pageTemplate(base, "settings"),
+			"storage":         pageTemplate(base, "storage"),
+			"backups":         pageTemplate(base, "backups"),
+			"pair":            pageTemplate(base, "pair"),
 		},
 		pair:        newPairing(),
 		static:      http.StripPrefix("/static/", fileOnly(http.FileServerFS(sub), sub)),
 		healthEvery: 15 * time.Second,
+	}
+	s.loggingStorage, s.loggingBackups = s.storageFacts, s.backupsData
+	if d.Store != nil {
+		s.setMediaRules = d.Store.SetMediaRules
+		s.setAlertThresholds = d.Store.SetAlertThresholds
+		s.setBackupSchedule = d.Store.SetBackupSchedule
+		s.setHeartbeatURL = d.Store.SetHeartbeatURL
+		s.removeHeartbeatURL = d.Store.RemoveHeartbeatURL
 	}
 	return s
 }
@@ -168,7 +186,10 @@ func (s *Server) routes(mux *http.ServeMux) {
 		http.Redirect(w, r, "/chats", http.StatusSeeOther)
 	})
 	mux.HandleFunc("GET /logging", s.logging)
+	mux.HandleFunc("GET /logging/{section}", s.loggingSection)
 	mux.HandleFunc("GET /partials/health", s.healthPartial)
+	mux.HandleFunc("GET /partials/inactivity", s.inactivityPartial)
+	mux.HandleFunc("GET /partials/feed", s.feedPartial)
 	mux.HandleFunc("GET /events", s.events)
 	mux.HandleFunc("GET /chats", s.chats)
 	mux.HandleFunc("POST /chats/rules/preview", s.chatRulePreview)
@@ -200,6 +221,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 type page struct {
 	Title, Current string
 	Live           bool
+	EventsURL      string
 }
 
 // render executes the template name of t into memory first, so a failure is a clean 500 and never half a page.

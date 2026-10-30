@@ -18,6 +18,7 @@ const (
 	KeyMediaRules      = "media.rules"
 	KeyAlertThresholds = "alerts.thresholds"
 	KeyBackupSchedule  = "backup.schedule"
+	KeyHeartbeatURL    = "alerts.heartbeat_url"
 )
 
 // ChatRule is the per-chat setting. Logging false means the chat is not stored. Media nil means the global media
@@ -270,6 +271,9 @@ func (s *Store) ImportConfigOnce(ctx context.Context, cfg *config.Config) (bool,
 		KeyBackupSchedule:   backupSchedule{Time: cfg.Backup.Time, Keep: cfg.Backup.Keep},
 		config.ImportMarker: now,
 	}
+	if cfg.Alerts.HeartbeatURL != "" {
+		values[KeyHeartbeatURL] = cfg.Alerts.HeartbeatURL
+	}
 	for key, v := range values {
 		b, err := json.Marshal(v)
 		if err != nil {
@@ -366,4 +370,23 @@ func (s *Store) BackupSchedule(ctx context.Context) (config.BackupConfig, bool, 
 // SetBackupSchedule writes the time and keep of b; b.Destination is never written.
 func (s *Store) SetBackupSchedule(ctx context.Context, b config.BackupConfig) error {
 	return s.setSettingJSON(ctx, KeyBackupSchedule, backupSchedule{Time: b.Time, Keep: b.Keep})
+}
+
+// HeartbeatURL returns the write-only off-host heartbeat URL. Callers must not
+// log or render the returned value.
+func (s *Store) HeartbeatURL(ctx context.Context) (string, bool, error) {
+	var value string
+	ok, err := s.settingJSON(ctx, KeyHeartbeatURL, &value)
+	return value, ok, err
+}
+
+func (s *Store) SetHeartbeatURL(ctx context.Context, value string) error {
+	return s.setSettingJSON(ctx, KeyHeartbeatURL, value)
+}
+
+func (s *Store) RemoveHeartbeatURL(ctx context.Context) error {
+	if _, err := s.write.ExecContext(ctx, `DELETE FROM settings WHERE key=?`, KeyHeartbeatURL); err != nil {
+		return fmt.Errorf("remove setting %s: %w", KeyHeartbeatURL, classify(err))
+	}
+	return nil
 }

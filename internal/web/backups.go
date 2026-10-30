@@ -51,6 +51,21 @@ func (s *Server) testAlert(w http.ResponseWriter, r *http.Request) {
 	if s.d.Notifier != nil {
 		res = s.sendTestAlert(r.Context())
 	}
+	if loggingSettingsRequest(r) {
+		d, err := s.settingsData(r.Context())
+		if err != nil {
+			http.Error(w, "the settings could not be read", http.StatusInternalServerError)
+			return
+		}
+		d.Alert = res
+		if r.Header.Get("HX-Request") == "true" {
+			s.renderLoggingSettingsFragment(w, "alerts", d)
+			return
+		}
+		data := loggingSectionData{page: page{Title: "Logging", Current: "Logging"}, Section: "settings", Settings: d}
+		s.render(w, s.pages["logging_section"], "layout", data)
+		return
+	}
 	s.renderBackups(w, r, res)
 }
 

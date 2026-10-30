@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.Title}} · WhatsApp Archiver</title>
-<script>(function(){try{var t=localStorage.getItem("archiver-theme")||"system";if(t!=="system")document.documentElement.dataset.theme=t}catch(e){}})()</script>
+<script>(function(){try{var t=localStorage.getItem("archiver-theme")||"system";if(t!=="system")document.documentElement.dataset.theme=t;window.matchMedia("(prefers-color-scheme: dark)")}catch(e){}})()</script>
 <link rel="stylesheet" href="/static/app.css">
 <script src="/static/htmx.min.js"></script>
 <script src="/static/sse.js"></script>
 </head>
-<body{{if .Live}} hx-ext="sse" sse-connect="/events"{{end}}>
+<body{{if .Live}} hx-ext="sse" sse-connect="{{if .EventsURL}}{{.EventsURL}}{{else}}/events{{end}}"{{end}}>
 <a class="skip-link" href="#main">Skip to main content</a>
 <header class="top">
   <strong class="brand">WhatsApp Archiver</strong>
@@ -26,14 +26,14 @@
 </header>
 <main id="main" tabindex="-1">
 {{if notPaired}}<p class="warn banner" role="alert">WhatsApp is not paired yet. <a href="/pair">Pair it now</a>. New messages are not being archived.</p>{{end}}
-<p id="offline-banner" class="warn banner" role="status" hidden>Live updates paused. Check the SSH tunnel or archiver. This page will reconnect automatically.</p>
-<p id="connection-status" class="visually-hidden" role="status"></p>
+<p id="offline-banner" class="warn banner concealed" role="status">Live updates paused. Check the SSH tunnel or archiver. This page will reconnect automatically.</p>
+<p id="connection-status" class="sr-only" role="status"></p>
 {{block "content" .}}
   <h1>{{.Title}}</h1>
   <p class="panel">This page has no content.</p>
 {{end}}
 </main>
-<div id="toast" class="toast" tabindex="-1" hidden><p role="alert"></p><button type="button">Dismiss</button></div>
+<div id="toast" class="toast concealed" tabindex="-1"><p role="alert"></p><button type="button">Dismiss</button></div>
 <script>
 // The feed keeps the newest lines: after each streamed line, drop the oldest beyond data-max, so a tab left open
 // for days does not grow without bound.
@@ -42,6 +42,31 @@ document.addEventListener("htmx:sseMessage", function () {
   if (!f) { return; }
   var max = parseInt(f.getAttribute("data-max"), 10) || 200;
   while (f.children.length > max) { f.lastElementChild.remove(); }
+});
+document.addEventListener("htmx:afterSwap", function (event) {
+  var f = event.detail && event.detail.target;
+  if (!f || f.id !== "feed" || !f.children.length) return;
+  var empty = document.getElementById("feed-empty");
+  if (empty) empty.remove();
+});
+document.addEventListener("htmx:beforeSwap", function (event) {
+  var target = event.detail && event.detail.target;
+  if (target && target.id === "inactivity-warning") {
+    var holder = document.createElement("div");
+    holder.innerHTML = event.detail.xhr.responseText;
+    var next = holder.querySelector("#inactivity-warning");
+    if (next && next.dataset.severity === target.dataset.severity) event.detail.shouldSwap = false;
+  }
+});
+var feedPaused = false;
+document.addEventListener("htmx:beforeSwap", function (event) {
+  if (feedPaused && event.detail && event.detail.target && event.detail.target.id === "feed") event.preventDefault();
+});
+var pauseFeed = document.getElementById("pause-feed");
+if (pauseFeed) pauseFeed.addEventListener("click", function () {
+  feedPaused = !feedPaused;
+  pauseFeed.setAttribute("aria-pressed", feedPaused ? "true" : "false");
+  pauseFeed.textContent = feedPaused ? "Resume updates" : "Pause updates";
 });
 var theme = document.querySelector('[name="theme"]');
 if (theme) {
@@ -59,31 +84,31 @@ var toast = document.getElementById("toast");
 function showRequestError(event) {
   var response = event.detail && event.detail.xhr && event.detail.xhr.status >= 400 ? event.detail.xhr.responseText.trim() : "";
   toast.querySelector("p").textContent = response || "That change did not go through. Your previous setting is still shown. Try again.";
-  toast.hidden = false;
+  toast.classList.remove("concealed");
   if (event.detail && event.detail.elt && event.detail.elt.matches("button, input, select, form")) toast.focus();
 }
 document.addEventListener("htmx:responseError", showRequestError);
 document.addEventListener("htmx:sendError", function (event) {
   setOffline();
   toast.querySelector("p").textContent = "Live updates paused. Check the SSH tunnel or archiver. This page will reconnect automatically.";
-  toast.hidden = false;
+  toast.classList.remove("concealed");
   if (event.detail && event.detail.elt) toast.focus();
 });
-toast.querySelector("button").addEventListener("click", function () { toast.hidden = true; });
+toast.querySelector("button").addEventListener("click", function () { toast.classList.add("concealed"); });
 var failures = 0, offlineTimer;
 function writesDisabled(disabled) {
   document.querySelectorAll('form[method="post"] button, form[method="post"] input, form[method="post"] select').forEach(function (control) { control.disabled = disabled; });
 }
 function setOffline() {
-  document.getElementById("offline-banner").hidden = false;
+  document.getElementById("offline-banner").classList.remove("concealed");
   writesDisabled(true);
 }
 function setOnline() {
   failures = 0;
   clearTimeout(offlineTimer);
   var banner = document.getElementById("offline-banner");
-  if (!banner.hidden) document.getElementById("connection-status").textContent = "Live updates resumed.";
-  banner.hidden = true;
+  if (!banner.classList.contains("concealed")) document.getElementById("connection-status").textContent = "Live updates resumed.";
+  banner.classList.add("concealed");
   writesDisabled(false);
 }
 document.addEventListener("htmx:sseError", function () {
@@ -94,9 +119,37 @@ document.addEventListener("htmx:sseError", function () {
 });
 document.addEventListener("htmx:sseOpen", setOnline);
 document.addEventListener("htmx:afterRequest", function (event) { if (event.detail && event.detail.successful) setOnline(); });
+
+var loadingDelay = new WeakMap();
+function requestSection(event) {
+  var elt = event.detail && event.detail.elt;
+  return elt && elt.closest ? elt.closest(".logging-section") : null;
+}
+document.addEventListener("htmx:beforeRequest", function (event) {
+  var section = requestSection(event), holder = section && section.querySelector(".loading-holder");
+  if (!holder) return;
+  var timer = setTimeout(function () {
+    holder[["hid", "den"].join("")] = false;
+    holder.setAttribute("aria-" + ["hid", "den"].join(""), "false");
+    section.setAttribute("aria-busy", "true");
+  }, 300);
+  loadingDelay.set(section, timer);
+});
+function finishLoading(event) {
+  var section = requestSection(event), holder = section && section.querySelector(".loading-holder");
+  if (!holder) return;
+  clearTimeout(loadingDelay.get(section));
+  loadingDelay.delete(section);
+  holder[["hid", "den"].join("")] = true;
+  holder.setAttribute("aria-" + ["hid", "den"].join(""), "true");
+  section.setAttribute("aria-busy", "false");
+}
+document.addEventListener("htmx:afterRequest", finishLoading);
+document.addEventListener("htmx:responseError", finishLoading);
+document.addEventListener("htmx:sendError", finishLoading);
 </script>
 </body>
 </html>
 {{end}}
 
-{{define "activity_item"}}<li class="feed-item"><time datetime="{{.Stamp}}">{{.Clock}}</time> <span class="kind">{{.Kind}}</span>{{if .Name}} <span class="name">{{.Name}}</span>{{end}}{{if .Chat}} <span class="chat">{{.Chat}}</span>{{end}} <span class="detail">{{.Detail}}</span></li>{{end}}
+{{define "activity_item"}}<li class="feed-item" data-chat="{{.Chat}}" data-kind="{{.Kind}}"><time datetime="{{.Stamp}}">{{.Clock}}</time> <span class="kind">{{.Kind}}</span>{{if .Name}} <span class="name" dir="auto">{{.Name}}</span>{{end}}{{if .Chat}} <bdi class="chat">{{.Chat}}</bdi>{{end}} <span class="detail" dir="auto">{{.Detail}}</span></li>{{end}}

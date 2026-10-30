@@ -49,7 +49,7 @@ func TestPrimaryNavigationHasOnlyThreeAreasAndCurrentPage(t *testing.T) {
 	}
 }
 
-func TestSSEIsScopedToLivePagesAndFeedExistsOnlyOnLogging(t *testing.T) {
+func TestSSEIsScopedToLoggingOverviewAndFeed(t *testing.T) {
 	h := New(Deps{}).Handler()
 	for _, path := range []string{"/chats", "/settings", "/storage", "/backups"} {
 		body, code, _ := get(t, h, path)
@@ -61,8 +61,12 @@ func TestSSEIsScopedToLivePagesAndFeedExistsOnlyOnLogging(t *testing.T) {
 		}
 	}
 	body, code, _ := get(t, h, "/logging")
+	if code != http.StatusOK || strings.Count(string(body), `sse-connect="/events"`) != 1 || strings.Contains(string(body), `id="feed"`) {
+		t.Fatalf("Logging overview SSE/feed scope is wrong: status %d", code)
+	}
+	body, code, _ = get(t, h, "/logging/feed")
 	if code != http.StatusOK || strings.Count(string(body), `sse-connect="/events"`) != 1 || strings.Count(string(body), `id="feed"`) != 1 {
-		t.Fatalf("Logging SSE/feed scope is wrong: status %d", code)
+		t.Fatalf("Logging feed SSE scope is wrong: status %d", code)
 	}
 }
 

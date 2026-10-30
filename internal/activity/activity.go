@@ -99,3 +99,27 @@ func (b *Bus) Recent() []Event {
 	}
 	return append(append([]Event(nil), b.ring[b.next:]...), b.ring[:b.next]...)
 }
+
+// RecentFiltered returns the newest matching events, oldest first. Filtering
+// happens while the bus owns the ring so an older match is not discarded by a
+// global limit. The returned slice is an independent copy.
+func (b *Bus) RecentFiltered(chat, kind string, limit int) []Event {
+	all := b.Recent()
+	if limit < 1 {
+		return nil
+	}
+	out := make([]Event, 0, min(limit, len(all)))
+	for i := len(all) - 1; i >= 0 && len(out) < limit; i-- {
+		if chat != "" && all[i].Chat != chat {
+			continue
+		}
+		if kind != "" && all[i].Kind != kind {
+			continue
+		}
+		out = append(out, all[i])
+	}
+	for left, right := 0, len(out)-1; left < right; left, right = left+1, right-1 {
+		out[left], out[right] = out[right], out[left]
+	}
+	return out
+}

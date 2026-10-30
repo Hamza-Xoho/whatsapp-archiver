@@ -2,8 +2,10 @@ package web
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -39,12 +41,20 @@ type backupSection struct {
 	Err        string
 }
 
+type heartbeatSection struct {
+	Masked string
+	Set    bool
+	Err    string
+}
+
 type settingsData struct {
 	page
-	Media  mediaSection
-	Alerts alertsSection
-	Backup backupSection
-	Saved  string // the section just saved: media, alerts or backup
+	Media     mediaSection
+	Alerts    alertsSection
+	Backup    backupSection
+	Heartbeat heartbeatSection
+	Alert     *alertResult
+	Saved     string // the section just saved: media, alerts or backup
 	// InUse says what applies now, whatever a rejected form shows: one line per section.
 	MediaInUse, AlertsInUse, BackupInUse string
 	// Read-only, from config.yaml.
@@ -71,6 +81,7 @@ func (s *Server) settings(w http.ResponseWriter, r *http.Request) {
 func (s *Server) settingsData(ctx context.Context) (settingsData, error) {
 	cfg := s.config()
 	m, a, b := cfg.Media, cfg.Alerts, cfg.Backup
+	heartbeat := cfg.Alerts.HeartbeatURL
 	if s.d.Store != nil {
 		if r, ok, err := s.d.Store.MediaRules(ctx); err != nil {
 			return settingsData{}, err
@@ -87,6 +98,15 @@ func (s *Server) settingsData(ctx context.Context) (settingsData, error) {
 		} else if ok {
 			b.Time, b.Keep = sc.Time, sc.Keep
 		}
+		if value, ok, err := s.d.Store.HeartbeatURL(ctx); err != nil {
+			return settingsData{}, err
+		} else if ok {
+			heartbeat = value
+		} else if imported, importErr := s.d.Store.ConfigImported(ctx); importErr != nil {
+			return settingsData{}, importErr
+		} else if imported {
+			heartbeat = ""
+		}
 	}
 	cap := strconv.Itoa(m.VideoMaxMB) + " MB"
 	if m.VideoMaxMB == 0 {
@@ -98,7 +118,8 @@ func (s *Server) settingsData(ctx context.Context) (settingsData, error) {
 		AlertsInUse: fmt.Sprintf("In use now: no events after %s, disconnected after %s, phone quiet after %s, disk free minimum %d GB.", formatDuration(a.NoEventsAfter), formatDuration(a.DisconnectedAfter), formatDuration(a.PhoneQuietAfter), a.DiskFreeMinGB),
 		BackupInUse: fmt.Sprintf("In use now: every day at %s, keeping %d snapshots.", b.Time, b.Keep),
 		Media:       mediaSectionOf(m), Alerts: alertsSectionOf(a), Backup: backupSection{Time: b.Time, Keep: strconv.Itoa(b.Keep)},
-		DataDir: cfg.DataDir, TimeZone: cfg.TimeZone, BackupDestination: cfg.Backup.Destination, Listen: cfg.Web.Listen,
+		Heartbeat: heartbeatSection{Masked: maskedHeartbeatURL(heartbeat), Set: heartbeat != ""},
+		DataDir:   cfg.DataDir, TimeZone: cfg.TimeZone, BackupDestination: cfg.Backup.Destination, Listen: cfg.Web.Listen,
 		CheckLatestVersion: cfg.WA.CheckLatestVersion, VersionOverride: cfg.WA.VersionOverride,
 		NtfyConfigured: cfg.Alerts.Ntfy != nil,
 	}, nil
@@ -132,6 +153,10 @@ func formatDuration(d time.Duration) string {
 // page; an invalid one re-renders the page with the error and the typed values, and writes nothing.
 func (s *Server) saveSetting(w http.ResponseWriter, r *http.Request) {
 	section := r.PathValue("section")
+	if section == "heartbeat" || section == "heartbeat-remove" {
+		s.saveHeartbeatSetting(w, r, section == "heartbeat-remove")
+		return
+	}
 	if section != "media" && section != "alerts" && section != "backup" {
 		http.NotFound(w, r)
 		return
@@ -160,10 +185,33 @@ func (s *Server) saveSetting(w http.ResponseWriter, r *http.Request) {
 		d.Backup, msg, err = s.saveBackup(r)
 	}
 	if err != nil {
-		http.Error(w, "the setting could not be saved", http.StatusInternalServerError)
+		msg = "The setting could not be saved. Your previous setting is still in use."
+		switch section {
+		case "media":
+			d.Media.Err = msg
+		case "alerts":
+			d.Alerts.Err = msg
+		case "backup":
+			d.Backup.Err = msg
+		}
+		s.renderSettingResult(w, r, section, d, http.StatusInternalServerError)
 		return
 	}
 	if msg == "" {
+		if loggingSettingsRequest(r) {
+			if r.Header.Get("HX-Request") == "true" {
+				fresh, readErr := s.settingsData(r.Context())
+				if readErr != nil {
+					http.Error(w, "the settings could not be read", http.StatusInternalServerError)
+					return
+				}
+				fresh.Saved = section
+				s.renderLoggingSettingsFragment(w, section, fresh)
+				return
+			}
+			http.Redirect(w, r, "/logging/settings?saved="+section+"#"+section, http.StatusSeeOther)
+			return
+		}
 		http.Redirect(w, r, "/settings?saved="+section+"#"+section, http.StatusSeeOther)
 		return
 	}
@@ -175,8 +223,117 @@ func (s *Server) saveSetting(w http.ResponseWriter, r *http.Request) {
 	case "backup":
 		d.Backup.Err = msg
 	}
-	w.WriteHeader(http.StatusUnprocessableEntity)
+	s.renderSettingResult(w, r, section, d, http.StatusUnprocessableEntity)
+}
+
+func (s *Server) renderSettingResult(w http.ResponseWriter, r *http.Request, section string, d settingsData, status int) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+	if loggingSettingsRequest(r) {
+		if r.Header.Get("HX-Request") == "true" {
+			s.renderLoggingSettingsFragment(w, section, d)
+			return
+		}
+		data := loggingSectionData{page: page{Title: "Logging", Current: "Logging"}, Section: "settings", Settings: d}
+		s.render(w, s.pages["logging_section"], "layout", data)
+		return
+	}
 	s.render(w, s.pages["settings"], "layout", d)
+}
+
+func (s *Server) saveHeartbeatSetting(w http.ResponseWriter, r *http.Request, remove bool) {
+	if s.d.Store == nil {
+		http.Error(w, "the archive is not available", http.StatusServiceUnavailable)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxFormBytes)
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "the form could not be read", http.StatusBadRequest)
+		return
+	}
+	var msg string
+	if remove {
+		if r.PostForm.Get("confirm") != "yes" {
+			msg = "Confirm heartbeat removal before continuing."
+		} else if err := s.removeHeartbeatURL(r.Context()); err != nil {
+			msg = "The heartbeat endpoint could not be removed. The previous endpoint is still in use."
+		}
+	} else if value := strings.TrimSpace(r.PostForm.Get("heartbeat_url")); value != "" {
+		if err := validateHeartbeatURL(value); err != nil {
+			msg = "Heartbeat URL must be an http or https URL with a network host."
+		} else if err = s.setHeartbeatURL(r.Context(), value); err != nil {
+			msg = "The heartbeat endpoint could not be saved. The previous endpoint is still in use."
+		}
+	}
+	if msg != "" {
+		d, err := s.loggingSectionData(r, "settings")
+		if err != nil {
+			http.Error(w, "the settings could not be read", http.StatusInternalServerError)
+			return
+		}
+		d.Settings.Heartbeat.Err = msg
+		status := http.StatusUnprocessableEntity
+		if strings.Contains(msg, "previous endpoint is still in use") {
+			status = http.StatusInternalServerError
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(status)
+		if r.Header.Get("HX-Request") == "true" && loggingSettingsRequest(r) {
+			s.renderLoggingSettingsFragment(w, "heartbeat", d.Settings)
+		} else {
+			s.render(w, s.pages["logging_section"], "layout", d)
+		}
+		return
+	}
+	if r.Header.Get("HX-Request") == "true" && loggingSettingsRequest(r) {
+		d, err := s.settingsData(r.Context())
+		if err != nil {
+			http.Error(w, "the settings could not be read", http.StatusInternalServerError)
+			return
+		}
+		d.Saved = "heartbeat"
+		s.renderLoggingSettingsFragment(w, "heartbeat", d)
+		return
+	}
+	http.Redirect(w, r, "/logging/settings?saved=heartbeat#heartbeat", http.StatusSeeOther)
+}
+
+func loggingSettingsRequest(r *http.Request) bool {
+	for _, raw := range []string{r.Header.Get("HX-Current-URL"), r.Referer()} {
+		u, err := url.Parse(raw)
+		if err == nil && u.Path == "/logging/settings" {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Server) renderLoggingSettingsFragment(w http.ResponseWriter, section string, d settingsData) {
+	name := "logging_settings_" + section
+	if section == "heartbeat-remove" {
+		name = "logging_settings_heartbeat"
+	}
+	s.render(w, s.pages["logging_section"], name, d)
+}
+
+func validateHeartbeatURL(value string) error {
+	u, err := url.ParseRequestURI(value)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil {
+		return errors.New("invalid heartbeat URL")
+	}
+	return nil
+}
+
+func maskedHeartbeatURL(value string) string {
+	if validateHeartbeatURL(value) != nil {
+		return ""
+	}
+	u, _ := url.Parse(value)
+	parts := strings.Split(strings.Trim(u.Path, "/"), "/")
+	if len(parts) == 0 || parts[0] == "" {
+		return u.Scheme + "://" + u.Host
+	}
+	return u.Scheme + "://" + u.Host + "/…/" + url.PathEscape(parts[len(parts)-1])
 }
 
 // atoi parses a whole number field; the message names the field.
@@ -220,7 +377,7 @@ func (s *Server) saveMedia(r *http.Request) (mediaSection, string, error) {
 	if err := config.ValidateMediaRules(rules); err != nil {
 		return f, upperFirst(err.Error()), nil
 	}
-	return f, "", s.d.Store.SetMediaRules(r.Context(), rules)
+	return f, "", s.setMediaRules(r.Context(), rules)
 }
 
 func (s *Server) saveAlerts(r *http.Request) (alertsSection, string, error) {
@@ -244,7 +401,7 @@ func (s *Server) saveAlerts(r *http.Request) (alertsSection, string, error) {
 	if err := config.ValidateAlertThresholds(a); err != nil {
 		return f, upperFirst(err.Error()), nil
 	}
-	return f, "", s.d.Store.SetAlertThresholds(r.Context(), a)
+	return f, "", s.setAlertThresholds(r.Context(), a)
 }
 
 func (s *Server) saveBackup(r *http.Request) (backupSection, string, error) {
@@ -256,7 +413,7 @@ func (s *Server) saveBackup(r *http.Request) (backupSection, string, error) {
 	if err := config.ValidateBackupSchedule(f.Time, keep); err != nil {
 		return f, upperFirst(err.Error()), nil
 	}
-	return f, "", s.d.Store.SetBackupSchedule(r.Context(), config.BackupConfig{Time: f.Time, Keep: keep})
+	return f, "", s.setBackupSchedule(r.Context(), config.BackupConfig{Time: f.Time, Keep: keep})
 }
 
 func upperFirst(s string) string {

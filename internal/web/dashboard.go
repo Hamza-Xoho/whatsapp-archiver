@@ -42,6 +42,8 @@ type healthView struct {
 	State, StateClass, Detail string
 	Version, LastEvent        string
 	PhoneLastActive           string
+	SessionAge, LastEventAgo  string
+	PhoneActiveAgo            string
 	PhoneQuiet                bool
 	PhoneQuietFor             string
 	Panics                    int
@@ -49,17 +51,18 @@ type healthView struct {
 
 type dashboardData struct {
 	page
-	Health                      healthView
-	HasArchive                  bool
-	History                     []string
-	Logging, NotLogging, Gaps   int
-	LoggingNoun, NotLoggingNoun string
-	GapGroups                   []gapSummaryView
-	Media24Hours, Media7Days    string
-	Events                      []feedItem
-	Outages                     []store.OutageDay
-	HasOutages                  bool
-	LongestOutageMinutes        int
+	Health                                     healthView
+	HasArchive                                 bool
+	History                                    []string
+	Logging, NotLogging, Gaps                  int
+	ArchiveChats, ArchiveMessages, FailedMedia int
+	LoggingNoun, NotLoggingNoun                string
+	GapGroups                                  []gapSummaryView
+	Media24Hours, Media7Days                   string
+	Events                                     []feedItem
+	Outages                                    []store.OutageDay
+	HasOutages                                 bool
+	LongestOutageMinutes                       int
 }
 
 type gapSummaryView struct {
@@ -98,6 +101,9 @@ func (s *Server) dashboardData(ctx context.Context) (dashboardData, error) {
 		data.Media7Days = view.PercentageCount(media.WeekDone, media.WeekTotal)
 		filter := ingest.NewFilter(s.d.Rules, func(jid string) ([]string, error) { return s.d.Store.Aliases(ctx, jid) })
 		for _, c := range report.Chats {
+			data.ArchiveChats++
+			data.ArchiveMessages += c.MessageCount
+			data.FailedMedia += c.MediaFailed
 			names[c.CanonicalJID] = c.Name
 			off, err := filter.Excluded(c.CanonicalJID)
 			if err != nil {
@@ -128,7 +134,6 @@ func (s *Server) dashboardData(ctx context.Context) (dashboardData, error) {
 		data.History = view.HistoryLinesAt(loc, report.Coverage, s.d.Now())
 		data.LoggingNoun, data.NotLoggingNoun = chatNoun(data.Logging), chatNoun(data.NotLogging)
 	}
-	data.Events = s.recent(names, loc)
 	return data, nil
 }
 
@@ -149,6 +154,15 @@ func (s *Server) healthPartial(w http.ResponseWriter, r *http.Request) {
 	s.render(w, s.pages["dashboard"], "health_panel", s.healthView(r.Context(), loc))
 }
 
+func (s *Server) inactivityPartial(w http.ResponseWriter, r *http.Request) {
+	loc, err := view.Location(s.config())
+	if err != nil {
+		http.Error(w, "the page could not be rendered", http.StatusInternalServerError)
+		return
+	}
+	s.render(w, s.pages["logging"], "logging_inactivity", s.healthView(r.Context(), loc))
+}
+
 // recent is the newest recentEvents events, newest first.
 func (s *Server) recent(names map[string]string, loc *time.Location) []feedItem {
 	all := s.d.Activity.Recent() // oldest first; a nil bus has none
@@ -167,14 +181,25 @@ func (s *Server) healthView(ctx context.Context, loc *time.Location) healthView 
 	if s.d.Health != nil {
 		snap = s.d.Health()
 	}
-	v := healthView{Detail: snap.Detail, Version: "-", Panics: snap.Panics,
+	v := healthView{Detail: safeHealthDetail(snap.State, snap.Detail), Version: "-", Panics: snap.Panics,
 		LastEvent: view.FormatTime(loc, snap.LastEvent), PhoneLastActive: view.FormatTime(loc, snap.PhoneLastActive)}
 	v.State, v.StateClass = stateWords(snap.State)
 	if snap.Version != "" {
 		v.Version = snap.Version
-		if snap.VersionReason != "" {
-			v.Version += " (" + snap.VersionReason + ")"
+		if reason := safeVersionReason(snap.VersionReason); reason != "" {
+			v.Version += " (" + reason + ")"
 		}
+	}
+	if started, ok := s.d.Pairer.(interface{ PairingStarted() time.Time }); ok {
+		if at := started.PairingStarted(); !at.IsZero() {
+			v.SessionAge = sinceWords(max(s.d.Now().Sub(at), 0))
+		}
+	}
+	if !snap.LastEvent.IsZero() {
+		v.LastEventAgo = agoWords(s.d.Now().Sub(snap.LastEvent))
+	}
+	if !snap.PhoneLastActive.IsZero() {
+		v.PhoneActiveAgo = agoWords(s.d.Now().Sub(snap.PhoneLastActive))
 	}
 	// An unknown phone time is not a warning: the monitor counts quiet from its own start, the page has no start.
 	if limit := s.phoneQuietAfter(ctx); limit > 0 && !snap.PhoneLastActive.IsZero() {
@@ -183,6 +208,62 @@ func (s *Server) healthView(ctx context.Context, loc *time.Location) healthView 
 		}
 	}
 	return v
+}
+
+func safeVersionReason(reason string) string {
+	reason = strings.ToLower(strings.TrimSpace(reason))
+	switch {
+	case reason == "latest":
+		return "latest"
+	case reason == "built-in", reason == "builtin":
+		return "built-in"
+	case strings.Contains(reason, "override"):
+		return "override"
+	case strings.Contains(reason, "lookup"), strings.Contains(reason, "failed"), strings.Contains(reason, "error"):
+		return "lookup failed"
+	default:
+		return ""
+	}
+}
+
+// safeHealthDetail reduces transport-owned error text to controlled copy. A
+// monitor detail can contain a URL, filesystem path or server response and is
+// never suitable for direct HTML rendering.
+func safeHealthDetail(state, detail string) string {
+	detail = strings.ToLower(strings.TrimSpace(detail))
+	if detail == "" {
+		return ""
+	}
+	if detail == "stream error" { // stable legacy monitor category
+		return detail
+	}
+	cause := ""
+	for _, item := range []struct{ needle, label string }{
+		{"dns", "DNS"}, {"tls", "TLS"}, {"websocket", "WebSocket"}, {"class=ws", "WebSocket"},
+		{"tcp", "network"}, {"keepalive", "keepalive"},
+	} {
+		if strings.Contains(detail, item.needle) {
+			cause = item.label
+			break
+		}
+	}
+	switch state {
+	case "disconnected", "reconnecting", "degraded":
+		if cause != "" {
+			return "Connection interrupted (" + cause + ")"
+		}
+		return "Connection interrupted"
+	case "logged_out":
+		return "WhatsApp logged out"
+	case "client_outdated":
+		return "WhatsApp client update required"
+	case "temp_banned":
+		return "WhatsApp temporarily paused capture"
+	case "stream_replaced":
+		return "WhatsApp session replaced"
+	default:
+		return ""
+	}
 }
 
 // phoneQuietAfter is the live alert threshold (the alerts.thresholds setting, read at each use), falling back to
@@ -210,10 +291,29 @@ func stateWords(state string) (label, class string) {
 		return "Connected", "ok"
 	case "disconnected":
 		return "Disconnected", "bad"
+	case "logged_out":
+		return "Logged out", "bad"
+	case "reconnecting":
+		return "Reconnecting", "bad"
+	case "degraded":
+		return "Degraded", "bad"
 	case "", "unknown":
 		return "Unknown", "warn"
 	}
 	return strings.ToUpper(state[:1]) + state[1:], "warn"
+}
+
+func agoWords(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	if d < time.Minute {
+		return fmt.Sprintf("%d seconds ago", int(d/time.Second))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%d minutes ago", int(d/time.Minute))
+	}
+	return sinceWords(d) + " ago"
 }
 
 func sinceWords(d time.Duration) string {

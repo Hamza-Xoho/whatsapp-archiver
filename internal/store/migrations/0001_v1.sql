@@ -69,7 +69,8 @@ CREATE TABLE message_events (
   raw_proto   BLOB NOT NULL DEFAULT X'',
   UNIQUE (chat_jid, target_id, kind, event_id));
 CREATE INDEX message_events_source ON message_events(chat_jid, source_id) WHERE source_id <> '';
-CREATE INDEX message_events_gaps   ON message_events(chat_jid, target_id) WHERE kind = 'undecryptable';
+CREATE INDEX message_events_gaps ON message_events(received_at DESC, seq DESC, chat_jid, target_id, cause)
+  WHERE kind = 'undecryptable';
 
 CREATE TABLE chat_events (                    -- unchanged
   chat_jid TEXT NOT NULL, kind TEXT NOT NULL, event_id TEXT NOT NULL,
@@ -111,7 +112,7 @@ CREATE TABLE media (
   thumb BLOB NOT NULL DEFAULT X'',            -- last column (R5, R19)
   PRIMARY KEY (chat_jid, message_id));
 CREATE INDEX media_due  ON media(state, next_attempt_at);
-CREATE INDEX media_pick ON media(state, source_rank, message_ts DESC);
+CREATE INDEX media_pick ON media(state, source_rank, message_ts DESC, error_class, reason);
 CREATE INDEX media_live_enqueued ON media(enqueued_at) WHERE source = 'live';
 
 -- Derived (rebuildable by RebuildDerived; maintained by the writer in the same transaction).
