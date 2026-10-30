@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"modernc.org/sqlite"
@@ -168,13 +169,41 @@ func ensureV1Columns(db *sql.DB) error {
 	if err = rows.Close(); err != nil {
 		return fmt.Errorf("inspect chat rules schema: %w", err)
 	}
-	if found {
-		return nil
+	if !found {
+		if _, err = db.Exec(`ALTER TABLE chat_rules ADD COLUMN inherited_from TEXT NOT NULL DEFAULT ''`); err != nil {
+			return fmt.Errorf("upgrade chat rules inheritance: %w", err)
+		}
 	}
-	if _, err = db.Exec(`ALTER TABLE chat_rules ADD COLUMN inherited_from TEXT NOT NULL DEFAULT ''`); err != nil {
-		return fmt.Errorf("upgrade chat rules inheritance: %w", err)
+	return ensureV1IndexShapes(db)
+}
+
+// ensureV1IndexShapes replaces two pre-release V1 indexes in place. Reusing the existing b-trees keeps fresh archive
+// size and index count stable while making Logging's bounded order and media aggregation index-only.
+func ensureV1IndexShapes(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin V1 index check: %w", err)
 	}
-	return nil
+	defer func() { _ = tx.Rollback() }()
+	for _, spec := range []struct{ name, marker, create string }{
+		{"message_events_gaps", "received_at DESC", `CREATE INDEX message_events_gaps ON message_events(received_at DESC,seq DESC,chat_jid,target_id,cause) WHERE kind='undecryptable'`},
+		{"media_pick", "error_class", `CREATE INDEX media_pick ON media(state,source_rank,message_ts DESC,error_class,reason)`},
+	} {
+		var definition string
+		if err = tx.QueryRow(`SELECT COALESCE(sql,'') FROM sqlite_master WHERE type='index' AND name=?`, spec.name).Scan(&definition); err != nil {
+			return fmt.Errorf("inspect %s index: %w", spec.name, err)
+		}
+		if strings.Contains(definition, spec.marker) {
+			continue
+		}
+		if _, err = tx.Exec(`DROP INDEX ` + spec.name); err != nil {
+			return fmt.Errorf("replace %s index: %w", spec.name, err)
+		}
+		if _, err = tx.Exec(spec.create); err != nil {
+			return fmt.Errorf("create %s index: %w", spec.name, err)
+		}
+	}
+	return tx.Commit()
 }
 
 // checkSchema refuses an archive from before V1 (R16). Such an archive lists version 1 in schema_version, so the new

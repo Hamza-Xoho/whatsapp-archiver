@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"slices"
 )
 
 // LoggingCount is one grouped operational count. Name is a closed state/class
@@ -51,8 +52,13 @@ type LoggingGap struct {
 
 func (s *Store) LoggingGaps(ctx context.Context, limit int) ([]LoggingGap, error) {
 	limit = boundedLoggingLimit(limit, 200)
-	rows, err := s.read.QueryContext(ctx, `SELECT canonical_jid,chat_jid,target_id,cause,received_at,post_outage
- FROM open_gaps ORDER BY received_at DESC,seq DESC LIMIT ?`, limit)
+	rows, err := s.read.QueryContext(ctx, `SELECT c.canonical,e.chat_jid,e.target_id,e.cause,e.received_at,
+ EXISTS (SELECT 1 FROM connection_periods p WHERE p.ended_at IS NOT NULL AND e.received_at BETWEEN p.ended_at AND p.ended_at+120)
+ FROM message_events e INDEXED BY message_events_gaps JOIN chat_canonical c ON c.alias=e.chat_jid
+ WHERE e.kind='undecryptable'
+ AND NOT EXISTS (SELECT 1 FROM chat_canonical ga JOIN messages gm ON gm.chat_jid=ga.alias WHERE ga.canonical=c.canonical AND gm.id=e.target_id)
+ AND NOT EXISTS (SELECT 1 FROM chat_canonical ga JOIN message_events gs ON gs.chat_jid=ga.alias WHERE ga.canonical=c.canonical AND gs.source_id=e.target_id AND gs.source_id<>'' AND gs.kind<>'undecryptable')
+ ORDER BY e.received_at DESC,e.seq DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("read logging gaps: %w", err)
 	}
@@ -81,47 +87,67 @@ type LoggingMediaReport struct {
 // LoggingMedia groups narrow indexed/scalar columns and never reads paths,
 // media URLs, thumbnails, hashes, retry paths or protobufs.
 func (s *Store) LoggingMedia(ctx context.Context, reasonLimit int) (LoggingMediaReport, error) {
-	var out LoggingMediaReport
-	var err error
-	out.States, err = s.loggingCounts(ctx, `SELECT state,COUNT(*) FROM media GROUP BY state ORDER BY state`)
+	states, classes, reasons := map[string]int{}, map[string]int{}, map[string]int{}
+	rows, err := s.read.QueryContext(ctx, `SELECT state,error_class,reason FROM media INDEXED BY media_pick ORDER BY state,source_rank,message_ts DESC`)
 	if err != nil {
-		return out, err
-	}
-	out.ErrorClasses, err = s.loggingCounts(ctx, `SELECT error_class,COUNT(*) FROM media WHERE error_class<>'' GROUP BY error_class ORDER BY error_class`)
-	if err != nil {
-		return out, err
-	}
-	reasonLimit = boundedLoggingLimit(reasonLimit, 50)
-	rows, err := s.read.QueryContext(ctx, `SELECT reason,COUNT(*) FROM media WHERE reason<>'' GROUP BY reason ORDER BY COUNT(*) DESC,reason LIMIT ?`, reasonLimit)
-	if err != nil {
-		return out, fmt.Errorf("read logging media reasons: %w", err)
+		return LoggingMediaReport{}, fmt.Errorf("read logging media: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
-		var r LoggingMediaReason
-		if err = rows.Scan(&r.Reason, &r.Count); err != nil {
-			return out, err
+		var state, class, reason string
+		if err = rows.Scan(&state, &class, &reason); err != nil {
+			return LoggingMediaReport{}, fmt.Errorf("scan logging media: %w", err)
 		}
-		out.Reasons = append(out.Reasons, r)
+		states[state]++
+		if class != "" {
+			classes[class]++
+		}
+		if reason != "" {
+			reasons[reason]++
+		}
 	}
-	return out, rows.Err()
+	if err = rows.Err(); err != nil {
+		return LoggingMediaReport{}, err
+	}
+	out := LoggingMediaReport{States: sortedLoggingCounts(states), ErrorClasses: sortedLoggingCounts(classes)}
+	reasonLimit = boundedLoggingLimit(reasonLimit, 50)
+	for reason, count := range reasons {
+		out.Reasons = append(out.Reasons, LoggingMediaReason{Reason: reason, Count: count})
+	}
+	slices.SortFunc(out.Reasons, func(a, b LoggingMediaReason) int {
+		if a.Count != b.Count {
+			return b.Count - a.Count
+		}
+		return compareStrings(a.Reason, b.Reason)
+	})
+	if len(out.Reasons) > reasonLimit {
+		out.Reasons = out.Reasons[:reasonLimit]
+	}
+	return out, nil
 }
 
-func (s *Store) loggingCounts(ctx context.Context, query string) ([]LoggingCount, error) {
-	rows, err := s.read.QueryContext(ctx, query)
-	if err != nil {
-		return nil, err
+func sortedLoggingCounts(counts map[string]int) []LoggingCount {
+	names := make([]string, 0, len(counts))
+	for name := range counts {
+		names = append(names, name)
 	}
-	defer func() { _ = rows.Close() }()
-	var out []LoggingCount
-	for rows.Next() {
-		var c LoggingCount
-		if err = rows.Scan(&c.Name, &c.Count); err != nil {
-			return nil, err
-		}
-		out = append(out, c)
+	slices.Sort(names)
+	out := make([]LoggingCount, 0, len(names))
+	for _, name := range names {
+		out = append(out, LoggingCount{Name: name, Count: counts[name]})
 	}
-	return out, rows.Err()
+	return out
+}
+
+func compareStrings(a, b string) int {
+	switch {
+	case a < b:
+		return -1
+	case a > b:
+		return 1
+	default:
+		return 0
+	}
 }
 
 type LoggingHistoryChat struct {
