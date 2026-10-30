@@ -91,6 +91,53 @@ func TestRowSwapEstimateUnavailableAndPageSelectionContracts(t *testing.T) {
 	}
 }
 
+func TestAllFilteredMarkSeenUsesTheServerSnapshot(t *testing.T) {
+	u := newChatsUI(t)
+	for i := range 3 {
+		jid := fmt.Sprintf("team-%d@g.us", i)
+		namedChat(t, u, jid, fmt.Sprintf("Team %d", i), "group", "", dashNow.Add(time.Duration(i)*time.Minute))
+		if _, err := u.st.MarkChatSeen(t.Context(), jid, dashNow.Unix()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page := rawChatsPage(t, u, "/chats?q=Team&new=1")
+	snapshot := regexp.MustCompile(`name="snapshot" value="([^"]+)"`).FindStringSubmatch(page)
+	if len(snapshot) != 2 {
+		t.Fatalf("all-filtered snapshot missing: %s", page)
+	}
+	body, code := postForm(t, u.handler(), "/chats/ack", url.Values{
+		"scope": {"filtered"}, "snapshot": {snapshot[1]}, "q": {"Team"}, "new": {"1"},
+	})
+	if code != http.StatusOK || strings.Count(body, `hx-swap-oob="true"`) != 3 {
+		t.Fatalf("all-filtered mark seen = %d, %s", code, body)
+	}
+	if page = rawChatsPage(t, u, "/chats?q=Team&new=1"); !strings.Contains(page, "0 chats shown") {
+		t.Fatalf("marked chats still match New: %s", visibleText(page))
+	}
+}
+
+func TestInheritedCommunityNamesDoNotDependOnTheCurrentPage(t *testing.T) {
+	u := newChatsUI(t)
+	namedChat(t, u, "neighbours@g.us", "Neighbours", "community", "", dashNow.Add(-2*time.Hour))
+	namedChat(t, u, "announcements@g.us", "Announcements", "group", "neighbours@g.us", dashNow.Add(2*time.Hour))
+	for i := range 55 {
+		namedChat(t, u, fmt.Sprintf("filler-%02d@g.us", i), fmt.Sprintf("Filler %02d", i), "group", "", dashNow.Add(time.Duration(i)*time.Minute))
+	}
+	if err := u.st.SetChatRules(t.Context(), []store.ChatRule{{JID: "neighbours@g.us", Logging: false}}); err != nil {
+		t.Fatal(err)
+	}
+	page := rawChatsPage(t, u, "/chats")
+	start := strings.Index(page, `href="/chats/announcements@g.us"`)
+	if start < 0 {
+		t.Fatalf("first page lacks child chat: %s", visibleText(page))
+	}
+	end := strings.Index(page[start:], "</tr>")
+	row := page[start : start+end]
+	if !strings.Contains(row, "Inherited from Neighbours") {
+		t.Fatalf("off-page community name missing from child rule label: %s", visibleText(row))
+	}
+}
+
 // Set W6B_DEVSEED_DATA to a disposable archive created by:
 //
 //	archiver devseed --data "$W6B_DEVSEED_DATA" --chats 250 --messages 300000
