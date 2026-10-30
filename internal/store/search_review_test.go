@@ -1,11 +1,28 @@
 package store_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	"whatsapp-archiver/internal/store"
 )
+
+func TestSearchDoesNotLoseExactPhraseBehindNewerBroadCandidates(t *testing.T) {
+	s := open(t)
+	for i := range 150 {
+		addSearchMessage(t, s, searchMessage("g@g.us", fmt.Sprintf("apart-%03d", i), "1@lid", "text", "foo intervening bar", int64(i+100)))
+	}
+	addSearchMessage(t, s, searchMessage("g@g.us", "exact", "1@lid", "text", "foo bar", 1))
+
+	hits, err := s.Search(t.Context(), store.SearchParams{Query: `foo "bar"`, Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) != 1 || hits[0].ID != "exact" {
+		t.Fatalf("phrase search = %+v, want the exact older match", hits)
+	}
+}
 
 func TestSearchTreatsTheWholeFoldedQueryAsOneSafePhrase(t *testing.T) {
 	s := open(t)

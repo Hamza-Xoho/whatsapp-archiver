@@ -68,7 +68,7 @@ func TestGlobalSearchPageStatesGroupingBadgesAndSafeJumps(t *testing.T) {
 			t.Errorf("results lack %q: %s", want, text)
 		}
 	}
-	wantJump := "/chats/a@g.us/m/" + url.PathEscape("odd/id?x")
+	wantJump := "/chats/a@g.us?at=" + url.QueryEscape("odd/id?x") + "#message-" + url.PathEscape("odd/id?x")
 	if !strings.Contains(page, wantJump) {
 		t.Errorf("message jump is not path escaped; want %q in %s", wantJump, page)
 	}
@@ -77,6 +77,14 @@ func TestGlobalSearchPageStatesGroupingBadgesAndSafeJumps(t *testing.T) {
 	}
 	if !strings.Contains(page, `dir="auto"`) {
 		t.Error("search excerpts do not use dir=auto")
+	}
+}
+
+func TestChatsLinksToGlobalMessageSearch(t *testing.T) {
+	u := newChatsUI(t)
+	body, code, _ := get(t, u.handler(), "/chats")
+	if code != http.StatusOK || !strings.Contains(string(body), `href="/search"`) || !strings.Contains(string(body), "Search messages") {
+		t.Fatalf("Chats search entry point = %d: %s", code, body)
 	}
 }
 
