@@ -162,13 +162,23 @@ func (s *Server) filteredFormJIDs(r *http.Request) ([]string, error) {
 		return nil, fmt.Errorf("the archive could not be read")
 	}
 	if r.PostForm.Get("snapshot") == "" || r.PostForm.Get("snapshot") != chatSnapshot(rows) {
-		return nil, fmt.Errorf("the filtered set changed; review the new count and estimate before applying")
+		return nil, &staleFilterError{rows: rows, filters: filters, snapshot: chatSnapshot(rows)}
 	}
 	jids := make([]string, len(rows))
 	for i := range rows {
 		jids[i] = rows[i].CanonicalJID
 	}
 	return jids, nil
+}
+
+type staleFilterError struct {
+	rows     []chatRowView
+	filters  chatFilters
+	snapshot string
+}
+
+func (e *staleFilterError) Error() string {
+	return "the filtered set changed; review the new count and estimate before applying"
 }
 
 func sameRule(a, b *store.ChatRule) bool {
@@ -218,6 +228,16 @@ func (s *Server) effectiveRules(ctx context.Context) ([]store.ChatRule, error) {
 	return rules, nil
 }
 
+func (s *Server) refreshEffectiveRules(ctx context.Context) error {
+	s.rulesMu.Lock()
+	defer s.rulesMu.Unlock()
+	rules, err := s.effectiveRules(ctx)
+	if err == nil && s.d.Rules != nil {
+		s.d.Rules.Replace(rules)
+	}
+	return err
+}
+
 type rulePreviewData struct {
 	Rows                      []chatRowView
 	Count                     int
@@ -228,6 +248,7 @@ type rulePreviewData struct {
 	Filters                   chatFilters
 	Logging, Media, VideoMax  string
 	Downloads                 []string
+	Changed                   bool
 }
 
 func (s *Server) chatRulePreview(w http.ResponseWriter, r *http.Request) {
@@ -236,13 +257,15 @@ func (s *Server) chatRulePreview(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "the form could not be read", http.StatusBadRequest)
 		return
 	}
-	if all, syncErr := s.effectiveRules(r.Context()); syncErr == nil && s.d.Rules != nil {
-		s.d.Rules.Replace(all)
-	}
+	_ = s.refreshEffectiveRules(r.Context())
 	if r.PostForm.Get("scope") == "filtered" {
 		jids, err := s.filteredFormJIDs(r)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusConflict)
+			if stale, ok := err.(*staleFilterError); ok {
+				s.renderStalePreview(w, r, stale)
+			} else {
+				http.Error(w, err.Error(), http.StatusConflict)
+			}
 			return
 		}
 		r.PostForm["jid[]"] = jids
@@ -265,16 +288,39 @@ func (s *Server) chatRulePreview(w http.ResponseWriter, r *http.Request) {
 	data := rulePreviewData{Rows: rows, Count: len(change.jids), Scope: r.PostForm.Get("scope"),
 		Snapshot: r.PostForm.Get("snapshot"), Filters: parsePostedChatFilters(r.PostForm), Logging: r.PostForm.Get("logging"),
 		Media: r.PostForm.Get("media"), VideoMax: r.PostForm.Get("video_max_mb"), Downloads: r.PostForm["download"]}
+	addEstimate(&data, estimate)
+	s.render(w, s.pages["chats"], "rule_preview", data)
+}
+
+func addEstimate(data *rulePreviewData, estimate store.ChatEstimate) {
 	data.Unavailable = estimate.Messages < 2 || estimate.Newest <= estimate.Oldest
 	if data.Unavailable {
 		data.Basis = "Estimate based on available archive history: unavailable because there is not enough history yet."
-	} else {
-		window := time.Duration(estimate.Newest-estimate.Oldest) * time.Second
-		weeks := float64((7 * 24 * time.Hour)) / float64(window)
-		data.TextPerWeek = formatBytes(int64(float64(estimate.TextBytes) * weeks))
-		data.MediaPerWeek = formatBytes(int64(float64(estimate.MediaBytes) * weeks))
-		data.Basis = fmt.Sprintf("Estimate based on %d archived messages over %s.", estimate.Messages, window.Round(time.Hour))
+		return
 	}
+	window := time.Duration(estimate.Newest-estimate.Oldest) * time.Second
+	weeks := float64(7*24*time.Hour) / float64(window)
+	data.TextPerWeek = formatBytes(int64(float64(estimate.TextBytes) * weeks))
+	data.MediaPerWeek = formatBytes(int64(float64(estimate.MediaBytes) * weeks))
+	data.Basis = fmt.Sprintf("Estimate based on %d archived messages over %s.", estimate.Messages, window.Round(time.Hour))
+}
+
+func (s *Server) renderStalePreview(w http.ResponseWriter, r *http.Request, stale *staleFilterError) {
+	jids := make([]string, len(stale.rows))
+	for i := range stale.rows {
+		jids[i] = stale.rows[i].CanonicalJID
+	}
+	estimate, err := s.d.Store.EstimateChats(r.Context(), jids)
+	if err != nil {
+		http.Error(w, "the estimate could not be prepared", http.StatusInternalServerError)
+		return
+	}
+	data := rulePreviewData{Rows: stale.rows, Count: len(stale.rows), Scope: "filtered", Snapshot: stale.snapshot,
+		Filters: stale.filters, Logging: r.PostForm.Get("logging"), Media: r.PostForm.Get("media"),
+		VideoMax: r.PostForm.Get("video_max_mb"), Downloads: r.PostForm["download"], Changed: true}
+	addEstimate(&data, estimate)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusConflict)
 	s.render(w, s.pages["chats"], "rule_preview", data)
 }
 

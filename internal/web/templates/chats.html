@@ -36,12 +36,13 @@
 {{end}}{{end}}
 
 {{define "rule_preview"}}<section class="panel rule-preview" aria-labelledby="preview-title">
+  {{if .Changed}}<p class="warn">The filtered set changed. Review the new count and estimate before applying.</p>{{end}}
   <h2 id="preview-title">{{if eq .Count 1}}Keep logging {{(index .Rows 0).DisplayName}}?{{else}}Change logging for {{.Count}} chats?{{end}}</h2>
   <p><strong>Projected per week</strong></p>
   {{if .Unavailable}}<p>Text: Estimate unavailable<br>Media: Estimate unavailable</p>{{else}}<p>Text: {{.TextPerWeek}}<br>Media: {{.MediaPerWeek}}</p>{{end}}
   <p class="muted">{{.Basis}}</p>
   <form method="post" action="/chats/rules" hx-post="/chats/rules" hx-swap="none">
-    {{range .Rows}}<input type="hidden" name="jid[]" value="{{.CanonicalJID}}">{{end}}
+    {{if ne .Scope "filtered"}}{{range .Rows}}<input type="hidden" name="jid[]" value="{{.CanonicalJID}}">{{end}}{{end}}
     {{if .Scope}}<input type="hidden" name="scope" value="{{.Scope}}"><input type="hidden" name="snapshot" value="{{.Snapshot}}">{{template "filter_hidden" .Filters}}{{end}}
     {{if .Logging}}<input type="hidden" name="logging" value="{{.Logging}}">{{end}}{{if .Media}}<input type="hidden" name="media" value="{{.Media}}">{{end}}
     {{range .Downloads}}<input type="hidden" name="download" value="{{.}}">{{end}}{{if .VideoMax}}<input type="hidden" name="video_max_mb" value="{{.VideoMax}}">{{end}}

@@ -47,6 +47,13 @@ func (s *Server) chats(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "the archive could not be read", http.StatusInternalServerError)
 		return
 	}
+	if s.d.Store != nil {
+		err = s.refreshEffectiveRules(r.Context())
+	}
+	if err != nil {
+		http.Error(w, "the archive could not be read", http.StatusInternalServerError)
+		return
+	}
 	pageRows, next, prev, err := paginateChats(rows, r.URL.Query().Get("cursor"), filters)
 	if err != nil {
 		http.Error(w, "invalid page cursor", http.StatusBadRequest)
@@ -206,7 +213,11 @@ func (s *Server) chatRules(w http.ResponseWriter, r *http.Request) {
 	if r.PostForm.Get("scope") == "filtered" {
 		jids, err := s.filteredFormJIDs(r)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusConflict)
+			if stale, ok := err.(*staleFilterError); ok {
+				s.renderStalePreview(w, r, stale)
+			} else {
+				http.Error(w, err.Error(), http.StatusConflict)
+			}
 			return
 		}
 		r.PostForm["jid[]"] = jids

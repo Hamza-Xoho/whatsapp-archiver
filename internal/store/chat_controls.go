@@ -109,7 +109,8 @@ SELECT alias FROM chat_canonical WHERE canonical IN (`+strings.Join(marks, ",")+
 	return nil
 }
 
-// EstimateChats reads only the selected chats' indexed messages/media rows. It is used only before a rule change.
+// EstimateChats uses the selected chats' derived aggregates. TextBytes is deliberately an estimate (300 bytes of
+// archived text/metadata per message), so a bulk preview remains O(chats) instead of rescanning raw messages.
 func (s *Store) EstimateChats(ctx context.Context, canonical []string) (ChatEstimate, error) {
 	var out ChatEstimate
 	if len(canonical) == 0 {
@@ -121,8 +122,8 @@ func (s *Store) EstimateChats(ctx context.Context, canonical []string) (ChatEsti
 		marks[i], args[i] = "?", jid
 	}
 	in := strings.Join(marks, ",")
-	q := `SELECT COUNT(*),COALESCE(SUM(length(m.text)+length(m.caption)+300),0),COALESCE(MIN(m.ts),0),COALESCE(MAX(m.ts),0)
-FROM messages m JOIN chat_canonical a ON a.alias=m.chat_jid WHERE a.canonical IN (` + in + `)`
+	q := `SELECT COALESCE(SUM(messages),0),COALESCE(SUM(messages)*300,0),COALESCE(MIN(oldest_ts),0),COALESCE(MAX(last_ts),0)
+FROM chat_stats WHERE canonical IN (` + in + `)`
 	if err := s.read.QueryRowContext(ctx, q, args...).Scan(&out.Messages, &out.TextBytes, &out.Oldest, &out.Newest); err != nil {
 		return out, fmt.Errorf("estimate chat text: %w", err)
 	}
