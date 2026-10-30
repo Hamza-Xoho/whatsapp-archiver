@@ -16,7 +16,7 @@ import (
 
 func TestJSONDateScopeHasOnlyTopLevelInRangeEvents(t *testing.T) {
 	u, chat := exportUI(t)
-	outside := time.Date(2026, 3, 9, 1, 0, 0, 0, time.UTC).Unix()
+	outside := time.Date(2026, 3, 9, 5, 0, 0, 0, time.UTC).Unix()
 	if _, err := u.st.InsertEvent(t.Context(), store.MessageEvent{ChatJID: chat, TargetID: "a", Kind: "edit", EventID: "outside", NewText: "OUTSIDE-EVENT", Timestamp: outside}); err != nil {
 		t.Fatal(err)
 	}

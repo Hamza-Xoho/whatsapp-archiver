@@ -170,14 +170,25 @@ func TestZIPDuplicateAvailableNamesMatchTranscriptAndManifestStreams(t *testing.
 		_ = r.Close()
 		names[f.Name] = string(b)
 	}
-	if _, ok := names["report.txt"]; !ok {
-		t.Fatalf("first media absent: %v", names)
+	var firstName, secondName string
+	for name, content := range names {
+		switch content {
+		case "MEDIA-CONTENT":
+			firstName = name
+		case "SECOND":
+			secondName = name
+		}
 	}
-	if _, ok := names["report_2.txt"]; !ok {
-		t.Fatalf("duplicate media absent: %v", names)
+	if firstName == "" || secondName == "" || firstName == secondName {
+		t.Fatalf("duplicate media names are not distinct: %v", names)
+	}
+	for _, name := range []string{firstName, secondName} {
+		if name == "_chat.txt" || name == "missing-media.txt" || strings.Contains(name, "..") || strings.ContainsAny(name, `/\`) {
+			t.Fatalf("unsafe or reserved media name %q", name)
+		}
 	}
 	text := names["_chat.txt"]
-	if !strings.Contains(text, "report.txt") || !strings.Contains(text, "report_2.txt") {
+	if !strings.Contains(text, firstName) || !strings.Contains(text, secondName) {
 		t.Fatalf("transcript names do not match ZIP: %s", text)
 	}
 	if _, ok := names["missing-media.txt"]; !ok {
