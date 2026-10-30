@@ -2,14 +2,12 @@ package web
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"regexp"
 	"time"
 
 	"whatsapp-archiver/internal/logsafe"
-	"whatsapp-archiver/internal/view"
 )
 
 // The backups screen is read-only except for the test alert. Restoring is shown as commands to run, never as a button.
@@ -80,41 +78,12 @@ func (s *Server) sendTestAlert(parent context.Context) *alertResult {
 }
 
 func (s *Server) renderBackups(w http.ResponseWriter, r *http.Request, alert *alertResult) {
-	loc, err := view.Location(s.config())
+	d, err := s.backupsData(r)
 	if err != nil {
-		http.Error(w, "the page could not be rendered", http.StatusInternalServerError)
+		http.Error(w, "the settings could not be read", http.StatusInternalServerError)
 		return
 	}
-	cfg := s.config()
-	b := cfg.Backup
-	if s.d.Store != nil {
-		sc, ok, err := s.d.Store.BackupSchedule(r.Context())
-		if err != nil {
-			http.Error(w, "the settings could not be read", http.StatusInternalServerError)
-			return
-		}
-		if ok {
-			b.Time, b.Keep = sc.Time, sc.Keep
-		}
-	}
-	d := backupsData{
-		page:           page{Title: "Backups & alerts"},
-		Schedule:       fmt.Sprintf("every day at %s, keeping %d snapshots", b.Time, b.Keep),
-		Destination:    b.Destination,
-		NtfyConfigured: s.d.Notifier != nil,
-		DataDir:        cfg.DataDir,
-		Dest:           b.Destination,
-		Alert:          alert,
-	}
-	if d.Dest == "" {
-		d.Dest = "<backup folder>"
-	}
-	if s.d.Health != nil {
-		if snap := s.d.Health(); !snap.LastBackup.IsZero() {
-			d.HasResult, d.ResultAt = true, view.FormatTime(loc, snap.LastBackup)
-			d.Succeeded, d.ResultPath, d.ResultErr = snap.LastBackupErr == "", snap.LastBackupPath, snap.LastBackupErr
-		}
-	}
+	d.Alert = alert
 	s.render(w, s.pages["backups"], "layout", d)
 }
 

@@ -25,7 +25,7 @@ func TestDashboardGroupsOpenGapsByCausePostOutageAndAge(t *testing.T) {
 		}
 	}
 
-	got := d.page(t, "/")
+	got := d.page(t, "/logging")
 	for _, want := range []string{
 		"Open gaps by cause",
 		"No sender key: 1 gap, oldest 3 days ago, after an outage",
@@ -38,7 +38,7 @@ func TestDashboardGroupsOpenGapsByCausePostOutageAndAge(t *testing.T) {
 }
 
 func TestDashboardOpenGapsHasAnExplicitEmptyState(t *testing.T) {
-	got := newDash(t).page(t, "/")
+	got := newDash(t).page(t, "/logging")
 	if !strings.Contains(got, "No open gaps") {
 		t.Fatalf("dashboard lacks empty gap copy: %s", got)
 	}

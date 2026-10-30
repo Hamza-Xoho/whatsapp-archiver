@@ -93,7 +93,7 @@ func (s *Server) settingsData(ctx context.Context) (settingsData, error) {
 		cap = "no cap"
 	}
 	return settingsData{
-		page:        page{Title: "Settings"},
+		page:        page{Title: "Settings", Current: "Logging"},
 		MediaInUse:  fmt.Sprintf("In use now: largest video %s, %d download workers, %d phone retry requests a minute.", cap, m.Workers, m.RetryRequestsPerMinute),
 		AlertsInUse: fmt.Sprintf("In use now: no events after %s, disconnected after %s, phone quiet after %s, disk free minimum %d GB.", formatDuration(a.NoEventsAfter), formatDuration(a.DisconnectedAfter), formatDuration(a.PhoneQuietAfter), a.DiskFreeMinGB),
 		BackupInUse: fmt.Sprintf("In use now: every day at %s, keeping %d snapshots.", b.Time, b.Keep),

@@ -152,7 +152,7 @@ func (s *Server) pairPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "the archive could not be read", http.StatusInternalServerError)
 		return
 	}
-	s.render(w, s.pages["pair"], "layout", pairData{page: page{Title: "Pairing"}, Pair: v})
+	s.render(w, s.pages["pair"], "layout", pairData{page: page{Title: "Pairing", Current: "Pairing", Live: v.Running || v.JustPaired}, Pair: v})
 }
 
 // pairStart is POST /pair/start: it asks the Pairer to pair (once; a pairing already running is kept) and sends the

@@ -377,9 +377,9 @@ func TestFeedLineUsesConfiguredTimeZone(t *testing.T) {
 // F8: the feed on an open page keeps the newest 200 lines: the page carries the cap and the script that applies it
 // after each streamed line.
 func TestFeedPageCapsItsLength(t *testing.T) {
-	body, code, _ := get(t, New(Deps{Activity: activity.NewBus(10), Config: &config.Config{}, Store: testkit.Store(t), Rules: ingest.NewRuleSet(nil)}).Handler(), "/")
+	body, code, _ := get(t, New(Deps{Activity: activity.NewBus(10), Config: &config.Config{}, Store: testkit.Store(t), Rules: ingest.NewRuleSet(nil)}).Handler(), "/logging")
 	if code != http.StatusOK {
-		t.Fatalf("GET /: %d", code)
+		t.Fatalf("GET /logging: %d", code)
 	}
 	for _, want := range []string{`id="feed"`, `data-max="200"`, "htmx:sseMessage", "lastElementChild.remove()"} {
 		if !strings.Contains(string(body), want) {

@@ -75,7 +75,7 @@ func TestDashboardShowsStateVersionAndHistoryLine(t *testing.T) {
 	if err := d.st.InsertHistoryChunk(t.Context(), store.HistoryChunk{ID: "c1", SyncType: "FULL", Progress: 40, ReceivedAt: dashNow.Add(-time.Hour).Unix()}); err != nil {
 		t.Fatal(err)
 	}
-	got := d.page(t, "/")
+	got := d.page(t, "/logging")
 	for _, want := range []string{"Connected", "2.3000.1050849967 (latest)", "history FULL: in progress (40%)"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("dashboard lacks %q:\n%s", want, got)
@@ -89,7 +89,7 @@ func TestDashboardShowsStateVersionAndHistoryLine(t *testing.T) {
 func TestDashboardShowsDisconnectedWithDetail(t *testing.T) {
 	d := newDash(t)
 	d.snap.State, d.snap.Detail = "disconnected", "stream error"
-	got := d.page(t, "/")
+	got := d.page(t, "/logging")
 	if !strings.Contains(got, "Disconnected") || !strings.Contains(got, "stream error") {
 		t.Fatalf("dashboard: %s", got)
 	}
@@ -99,13 +99,13 @@ func TestDashboardShowsDisconnectedWithDetail(t *testing.T) {
 func TestDashboardWarnsWhenPhoneQuiet(t *testing.T) {
 	d := newDash(t)
 	d.snap.PhoneLastActive = dashNow.Add(-72 * time.Hour)
-	if got := d.page(t, "/"); strings.Contains(got, "Open WhatsApp on your phone soon") {
+	if got := d.page(t, "/logging"); strings.Contains(got, "Open WhatsApp on your phone soon") {
 		t.Fatalf("warned at the 240 hour config threshold: %s", got)
 	}
 	if err := d.st.SetAlertThresholds(t.Context(), config.AlertConfig{PhoneQuietAfter: 48 * time.Hour}); err != nil {
 		t.Fatal(err)
 	}
-	if got := d.page(t, "/"); !strings.Contains(got, "Open WhatsApp on your phone soon") || !strings.Contains(got, "not been active for 3 days") {
+	if got := d.page(t, "/logging"); !strings.Contains(got, "Open WhatsApp on your phone soon") || !strings.Contains(got, "not been active for 3 days") {
 		t.Fatalf("no warning at the 48 hour live threshold: %s", got)
 	}
 }
@@ -114,7 +114,7 @@ func TestDashboardPhoneQuietFallsBackToConfig(t *testing.T) {
 	d := newDash(t)
 	d.cfg.Alerts.PhoneQuietAfter = 24 * time.Hour
 	d.snap.PhoneLastActive = dashNow.Add(-30 * time.Hour)
-	if got := d.page(t, "/"); !strings.Contains(got, "Open WhatsApp on your phone soon") || !strings.Contains(got, "not been active for 30 hours") {
+	if got := d.page(t, "/logging"); !strings.Contains(got, "Open WhatsApp on your phone soon") || !strings.Contains(got, "not been active for 30 hours") {
 		t.Fatalf("no warning past the config threshold: %s", got)
 	}
 }
@@ -122,7 +122,7 @@ func TestDashboardPhoneQuietFallsBackToConfig(t *testing.T) {
 func TestDashboardPhoneUnknownIsNotAWarning(t *testing.T) {
 	d := newDash(t)
 	d.snap.PhoneLastActive = time.Time{}
-	if got := d.page(t, "/"); strings.Contains(got, "Open WhatsApp on your phone") {
+	if got := d.page(t, "/logging"); strings.Contains(got, "Open WhatsApp on your phone") {
 		t.Fatalf("warned with no phone activity recorded yet: %s", got)
 	}
 }
@@ -132,7 +132,7 @@ func TestDashboardLists20RecentEvents(t *testing.T) {
 	for i := range 25 {
 		d.bus.Publish(activity.Event{At: dashNow.Add(time.Duration(i) * time.Second), Kind: "message", Chat: "c@g.us", Detail: fmt.Sprintf("item%02d", i)})
 	}
-	got := d.page(t, "/")
+	got := d.page(t, "/logging")
 	if n := strings.Count(got, "item"); n != 20 {
 		t.Fatalf("%d events listed, want 20", n)
 	}
@@ -150,7 +150,7 @@ func TestDashboardCountsLoggingAndNotLoggingChats(t *testing.T) {
 	d.message(t, "2@g.us", "b")
 	d.message(t, "3@g.us", "c")
 	d.rule = []store.ChatRule{{JID: "3@g.us", Logging: false}}
-	got := d.page(t, "/")
+	got := d.page(t, "/logging")
 	for _, want := range []string{"Logging: 2 chats", "Not logging: 1 chat "} {
 		if !strings.Contains(got, want) {
 			t.Errorf("dashboard lacks %q:\n%s", want, got)
@@ -167,7 +167,7 @@ func TestDashboardShowsOpenGapsCount(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if got := d.page(t, "/"); !strings.Contains(got, "Open gaps: 2") {
+	if got := d.page(t, "/logging"); !strings.Contains(got, "Open gaps: 2") {
 		t.Fatalf("dashboard: %s", got)
 	}
 }
@@ -190,7 +190,7 @@ func TestDashboardShowsLiveMediaDoneWithinFiveMinutes(t *testing.T) {
 		State: "done", EnqueuedAt: dashNow.Add(-48 * time.Hour).Unix(), DoneAt: dashNow.Add(-48*time.Hour + 4*time.Minute).Unix()}); err != nil {
 		t.Fatal(err)
 	}
-	got := d.page(t, "/")
+	got := d.page(t, "/logging")
 	for _, want := range []string{"Media done within 5 min (24 hours): 33.3% (1/3)", "Media done within 5 min (7 days): 50.0% (2/4)"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("dashboard lacks %q: %s", want, got)
@@ -206,7 +206,7 @@ func TestDashboardShowsOutageMinutesAndLongestOutage(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	got := d.page(t, "/")
+	got := d.page(t, "/logging")
 	for _, want := range []string{"Outage minutes by day", "2026-10-20: 60 minutes", "Longest outage: 60 minutes"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("dashboard lacks %q:\n%s", want, got)
@@ -221,7 +221,7 @@ func TestHealthPartialIsThePanelOnly(t *testing.T) {
 	if code != http.StatusOK || strings.Contains(string(body), "<html") || !strings.Contains(visibleText(string(body)), "Connected") {
 		t.Fatalf("status %d, body %s", code, body)
 	}
-	page, _, _ := get(t, d.handler(), "/")
+	page, _, _ := get(t, d.handler(), "/logging")
 	for _, want := range []string{`hx-get="/partials/health"`, `hx-trigger="sse:health"`} {
 		if !strings.Contains(string(page), want) {
 			t.Errorf("dashboard lacks %s", want)
@@ -238,7 +238,7 @@ func TestDashboardShowsNoMessageText(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.bus.Publish(activity.Event{At: dashNow, Kind: "message", Chat: "1@g.us", Detail: "text"})
-	if got := d.page(t, "/"); strings.Contains(got, "SECRET-BODY-TEXT") {
+	if got := d.page(t, "/logging"); strings.Contains(got, "SECRET-BODY-TEXT") {
 		t.Fatal("message text on the dashboard")
 	}
 }
@@ -251,7 +251,7 @@ func TestDashboardEventShowsChatName(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.bus.Publish(activity.Event{At: dashNow, Kind: "message", Chat: "1@g.us", Detail: "text"})
-	got := d.page(t, "/")
+	got := d.page(t, "/logging")
 	if !strings.Contains(got, "Family") {
 		t.Fatalf("no chat name: %s", got)
 	}
@@ -259,7 +259,7 @@ func TestDashboardEventShowsChatName(t *testing.T) {
 
 // A page with no store or monitor behind it (an unwired server) still renders.
 func TestDashboardRendersWithoutDeps(t *testing.T) {
-	body, code, _ := get(t, New(Deps{}).Handler(), "/")
+	body, code, _ := get(t, New(Deps{}).Handler(), "/logging")
 	if code != http.StatusOK || !strings.Contains(string(body), "Unknown") {
 		t.Fatalf("status %d: %s", code, body)
 	}
