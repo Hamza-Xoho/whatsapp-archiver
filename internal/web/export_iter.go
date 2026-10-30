@@ -12,11 +12,12 @@ import (
 func (s *Server) eachEvent(ctx context.Context, x exportScope, fn func(store.ExportEvent) error) error {
 	var ts int64
 	var key string
+	hasCursor := false
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		page, err := s.d.Store.ExportEventPage(ctx, store.ExportEventParams{CanonicalJID: x.jid, From: x.from, To: x.to, AfterTS: ts, AfterKey: key, Limit: exportPageSize})
+		page, err := s.d.Store.ExportEventPage(ctx, store.ExportEventParams{CanonicalJID: x.jid, From: x.from, To: x.to, AfterTS: ts, AfterKey: key, HasCursor: hasCursor, Limit: exportPageSize})
 		if err != nil {
 			return err
 		}
@@ -31,6 +32,7 @@ func (s *Server) eachEvent(ctx context.Context, x exportScope, fn func(store.Exp
 				return err
 			}
 			ts, key = e.TS, e.Key
+			hasCursor = true
 		}
 		if len(page) < exportPageSize {
 			return nil
@@ -39,14 +41,15 @@ func (s *Server) eachEvent(ctx context.Context, x exportScope, fn func(store.Exp
 }
 
 type messageIter struct {
-	s    *Server
-	ctx  context.Context
-	x    exportScope
-	page []store.ExportRecord
-	at   int
-	ts   int64
-	id   string
-	done bool
+	s      *Server
+	ctx    context.Context
+	x      exportScope
+	page   []store.ExportRecord
+	at     int
+	ts     int64
+	id     string
+	cursor bool
+	done   bool
 }
 
 func (i *messageIter) next() (*store.ExportRecord, error) {
@@ -54,7 +57,7 @@ func (i *messageIter) next() (*store.ExportRecord, error) {
 		return nil, nil
 	}
 	if i.at >= len(i.page) {
-		p, err := i.s.d.Store.ExportPage(i.ctx, store.ExportParams{CanonicalJID: i.x.jid, From: i.x.from, To: i.x.to, AfterTS: i.ts, AfterID: i.id, Limit: exportPageSize})
+		p, err := i.s.d.Store.ExportPage(i.ctx, store.ExportParams{CanonicalJID: i.x.jid, From: i.x.from, To: i.x.to, AfterTS: i.ts, AfterID: i.id, HasCursor: i.cursor, Limit: exportPageSize})
 		if err != nil {
 			return nil, err
 		}
@@ -67,18 +70,20 @@ func (i *messageIter) next() (*store.ExportRecord, error) {
 	r := &i.page[i.at]
 	i.at++
 	i.ts, i.id = r.Message.Timestamp, r.Message.ID
+	i.cursor = true
 	return r, nil
 }
 
 type eventIter struct {
-	s    *Server
-	ctx  context.Context
-	x    exportScope
-	page []store.ExportEvent
-	at   int
-	ts   int64
-	key  string
-	done bool
+	s      *Server
+	ctx    context.Context
+	x      exportScope
+	page   []store.ExportEvent
+	at     int
+	ts     int64
+	key    string
+	cursor bool
+	done   bool
 }
 
 func (i *eventIter) next() (*store.ExportEvent, error) {
@@ -86,7 +91,7 @@ func (i *eventIter) next() (*store.ExportEvent, error) {
 		return nil, nil
 	}
 	if i.at >= len(i.page) {
-		p, err := i.s.d.Store.ExportEventPage(i.ctx, store.ExportEventParams{CanonicalJID: i.x.jid, From: i.x.from, To: i.x.to, AfterTS: i.ts, AfterKey: i.key, Limit: exportPageSize})
+		p, err := i.s.d.Store.ExportEventPage(i.ctx, store.ExportEventParams{CanonicalJID: i.x.jid, From: i.x.from, To: i.x.to, AfterTS: i.ts, AfterKey: i.key, HasCursor: i.cursor, Limit: exportPageSize})
 		if err != nil {
 			return nil, err
 		}
@@ -99,6 +104,7 @@ func (i *eventIter) next() (*store.ExportEvent, error) {
 	e := &i.page[i.at]
 	i.at++
 	i.ts, i.key = e.TS, e.Key
+	i.cursor = true
 	return e, nil
 }
 
@@ -146,11 +152,15 @@ func messageDisplay(m store.Message) string {
 		return m.Caption
 	}
 	var d struct {
-		Name, Address, Question, DisplayName, Type string
-		Options                                    []string
-		Contacts                                   []struct {
+		Name        string   `json:"name"`
+		Address     string   `json:"address"`
+		Question    string   `json:"question"`
+		DisplayName string   `json:"display_name"`
+		Type        string   `json:"type"`
+		Options     []string `json:"options"`
+		Contacts    []struct {
 			DisplayName string `json:"display_name"`
-		}
+		} `json:"contacts"`
 	}
 	_ = json.Unmarshal([]byte(m.Details), &d)
 	parts := []string{d.Question, d.Name, d.Address, d.DisplayName}

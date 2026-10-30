@@ -15,6 +15,7 @@ type ExportParams struct {
 	From, To     int64
 	AfterTS      int64
 	AfterID      string
+	HasCursor    bool
 	Limit        int
 }
 
@@ -68,9 +69,10 @@ func (s *Store) ExportPage(ctx context.Context, p ExportParams) ([]ExportRecord,
  AND (?2=0 OR ts>=?2) AND (?3=0 OR ts<=?3)
 )
 SELECT chat_jid,id,sender_jid,from_me,push_name,kind,text,caption,quoted_id,quoted_sender,mentions,forwarded,forward_score,view_once,ephemeral_secs,details,source,ts,received_at
-FROM ranked WHERE rk=1 AND (?4=0 OR ts>?4 OR (ts=?4 AND id>?5)) ORDER BY ts,id LIMIT ?6`
+FROM ranked WHERE rk=1 AND (?4=0 OR ts>?5 OR (ts=?5 AND id>?6)) ORDER BY ts,id LIMIT ?7`
 	var out []ExportRecord
-	err = s.scanRows(ctx, q, []any{p.CanonicalJID, p.From, p.To, p.AfterTS, p.AfterID, limit}, func(rows *sql.Rows) error {
+	hasCursor := p.HasCursor || p.AfterTS != 0 || p.AfterID != ""
+	err = s.scanRows(ctx, q, []any{p.CanonicalJID, p.From, p.To, hasCursor, p.AfterTS, p.AfterID, limit}, func(rows *sql.Rows) error {
 		var r ExportRecord
 		var mentions string
 		m := &r.Message
@@ -147,4 +149,16 @@ FROM ranked WHERE rk=1 AND (?4=0 OR ts>?4 OR (ts=?4 AND id>?5)) ORDER BY ts,id L
 		return out[i].Message.ID < out[j].Message.ID
 	})
 	return out, nil
+}
+
+// ExportMediaNameFacts supplies deterministic naming facts without retaining archive-sized state in the exporter.
+func (s *Store) ExportMediaNameFacts(ctx context.Context, canonical, filename, candidate, messageID string, ts int64) (int, bool, error) {
+	var ordinal int
+	err := s.read.QueryRowContext(ctx, `SELECT COUNT(*) FROM media x JOIN chat_canonical c ON c.alias=x.chat_jid WHERE c.canonical=?1 AND x.filename=?2 AND (x.message_ts<?3 OR (x.message_ts=?3 AND x.message_id<=?4))`, canonical, filename, ts, messageID).Scan(&ordinal)
+	if err != nil {
+		return 0, false, err
+	}
+	var collision bool
+	err = s.read.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM media x JOIN chat_canonical c ON c.alias=x.chat_jid WHERE c.canonical=?1 AND x.filename=?2 AND x.message_id<>?3)`, canonical, candidate, messageID).Scan(&collision)
+	return ordinal, collision, err
 }

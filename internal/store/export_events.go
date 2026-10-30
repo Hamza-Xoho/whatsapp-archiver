@@ -12,6 +12,7 @@ type ExportEventParams struct {
 	From, To     int64
 	AfterTS      int64
 	AfterKey     string
+	HasCursor    bool
 	Limit        int
 }
 
@@ -57,16 +58,17 @@ func (s *Store) ExportEventPage(ctx context.Context, p ExportEventParams) ([]Exp
 		limit = 200
 	}
 	const q = `WITH events AS (
- SELECT 'm:'||kind||':'||event_id AS k,chat_jid,target_id,kind,event_id,source_id,cause,sender_jid,source,new_text,value,ts,received_at,0 AS chat
+ SELECT 'm:'||hex(chat_jid)||':'||hex(target_id)||':'||hex(kind)||':'||hex(event_id) AS k,chat_jid,target_id,kind,event_id,source_id,cause,sender_jid,source,new_text,value,ts,received_at,0 AS chat
  FROM message_events WHERE chat_jid IN (` + chatForms + `) AND (?2=0 OR ts>=?2) AND (?3=0 OR ts<=?3)
  UNION ALL
- SELECT 'c:'||kind||':'||event_id,chat_jid,'',kind,event_id,'','',sender_jid,'','',value,ts,received_at,1
+ SELECT 'c:'||hex(chat_jid)||':'||hex(kind)||':'||hex(event_id),chat_jid,'',kind,event_id,'','',sender_jid,'','',value,ts,received_at,1
  FROM chat_events WHERE chat_jid IN (` + chatForms + `) AND (?2=0 OR ts>=?2) AND (?3=0 OR ts<=?3)
 )
 SELECT k,chat_jid,target_id,kind,event_id,source_id,cause,sender_jid,source,new_text,value,ts,received_at,chat
-FROM events WHERE (?4=0 OR ts>?4 OR (ts=?4 AND k>?5)) ORDER BY ts,k LIMIT ?6`
+FROM events WHERE (?4=0 OR ts>?5 OR (ts=?5 AND k>?6)) ORDER BY ts,k LIMIT ?7`
 	var out []ExportEvent
-	err = s.scanRows(ctx, q, []any{p.CanonicalJID, p.From, p.To, p.AfterTS, p.AfterKey, limit}, func(rows *sql.Rows) error {
+	hasCursor := p.HasCursor || p.AfterTS != 0 || p.AfterKey != ""
+	err = s.scanRows(ctx, q, []any{p.CanonicalJID, p.From, p.To, hasCursor, p.AfterTS, p.AfterKey, limit}, func(rows *sql.Rows) error {
 		var x ExportEvent
 		var chat bool
 		var chatJID, target, kind, id, sourceID, cause, sender, source, newText, value string
