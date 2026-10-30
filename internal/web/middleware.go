@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+const internalServerError = "internal server error"
+
 // requestWriter records response facts while preserving optional HTTP interfaces.
 type requestWriter struct {
 	http.ResponseWriter
@@ -52,14 +54,24 @@ func timeRequests(log *slog.Logger) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			started := time.Now()
 			rw := &requestWriter{ResponseWriter: w}
+			returned := false
 			defer func() {
 				status := rw.status
+				bytes := rw.bytes
 				if status == 0 {
-					status = http.StatusOK
+					if returned {
+						status = http.StatusOK
+					} else {
+						// Recovery is the outer middleware, so this defer runs first. Record the
+						// response that recovery is about to write instead of a false 200.
+						status = http.StatusInternalServerError
+						bytes = len(internalServerError) + 1 // http.Error appends a newline.
+					}
 				}
-				log.Info("http request", "method", r.Method, "route", routePattern(r), "status", status, "bytes", rw.bytes, "duration", time.Since(started))
+				log.Info("http request", "method", r.Method, "route", routePattern(r), "status", status, "bytes", bytes, "duration", time.Since(started))
 			}()
 			next.ServeHTTP(rw, r)
+			returned = true
 		})
 	}
 }
@@ -72,7 +84,7 @@ func recoverRequests(log *slog.Logger) func(http.Handler) http.Handler {
 					return
 				}
 				log.Error("request panic", "method", r.Method, "route", routePattern(r))
-				http.Error(w, "internal server error", http.StatusInternalServerError)
+				http.Error(w, internalServerError, http.StatusInternalServerError)
 			}()
 			next.ServeHTTP(w, r)
 		})
