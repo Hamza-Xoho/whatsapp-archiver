@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"slices"
+	"sort"
 )
 
 // LoggingCount is one grouped operational count. Name is a closed state/class
@@ -50,6 +51,11 @@ type LoggingGap struct {
 	PostOutage                             bool
 }
 
+const loggingOpenGapsFrom = `FROM message_events e INDEXED BY message_events_gaps JOIN chat_canonical c ON c.alias=e.chat_jid
+ WHERE e.kind='undecryptable'
+ AND NOT EXISTS (SELECT 1 FROM chat_canonical ga JOIN messages gm ON gm.chat_jid=ga.alias WHERE ga.canonical=c.canonical AND gm.id=e.target_id)
+ AND NOT EXISTS (SELECT 1 FROM chat_canonical ga JOIN message_events gs ON gs.chat_jid=ga.alias WHERE ga.canonical=c.canonical AND gs.source_id=e.target_id AND gs.source_id<>'' AND gs.kind<>'undecryptable')`
+
 // LoggingGapGroup is one complete-ledger aggregate plus a bounded trace
 // representative. Counts and oldest times are never derived from the detail
 // window.
@@ -66,42 +72,65 @@ type LoggingGapGroup struct {
 // closed enum, so the representative reads are bounded independently of the
 // archive size.
 func (s *Store) LoggingGapGroups(ctx context.Context) ([]LoggingGapGroup, error) {
-	summary, err := s.OpenGapSummary(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("read logging gap summary: %w", err)
+	var oldest int64
+	if err := s.read.QueryRowContext(ctx, `SELECT COALESCE(MIN(e.received_at),0) `+loggingOpenGapsFrom).Scan(&oldest); err != nil {
+		return nil, fmt.Errorf("read logging gap range: %w", err)
 	}
-	out := make([]LoggingGapGroup, 0, len(summary))
-	for _, item := range summary {
-		representative, readErr := s.loggingGapRepresentative(ctx, item.Cause, item.PostOutage)
-		if readErr != nil {
-			return nil, readErr
+	ends, err := s.loggingOutageEnds(ctx, oldest)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.read.QueryContext(ctx, `SELECT c.canonical,e.chat_jid,e.target_id,e.cause,e.received_at `+loggingOpenGapsFrom)
+	if err != nil {
+		return nil, fmt.Errorf("read logging gap groups: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	type key struct {
+		cause string
+		post  bool
+	}
+	groups := make(map[key]*LoggingGapGroup, len(EventCauses)*2)
+	for rows.Next() {
+		var gap LoggingGap
+		if err = rows.Scan(&gap.CanonicalJID, &gap.ChatJID, &gap.TargetID, &gap.Cause, &gap.ReceivedAt); err != nil {
+			return nil, fmt.Errorf("scan logging gap group: %w", err)
 		}
-		out = append(out, LoggingGapGroup{Cause: item.Cause, PostOutage: item.PostOutage, Count: item.Count,
-			OldestReceivedAt: item.OldestReceivedAt, Representative: representative})
+		gap.PostOutage = loggingPostOutage(ends, gap.ReceivedAt)
+		groupKey := key{cause: gap.Cause, post: gap.PostOutage}
+		group := groups[groupKey]
+		if group == nil {
+			group = &LoggingGapGroup{Cause: gap.Cause, PostOutage: gap.PostOutage, OldestReceivedAt: gap.ReceivedAt}
+			groups[groupKey] = group
+		}
+		group.Count++
+		group.OldestReceivedAt = min(group.OldestReceivedAt, gap.ReceivedAt)
+		if group.Representative.TargetID == "" || gap.ReceivedAt > group.Representative.ReceivedAt {
+			group.Representative = gap
+		}
 	}
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+	out := make([]LoggingGapGroup, 0, len(groups))
+	for _, group := range groups {
+		out = append(out, *group)
+	}
+	slices.SortFunc(out, func(a, b LoggingGapGroup) int {
+		if a.OldestReceivedAt != b.OldestReceivedAt {
+			return int(a.OldestReceivedAt - b.OldestReceivedAt)
+		}
+		if order := compareStrings(a.Cause, b.Cause); order != 0 {
+			return order
+		}
+		return compareStrings(fmt.Sprint(a.PostOutage), fmt.Sprint(b.PostOutage))
+	})
 	return out, nil
-}
-
-func (s *Store) loggingGapRepresentative(ctx context.Context, cause string, postOutage bool) (LoggingGap, error) {
-	var gap LoggingGap
-	err := s.read.QueryRowContext(ctx, `SELECT canonical_jid,chat_jid,target_id,cause,received_at,post_outage
- FROM open_gaps WHERE cause=? AND post_outage=? ORDER BY received_at DESC,seq DESC LIMIT 1`, cause, postOutage).Scan(
-		&gap.CanonicalJID, &gap.ChatJID, &gap.TargetID, &gap.Cause, &gap.ReceivedAt, &gap.PostOutage)
-	if err != nil {
-		return LoggingGap{}, fmt.Errorf("read logging gap representative: %w", err)
-	}
-	return gap, nil
 }
 
 func (s *Store) LoggingGaps(ctx context.Context, limit int) ([]LoggingGap, error) {
 	limit = boundedLoggingLimit(limit, 200)
-	rows, err := s.read.QueryContext(ctx, `SELECT c.canonical,e.chat_jid,e.target_id,e.cause,e.received_at,
- EXISTS (SELECT 1 FROM connection_periods p WHERE p.ended_at IS NOT NULL AND e.received_at BETWEEN p.ended_at AND p.ended_at+120)
- FROM message_events e INDEXED BY message_events_gaps JOIN chat_canonical c ON c.alias=e.chat_jid
- WHERE e.kind='undecryptable'
- AND NOT EXISTS (SELECT 1 FROM chat_canonical ga JOIN messages gm ON gm.chat_jid=ga.alias WHERE ga.canonical=c.canonical AND gm.id=e.target_id)
- AND NOT EXISTS (SELECT 1 FROM chat_canonical ga JOIN message_events gs ON gs.chat_jid=ga.alias WHERE ga.canonical=c.canonical AND gs.source_id=e.target_id AND gs.source_id<>'' AND gs.kind<>'undecryptable')
- ORDER BY e.received_at DESC,e.seq DESC LIMIT ?`, limit)
+	rows, err := s.read.QueryContext(ctx, `SELECT c.canonical,e.chat_jid,e.target_id,e.cause,e.received_at `+loggingOpenGapsFrom+
+		` ORDER BY e.received_at DESC,e.seq DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, fmt.Errorf("read logging gaps: %w", err)
 	}
@@ -109,12 +138,45 @@ func (s *Store) LoggingGaps(ctx context.Context, limit int) ([]LoggingGap, error
 	var out []LoggingGap
 	for rows.Next() {
 		var g LoggingGap
-		if err = rows.Scan(&g.CanonicalJID, &g.ChatJID, &g.TargetID, &g.Cause, &g.ReceivedAt, &g.PostOutage); err != nil {
+		if err = rows.Scan(&g.CanonicalJID, &g.ChatJID, &g.TargetID, &g.Cause, &g.ReceivedAt); err != nil {
 			return nil, fmt.Errorf("scan logging gap: %w", err)
 		}
 		out = append(out, g)
 	}
-	return out, rows.Err()
+	if err = rows.Err(); err != nil || len(out) == 0 {
+		return out, err
+	}
+	ends, err := s.loggingOutageEnds(ctx, out[len(out)-1].ReceivedAt)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].PostOutage = loggingPostOutage(ends, out[i].ReceivedAt)
+	}
+	return out, nil
+}
+
+func (s *Store) loggingOutageEnds(ctx context.Context, oldest int64) ([]int64, error) {
+	rows, err := s.read.QueryContext(ctx, `SELECT ended_at FROM connection_periods
+ WHERE ended_at IS NOT NULL AND ended_at>=? ORDER BY ended_at`, oldest-120)
+	if err != nil {
+		return nil, fmt.Errorf("read logging outage range: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var ends []int64
+	for rows.Next() {
+		var end int64
+		if err = rows.Scan(&end); err != nil {
+			return nil, err
+		}
+		ends = append(ends, end)
+	}
+	return ends, rows.Err()
+}
+
+func loggingPostOutage(ends []int64, at int64) bool {
+	i := sort.Search(len(ends), func(i int) bool { return ends[i]+120 >= at })
+	return i < len(ends) && at >= ends[i]
 }
 
 type LoggingMediaReason struct {
@@ -130,30 +192,54 @@ type LoggingMediaReport struct {
 // LoggingMedia groups narrow indexed/scalar columns and never reads paths,
 // media URLs, thumbnails, hashes, retry paths or protobufs.
 func (s *Store) LoggingMedia(ctx context.Context, reasonLimit int) (LoggingMediaReport, error) {
-	states, classes, reasons := map[string]int{}, map[string]int{}, map[string]int{}
-	rows, err := s.read.QueryContext(ctx, `SELECT state,error_class,reason FROM media INDEXED BY media_pick ORDER BY state,source_rank,message_ts DESC`)
+	states, classes := map[string]int{}, map[string]int{}
+	rows, err := s.read.QueryContext(ctx, `SELECT state,COUNT(*),COUNT(*) FILTER (WHERE error_class='network'),
+ COUNT(*) FILTER (WHERE error_class='expired'),COUNT(*) FILTER (WHERE error_class='gone'),
+ COUNT(*) FILTER (WHERE error_class='key'),COUNT(*) FILTER (WHERE error_class='other')
+	 FROM media INDEXED BY media_pick GROUP BY state`)
 	if err != nil {
-		return LoggingMediaReport{}, fmt.Errorf("read logging media: %w", err)
+		return LoggingMediaReport{}, fmt.Errorf("read logging media counts: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
-		var state, class, reason string
-		if err = rows.Scan(&state, &class, &reason); err != nil {
-			return LoggingMediaReport{}, fmt.Errorf("scan logging media: %w", err)
+		var state string
+		var count, network, expired, gone, key, other int
+		if err = rows.Scan(&state, &count, &network, &expired, &gone, &key, &other); err != nil {
+			return LoggingMediaReport{}, fmt.Errorf("scan logging media counts: %w", err)
 		}
-		states[state]++
-		if class != "" {
-			classes[class]++
-		}
-		if reason != "" {
-			reasons[reason]++
+		states[state] += count
+		for name, n := range map[string]int{"network": network, "expired": expired, "gone": gone, "key": key, "other": other} {
+			if n > 0 {
+				classes[name] += n
+			}
 		}
 	}
 	if err = rows.Err(); err != nil {
 		return LoggingMediaReport{}, err
 	}
-	out := LoggingMediaReport{States: sortedLoggingCounts(states), ErrorClasses: sortedLoggingCounts(classes)}
 	reasonLimit = boundedLoggingLimit(reasonLimit, 50)
+	// Reasons are diagnostic examples, not ledger totals. Sample at most 5,000
+	// recent scheduler-index entries; the exact state/class totals above remain
+	// complete. The web layer maps every sample to controlled safe copy.
+	sampleLimit := min(max(reasonLimit*100, 1000), 5000)
+	reasonRows, err := s.read.QueryContext(ctx, `SELECT reason FROM media INDEXED BY media_pick
+	 WHERE state IN ('failed','expired','retry_requested') AND reason<>'' LIMIT ?`, sampleLimit)
+	if err != nil {
+		return LoggingMediaReport{}, fmt.Errorf("read logging media reasons: %w", err)
+	}
+	defer func() { _ = reasonRows.Close() }()
+	reasons := make(map[string]int)
+	for reasonRows.Next() {
+		var reason string
+		if err = reasonRows.Scan(&reason); err != nil {
+			return LoggingMediaReport{}, fmt.Errorf("scan logging media reason: %w", err)
+		}
+		reasons[reason]++
+	}
+	if err = reasonRows.Err(); err != nil {
+		return LoggingMediaReport{}, err
+	}
+	out := LoggingMediaReport{States: sortedLoggingCounts(states), ErrorClasses: sortedLoggingCounts(classes)}
 	for reason, count := range reasons {
 		out.Reasons = append(out.Reasons, LoggingMediaReason{Reason: reason, Count: count})
 	}

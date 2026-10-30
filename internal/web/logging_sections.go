@@ -331,19 +331,10 @@ func (s *Server) loggingFeedNames(ctx context.Context) (map[string]string, error
 }
 
 func (s *Server) recentFiltered(names map[string]string, loc *time.Location, chat, kind string) []feedItem {
-	rows := s.recent(names, loc)
-	if chat == "" && kind == "" {
-		return rows
-	}
-	out := rows[:0]
-	for _, row := range rows {
-		if chat != "" && row.Chat != chat {
-			continue
-		}
-		if kind != "" && row.Kind != kind {
-			continue
-		}
-		out = append(out, row)
+	events := s.d.Activity.RecentFiltered(chat, kind, recentEvents)
+	out := make([]feedItem, 0, len(events))
+	for i := len(events) - 1; i >= 0; i-- {
+		out = append(out, feedItem{Event: events[i], Name: names[events[i].Chat], Loc: loc})
 	}
 	return out
 }
