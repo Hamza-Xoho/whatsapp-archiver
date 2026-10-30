@@ -81,7 +81,9 @@ func printStatus(cfg *config.Config, out io.Writer) error {
 	p("client version: %s", version)
 	p("last event: %s", view.FormatTime(loc, snap.LastEvent))
 	p("phone last active: %s", view.FormatTime(loc, snap.PhoneLastActive))
-	p("%s", view.HistoryLine(loc, coverage))
+	for _, line := range view.HistoryLinesAt(loc, coverage, time.Now()) {
+		p("%s", line)
+	}
 	p("media done within 5 min (24 hours): %s", view.PercentageCount(media.DayDone, media.DayTotal))
 	p("media done within 5 min (7 days): %s", view.PercentageCount(media.WeekDone, media.WeekTotal))
 	p("name\tcanonical JID\tmessages\toldest\tnewest\tmedia failed\tmedia expired\tmedia pending\topen gaps")

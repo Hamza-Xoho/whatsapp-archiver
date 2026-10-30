@@ -101,6 +101,8 @@ Single status record for V1 (max 150 lines, update in place; history lives in gi
 
 ## In flight
 
+- W5.2 golden review, 30 Oct: `cmd/archiver/testdata/status.golden` was edited by hand (no `-update`); exactly one line changed. The old aggregate `history: complete back to 2024-03-02, chunks 3, last chunk 2026-10-10 12:00 +03` became the per-sync ledger line `history FULL: complete, received 0, imported 3, last chunk 2026-10-10 12:00 +03`. Every other line is unchanged; per-chat history reach now comes from `chat_stats.oldest_history_ts` on the Chats UI.
+
 - W0 step 3 (Hamza): done 26 Oct: practice instance unlinked on the phone and its process stopped (PID 288900); only the `SaudiSpyWithMyWifi` Wi-Fi profile left; stale DNS 192.168.68.1 gone. Reboot test still open (optional).
 - `sudo perf` on the practice PID is moot: the instance is stopped.
 

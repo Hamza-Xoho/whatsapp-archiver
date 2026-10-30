@@ -16,7 +16,7 @@
   {{if .HasArchive}}
   <section class="panel">
     <h2>Archive</h2>
-    <p>{{.History}}</p>
+    {{range .History}}<p>{{.}}</p>{{end}}
     <ul class="counts">
       <li>Logging: <strong>{{.Logging}}</strong> {{.LoggingNoun}}</li>
       <li>Not logging: <strong>{{.NotLogging}}</strong> {{.NotLoggingNoun}}</li>

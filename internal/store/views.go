@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"slices"
 )
 
 // statusReportQuery is the one query behind the chat half of `archiver status`: a read of chat_stats, the table the
@@ -21,11 +22,11 @@ type StatusReport struct {
 
 // StatusReport reads the per-chat statistics from chat_stats and the history coverage from the ledger.
 func (s *Store) StatusReport(ctx context.Context) (StatusReport, error) {
-	r := StatusReport{Coverage: Coverage{OldestByChat: map[string]int64{}}}
-	err := s.read.QueryRowContext(ctx, historyChunksQuery).Scan(&r.Coverage.Chunks, &r.Coverage.LastProgress, &r.Coverage.LastChunkTime, &r.Coverage.Complete)
+	coverage, err := s.historyCoverage(ctx)
 	if err != nil {
-		return r, err
+		return StatusReport{}, err
 	}
+	r := StatusReport{Coverage: coverage}
 	rows, err := s.read.QueryContext(ctx, statusReportQuery)
 	if err != nil {
 		return r, err
@@ -55,16 +56,112 @@ func (s *Store) ChatStats(ctx context.Context) ([]ChatStat, error) {
 	return r.Chats, err
 }
 
-// historyChunksQuery summarizes the history ledger (the imported rows only, R10: a chunk that is only spooled has not
-// made the archive more complete): chunk count, progress of the newest T chunk (by received_at, then
-// chunk_order; any type when there is none), time of the last chunk, and whether history is complete. Let T be FULL if any FULL chunk exists, else INITIAL_BOOTSTRAP; the
-// newest sync of T starts at start, the latest received_at among the T chunks with the lowest chunk_order (a restarted
-// sync sends its first chunk again). History is complete when some T chunk received at or after start has progress
-// 100. The ledger has no sync id, so a sync is found this way; with no T chunk history is not complete. A sync whose
-// first chunk arrives after a later chunk reads "in progress" until a newer chunk arrives. Limitation: if the newest
-// sync's lowest-order chunk never reaches the ledger (acked as gone, or never importable), start stays at the old sync
-// and an old 100 can complete the newer one.
-const historyChunksQuery = `WITH chunks AS (SELECT *,rowid AS rid FROM history_sync_chunks WHERE stage='imported') SELECT COUNT(*),COALESCE((SELECT progress FROM chunks WHERE sync_type=COALESCE((SELECT sync_type FROM chunks WHERE sync_type='FULL' LIMIT 1),'INITIAL_BOOTSTRAP') ORDER BY received_at DESC,chunk_order DESC LIMIT 1),(SELECT progress FROM chunks ORDER BY received_at DESC,rid DESC LIMIT 1),0),COALESCE(MAX(received_at),0),COALESCE((SELECT MAX(h.progress)>=100 FROM chunks h,(SELECT t.sync_type,MAX(t.received_at) AS start FROM chunks t WHERE t.sync_type=COALESCE((SELECT sync_type FROM chunks WHERE sync_type='FULL' LIMIT 1),'INITIAL_BOOTSTRAP') AND t.chunk_order=(SELECT MIN(chunk_order) FROM chunks WHERE sync_type=t.sync_type)) s WHERE h.sync_type=s.sync_type AND h.received_at>=s.start),0) FROM chunks`
+// historyChunksQuery reads only the insert-only ledger. historyCoverage folds its two stages per sync type in Go: the
+// ledger stays small, while received progress becomes visible before asynchronous import finishes.
+const historyChunksQuery = `SELECT id,stage,sync_type,chunk_order,progress,oldest_ts,newest_ts,received_at
+ FROM history_sync_chunks ORDER BY received_at,rowid`
+
+type historyStatusRow struct {
+	id, stage, syncType        string
+	order, progress            int
+	oldest, newest, receivedAt int64
+}
+
+func (s *Store) historyCoverage(ctx context.Context) (Coverage, error) {
+	c := Coverage{OldestByChat: map[string]int64{}}
+	rows, err := s.read.QueryContext(ctx, historyChunksQuery)
+	if err != nil {
+		return c, err
+	}
+	defer func() { _ = rows.Close() }()
+	byType := map[string][]historyStatusRow{}
+	for rows.Next() {
+		var r historyStatusRow
+		if err = rows.Scan(&r.id, &r.stage, &r.syncType, &r.order, &r.progress, &r.oldest, &r.newest, &r.receivedAt); err != nil {
+			return c, err
+		}
+		if r.syncType == "" {
+			r.syncType = "UNKNOWN"
+		}
+		byType[r.syncType] = append(byType[r.syncType], r)
+		if r.stage == StageImported {
+			c.Chunks++
+		}
+	}
+	if err = rows.Err(); err != nil {
+		return c, err
+	}
+	types := make([]string, 0, len(byType))
+	for typ := range byType {
+		types = append(types, typ)
+	}
+	slices.Sort(types)
+	for _, typ := range types {
+		c.Syncs = append(c.Syncs, summarizeSync(typ, byType[typ]))
+	}
+	chosen := chooseCoverage(c.Syncs)
+	if chosen != nil {
+		c.LastProgress, c.LastChunkTime, c.Complete = chosen.LastProgress, chosen.LastChunkTime, chosen.Complete
+	}
+	return c, nil
+}
+
+func summarizeSync(typ string, rows []historyStatusRow) SyncCoverage {
+	out := SyncCoverage{SyncType: typ}
+	minOrder := 0
+	lastOrder := 0
+	haveOrder := false
+	for _, r := range rows {
+		switch r.stage {
+		case StageReceived:
+			out.ReceivedChunks++
+		case StageImported:
+			out.ImportedChunks++
+		}
+		if r.receivedAt > out.LastChunkTime || r.receivedAt == out.LastChunkTime && r.order > lastOrder {
+			out.LastChunkTime, out.LastProgress = r.receivedAt, r.progress
+			lastOrder = r.order
+		}
+		if !haveOrder || r.order < minOrder {
+			minOrder, haveOrder = r.order, true
+		}
+		if r.oldest > 0 && (out.Oldest == 0 || r.oldest < out.Oldest) {
+			out.Oldest = r.oldest
+		}
+		if r.newest > out.Newest {
+			out.Newest = r.newest
+		}
+	}
+	var start int64
+	for _, r := range rows {
+		if r.order == minOrder && r.receivedAt > start {
+			start = r.receivedAt
+		}
+	}
+	for _, r := range rows {
+		if r.stage == StageImported && r.receivedAt >= start && r.progress >= 100 {
+			out.Complete = true
+		}
+	}
+	return out
+}
+
+func chooseCoverage(syncs []SyncCoverage) *SyncCoverage {
+	for _, want := range []string{"FULL", "INITIAL_BOOTSTRAP"} {
+		for i := range syncs {
+			if syncs[i].SyncType == want {
+				return &syncs[i]
+			}
+		}
+	}
+	var newest *SyncCoverage
+	for i := range syncs {
+		if newest == nil || syncs[i].LastChunkTime > newest.LastChunkTime {
+			newest = &syncs[i]
+		}
+	}
+	return newest
+}
 
 // HistoryCoverage is the coverage half of StatusReport.
 func (s *Store) HistoryCoverage(ctx context.Context) (Coverage, error) {

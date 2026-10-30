@@ -51,7 +51,7 @@ type dashboardData struct {
 	page
 	Health                      healthView
 	HasArchive                  bool
-	History                     string
+	History                     []string
 	Logging, NotLogging, Gaps   int
 	LoggingNoun, NotLoggingNoun string
 	Media24Hours, Media7Days    string
@@ -110,7 +110,7 @@ func (s *Server) dashboard(w http.ResponseWriter, r *http.Request) {
 		data.Outages, data.HasOutages = outages.Days, outages.HasOutages
 		data.LongestOutageMinutes = roundedMinutes(outages.Longest)
 		data.HasArchive = true
-		data.History = view.HistoryLine(loc, report.Coverage)
+		data.History = view.HistoryLinesAt(loc, report.Coverage, s.d.Now())
 		data.LoggingNoun, data.NotLoggingNoun = chatNoun(data.Logging), chatNoun(data.NotLogging)
 	}
 	data.Events = s.recent(names, loc)

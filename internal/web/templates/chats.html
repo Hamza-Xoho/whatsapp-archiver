@@ -1,7 +1,8 @@
 {{define "chat_row"}}<tr id="{{.RowID}}"{{if .OOB}} hx-swap-oob="true"{{end}}>
   <td><input type="checkbox" name="jid[]" value="{{.CanonicalJID}}" form="bulk" aria-label="Select {{.DisplayName}}"></td>
   <td><a href="/chats/{{.CanonicalJID}}">{{.DisplayName}}</a>{{if .New}} <span class="badge">New</span>{{end}}
-    {{if ne .DisplayName .CanonicalJID}}<br><span class="chat">{{.CanonicalJID}}</span>{{end}}</td>
+    {{if ne .DisplayName .CanonicalJID}}<br><span class="chat">{{.CanonicalJID}}</span>{{end}}
+    {{if .HistoryBackTo}}<br><span class="muted">History back to {{.HistoryBackTo}}</span>{{end}}</td>
   <td class="num">{{.MessageCount}}</td>
   <td>{{.LastMessage}}</td>
   <td>{{if .Logging}}<span class="ok">Logging</span>{{else}}<span class="bad">Not logging</span>{{end}}</td>

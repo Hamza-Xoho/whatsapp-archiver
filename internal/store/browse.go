@@ -16,10 +16,11 @@ import (
 // ChatRow is one line of the chats screen. Logging, HasMediaRule and New take every JID form of the chat into account.
 type ChatRow struct {
 	ChatStat
-	DisplayName  string
-	Logging      bool
-	HasMediaRule bool
-	New          bool
+	DisplayName   string
+	OldestHistory int64
+	Logging       bool
+	HasMediaRule  bool
+	New           bool
 }
 
 // ViewMessage is one message as the chat viewer shows it. Text is the text as first received; EditedText is the
@@ -45,7 +46,7 @@ type Trace struct {
 // directory row, R20), newest activity first, the quiet ones (no message) after the chats that have messages at the same
 // time. Rules and sightings are aggregated per canonical through chat_canonical: a chat logs unless some form of it has
 // logging off, has a media rule if some form has one, and is new when it was seen and no form was acknowledged.
-const chatListQuery = `SELECT s.canonical,s.name,s.messages,s.oldest_ts,s.last_ts,s.media_failed,s.media_expired,s.media_pending,s.gaps_open,
+const chatListQuery = `SELECT s.canonical,s.name,s.messages,s.oldest_ts,s.last_ts,COALESCE(s.oldest_history_ts,0),s.media_failed,s.media_expired,s.media_pending,s.gaps_open,
  COALESCE(r.logging,1),COALESCE(r.media,0),COALESCE(NOT f.acked,0)
 FROM chat_stats s
 LEFT JOIN (SELECT a.canonical AS c,MIN(x.logging) AS logging,MAX(x.media<>'') AS media FROM chat_rules x JOIN chat_canonical a ON a.alias=x.jid GROUP BY a.canonical) r ON r.c=s.canonical
@@ -63,7 +64,7 @@ func (s *Store) ChatList(ctx context.Context, filter string) ([]ChatRow, error) 
 	err := s.scanRows(ctx, chatListQuery, nil, func(rows *sql.Rows) error {
 		var row ChatRow
 		c := &row.ChatStat
-		if err := rows.Scan(&c.CanonicalJID, &c.Name, &c.MessageCount, &c.Oldest, &c.Newest, &c.MediaFailed, &c.MediaExpired, &c.MediaPending, &c.OpenGaps, &row.Logging, &row.HasMediaRule, &row.New); err != nil {
+		if err := rows.Scan(&c.CanonicalJID, &c.Name, &c.MessageCount, &c.Oldest, &c.Newest, &row.OldestHistory, &c.MediaFailed, &c.MediaExpired, &c.MediaPending, &c.OpenGaps, &row.Logging, &row.HasMediaRule, &row.New); err != nil {
 			return err
 		}
 		row.DisplayName = c.Name

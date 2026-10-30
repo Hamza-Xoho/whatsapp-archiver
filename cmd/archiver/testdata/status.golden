@@ -2,7 +2,7 @@ state: connected
 client version: 2.3000.1031 (latest)
 last event: 2026-10-12 12:15 +03
 phone last active: 2026-10-12 09:00 +03
-history: complete back to 2024-03-02, chunks 3, last chunk 2026-10-10 12:00 +03
+history FULL: complete, received 0, imported 3, last chunk 2026-10-10 12:00 +03
 media done within 5 min (24 hours): n/a (0/0)
 media done within 5 min (7 days): n/a (0/0)
 name	canonical JID	messages	oldest	newest	media failed	media expired	media pending	open gaps

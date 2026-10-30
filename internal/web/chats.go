@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"time"
 
 	"whatsapp-archiver/internal/config"
 	"whatsapp-archiver/internal/store"
@@ -21,8 +22,8 @@ var mediaTypes = config.MediaTypes
 
 type chatRowView struct {
 	store.ChatRow
-	RowID, LastMessage string
-	OOB                bool // the row replaces its copy on the page (an htmx out-of-band swap)
+	RowID, LastMessage, HistoryBackTo string
+	OOB                               bool // the row replaces its copy on the page (an htmx out-of-band swap)
 }
 
 type chatsData struct {
@@ -61,7 +62,11 @@ func (s *Server) chatRows(ctx context.Context, q string, only map[string]bool, o
 		if only != nil && !only[c.CanonicalJID] {
 			continue
 		}
-		out = append(out, chatRowView{ChatRow: c, RowID: rowID(c.CanonicalJID), LastMessage: view.FormatUnix(loc, c.Newest), OOB: oob})
+		row := chatRowView{ChatRow: c, RowID: rowID(c.CanonicalJID), LastMessage: view.FormatUnix(loc, c.Newest), OOB: oob}
+		if c.OldestHistory > 0 {
+			row.HistoryBackTo = time.Unix(c.OldestHistory, 0).In(loc).Format("2 Jan 2006")
+		}
+		out = append(out, row)
 	}
 	return out, nil
 }
