@@ -42,7 +42,7 @@ func TestLoggingGapAndMediaPlansReuseExistingIndexesWithoutSchemaGrowth(t *testi
 	}
 	for name, query := range map[string]string{"counts": loggingMediaCountsQuery, "reasons": loggingMediaReasonsQuery} {
 		mediaPlan := planOf(t, s, query)
-		if !strings.Contains(mediaPlan, "COVERING INDEX media_pick") || strings.Contains(mediaPlan, "SCAN media") {
+		if !strings.Contains(mediaPlan, "SCAN media USING COVERING INDEX media_pick") || strings.Contains(mediaPlan, "TEMP B-TREE") {
 			t.Errorf("media %s aggregation streams the base table instead of the covering index:\n%s", name, mediaPlan)
 		}
 	}
