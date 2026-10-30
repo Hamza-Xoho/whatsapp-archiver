@@ -134,7 +134,8 @@ Single status record for V1 (max 150 lines, update in place; history lives in gi
 
 ## W6(d) global search
 
-- Implemented on `v1/w6de-search-export`: folded, safely quoted dual-FTS routing; canonical filters and keyset paging; grouped, escaped `/search` results with edit/delete labels and message jumps. The 5k-message regression stays under the 300 ms budget; no golden files changed.
+- Implemented on `v1/w6de-search-export`: whole-query folded phrase routing, canonical filters/keyset paging, edit-row resolution, rich unfolded context, safe folded highlights, grouped `/search` results and message jumps. Review regressions cover punctuation, negative FTS rowids, detail/filename context and escaped segments; no golden file changed.
+- Actual W6(h) seed (250 canonical chats, 300,000 messages, seed 42), warm cache, query `archive message`, 5 warmups + 30 measured `Store.Search` calls: p50 5.140 ms, p95 6.115 ms, slowest 6.377 ms (under 300 ms). Dense unfiltered searches use the global message-time index after bounded FTS routing; sparse/filtered/edit searches remain FTS-first.
 
 ## Rulings
 

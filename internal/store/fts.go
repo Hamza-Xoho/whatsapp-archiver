@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -16,21 +17,19 @@ const (
 	createSearchTri = `CREATE VIRTUAL TABLE search_tri USING fts5(body, content='', contentless_delete=1, tokenize='trigram')`
 )
 
-// searchBody is the text a message is indexed under (schema 4.2): fold(text + caption + kind strings), where the kind
-// strings are the poll options, the location name and address, the contact names and the document filename. It is
-// empty when the message has nothing to search for. details is the validated JSON of the message; an unreadable one
-// contributes nothing.
-func searchBody(kind, text, caption, details, filename string) string {
+type searchDetails struct {
+	Name        string   `json:"name"`
+	Address     string   `json:"address"`
+	Options     []string `json:"options"`
+	DisplayName string   `json:"display_name"`
+	Contacts    []struct {
+		DisplayName string `json:"display_name"`
+	} `json:"contacts"`
+}
+
+func searchParts(kind, text, caption, details, filename string) []string {
 	parts := []string{text, caption}
-	var d struct {
-		Name        string   `json:"name"`
-		Address     string   `json:"address"`
-		Options     []string `json:"options"`
-		DisplayName string   `json:"display_name"`
-		Contacts    []struct {
-			DisplayName string `json:"display_name"`
-		} `json:"contacts"`
-	}
+	var d searchDetails
 	if details != "" && details != "{}" {
 		_ = json.Unmarshal([]byte(details), &d)
 	}
@@ -47,8 +46,16 @@ func searchBody(kind, text, caption, details, filename string) string {
 	case "document":
 		parts = append(parts, filename)
 	}
+	return parts
+}
+
+// searchBody is the text a message is indexed under (schema 4.2): fold(text + caption + kind strings), where the kind
+// strings are the poll options, the location name and address, the contact names and the document filename. It is
+// empty when the message has nothing to search for. details is the validated JSON of the message; an unreadable one
+// contributes nothing.
+func searchBody(kind, text, caption, details, filename string) string {
 	var b strings.Builder
-	for _, p := range parts {
+	for _, p := range searchParts(kind, text, caption, details, filename) {
 		if p = strings.TrimSpace(p); p != "" {
 			if b.Len() > 0 {
 				b.WriteByte(' ')
@@ -57,6 +64,17 @@ func searchBody(kind, text, caption, details, filename string) string {
 		}
 	}
 	return strings.TrimSpace(Fold(b.String()))
+}
+
+// searchContext is the original, unfolded source represented by searchBody. It is safe display text, not markup.
+func searchContext(kind, text, caption, details, filename string) string {
+	var out []string
+	for _, p := range searchParts(kind, text, caption, details, filename) {
+		if p = strings.TrimSpace(p); p != "" && !slices.Contains(out, p) {
+			out = append(out, p)
+		}
+	}
+	return strings.Join(out, " · ")
 }
 
 // indexBody puts a folded body into both FTS tables under rowid; an empty body indexes nothing.

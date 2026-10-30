@@ -149,7 +149,7 @@ CREATE TABLE messages (
   UNIQUE (chat_jid, id));
 CREATE INDEX messages_chat_ts   ON messages(chat_jid, ts, id);
 CREATE INDEX messages_chat_kind ON messages(chat_jid, kind, ts);
-CREATE INDEX messages_received  ON messages(received_at);
+CREATE INDEX messages_global_ts ON messages(ts DESC, seq DESC, received_at);
 CREATE INDEX messages_unknown   ON messages(seq) WHERE kind = 'unknown';
 
 CREATE TABLE message_events (
@@ -373,7 +373,7 @@ and the `fts5vocab` instance table of `search_fts`.
 | Media wake timer | `MIN(next_attempt_at) WHERE state='pending'` | `media_due` (one index seek) |
 | Media claim / next expired / stale retries / reset | `state=? [AND next_attempt_at<=?] ORDER BY source_rank, message_ts DESC LIMIT 1` | `media_pick` (no sort, no blob read); root cause 5. Written `INDEXED BY media_pick`: without statistics SQLite picks `media_due` plus a temp sort of every due row (checked with `EXPLAIN QUERY PLAN`); a query-plan test pins it |
 | SC-3 percentage | live rows with `enqueued_at` in 24 h / 7 d, `done_at - enqueued_at <= 300` | `media_live_enqueued` |
-| Usage | per chat from `chat_stats.media_bytes`; per type a narrow scan of `media` (thumb is last); recent messages by `received_at` | `messages_received` |
+| Usage / global search | recent-message aggregate is a covering scan; unfiltered search scans newest messages and probes FTS by rowid until its page is full | `messages_global_ts` |
 | Search | `search_fts MATCH fold(q)` → `messages` by `seq` → canonical via `chat_canonical` | FTS; in-chat search filters the hits by alias set |
 | Outage timeline, alert outbox, spool importer | by time / due / not imported | `connection_periods_time`, `alerts_due`, `history_spool_todo` |
 
