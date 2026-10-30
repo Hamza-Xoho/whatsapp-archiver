@@ -26,8 +26,8 @@ FROM n`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if took >= 150*time.Millisecond {
-		t.Fatalf("300k-media aggregation took %v, want <150ms", took)
+	if took >= loggingMediaDenseLimit {
+		t.Fatalf("300k-media aggregation took %v, want <%v", took, loggingMediaDenseLimit)
 	}
 	for _, state := range []string{"done", "pending", "downloading", "expired", "failed"} {
 		if countLogging(report.States, state) != 60_000 {
@@ -69,8 +69,8 @@ SELECT 'dense@g.us','missing-'||i,'undecryptable','gap-'||i,'no_sender_key',i*10
 	if err != nil {
 		t.Fatal(err)
 	}
-	if took >= 150*time.Millisecond {
-		t.Fatalf("%d gaps x %d periods took %v, want <150ms without a correlated period scan", rows, rows, took)
+	if took >= loggingGapDenseLimit {
+		t.Fatalf("%d gaps x %d periods took %v, want <%v without a correlated period scan", rows, rows, took, loggingGapDenseLimit)
 	}
 	if len(groups) != 1 || groups[0].Count != rows || !groups[0].PostOutage {
 		t.Fatalf("gap groups = %+v", groups)
