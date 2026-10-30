@@ -303,7 +303,7 @@ func TestBannerWhenUnpaired(t *testing.T) {
 	for _, paired := range []bool{false, true} {
 		f := newFakePairer(t, paired)
 		h := newPairUI(t, f).Handler()
-		for _, path := range []string{"/", "/settings"} {
+		for _, path := range []string{"/chats", "/settings"} {
 			body, code, _ := get(t, h, path)
 			if code != http.StatusOK {
 				t.Fatalf("GET %s: %d", path, code)

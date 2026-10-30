@@ -28,8 +28,8 @@ func TestRejectsForeignHost(t *testing.T) {
 		r.Host = host
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, r)
-		if w.Code != http.StatusOK {
-			t.Errorf("Host %q: status %d, want 200", host, w.Code)
+		if w.Code != http.StatusSeeOther {
+			t.Errorf("Host %q: status %d, want the root redirect", host, w.Code)
 		}
 	}
 }

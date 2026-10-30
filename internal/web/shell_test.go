@@ -31,17 +31,18 @@ func TestPrimaryNavigationHasOnlyThreeAreasAndCurrentPage(t *testing.T) {
 			t.Fatalf("GET %s = %d", path, code)
 		}
 		page := string(body)
+		primary := page[strings.Index(page, `<nav aria-label="Primary">`):strings.Index(page, `</nav>`)]
 		for _, label := range []string{"Chats", "Logging", "Pairing"} {
 			want := `>` + label + `</a>`
-			if strings.Count(page, want) != 1 {
-				t.Errorf("GET %s: %q count = %d", path, want, strings.Count(page, want))
+			if strings.Count(primary, want) != 1 {
+				t.Errorf("GET %s: %q count = %d", path, want, strings.Count(primary, want))
 			}
 		}
 		if !strings.Contains(page, `aria-current="page">`+current+`</a>`) {
 			t.Errorf("GET %s: %s is not current", path, current)
 		}
 		for _, old := range []string{`>Dashboard</a>`, `>Storage</a>`, `>Backups</a>`, `>Settings</a>`} {
-			if strings.Contains(page, old) {
+			if strings.Contains(primary, old) {
 				t.Errorf("GET %s retains primary link %s", path, old)
 			}
 		}
