@@ -151,6 +151,15 @@ func (s *Server) healthPartial(w http.ResponseWriter, r *http.Request) {
 	s.render(w, s.pages["dashboard"], "health_panel", s.healthView(r.Context(), loc))
 }
 
+func (s *Server) inactivityPartial(w http.ResponseWriter, r *http.Request) {
+	loc, err := view.Location(s.config())
+	if err != nil {
+		http.Error(w, "the page could not be rendered", http.StatusInternalServerError)
+		return
+	}
+	s.render(w, s.pages["logging"], "logging_inactivity", s.healthView(r.Context(), loc))
+}
+
 // recent is the newest recentEvents events, newest first.
 func (s *Server) recent(names map[string]string, loc *time.Location) []feedItem {
 	all := s.d.Activity.Recent() // oldest first; a nil bus has none

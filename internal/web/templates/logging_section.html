@@ -12,6 +12,7 @@
 {{define "loading_state"}}<span class="visually-hidden loading-copy">Loading…</span>{{end}}
 
 {{define "feed_panel"}}<section class="panel logging-section" aria-busy="false"><h2>Live feed</h2>
+  <form method="get" action="/logging/feed" class="feed-filters"><label>Chat <input name="chat" value="{{.FeedChat}}"></label><label>Kind <input name="kind" value="{{.FeedKind}}"></label><button>Filter</button><button id="pause-feed" type="button" aria-pressed="false">Pause updates</button></form>
   {{if .Feed}}<ul id="feed" class="feed" data-max="200" role="log" aria-live="polite" aria-relevant="additions" sse-swap="activity" hx-swap="afterbegin">{{range .Feed}}{{template "activity_item" .}}{{end}}</ul>{{else}}<p>Waiting for archive activity</p>{{end}}
   {{template "loading_state"}}
 </section>{{end}}
@@ -20,7 +21,7 @@
 <h1>Logging</h1>{{template "logging_nav" .}}
 {{if .Error}}<section class="panel logging-section" aria-busy="false"><h2>{{.Heading}}</h2><p role="alert">The archive could not be read. Try again.</p><a href="{{.Retry}}">Try again</a>{{template "loading_state"}}</section>
 {{else if eq .Section "outages"}}<section class="panel logging-section" aria-busy="false"><h2>Outages</h2>
-  {{if .Outages}}<div class="logging-cards">{{range .Outages}}<article><h3>{{.State}}</h3><dl class="facts"><dt>Started</dt><dd>{{.Started}}</dd><dt>Ended</dt><dd>{{.Ended}}</dd><dt>Duration</dt><dd>{{.Duration}}</dd><dt>Cause</dt><dd>{{.Cause}}</dd><dt>Errors</dt><dd>{{.Errors}} errors</dd><dt>Offline preview</dt><dd>{{.Preview}}</dd><dt>Completed backlog</dt><dd>{{.Completed}}</dd></dl></article>{{end}}</div>{{else}}<p>No outages recorded</p>{{end}}{{template "loading_state"}}</section>
+  <div class="logging-cards">{{if .Outages}}{{range .Outages}}<article><h3>{{.State}}</h3><dl class="facts"><dt>Started</dt><dd>{{.Started}}</dd><dt>Ended</dt><dd>{{.Ended}}</dd><dt>Duration</dt><dd>{{.Duration}}</dd><dt>Cause</dt><dd>{{.Cause}}</dd><dt>Errors</dt><dd>{{.Errors}} errors</dd><dt>Offline preview</dt><dd>{{.Preview}}</dd><dt>Completed backlog</dt><dd>{{.Completed}}</dd></dl></article>{{end}}{{else}}<p>No outages recorded</p>{{end}}</div>{{template "loading_state"}}</section>
 {{else if eq .Section "gaps-media"}}<section class="panel logging-section" aria-busy="false"><h2>Gaps &amp; media</h2>
   <h3>Open gaps</h3>{{if .Gaps}}<div class="logging-cards">{{range .Gaps}}<article><h4>{{.Cause}}</h4><p><a href="/chats/{{pathEscape .CanonicalJID}}/m/{{pathEscape .TargetID}}">{{.TargetID}}</a> · {{.Age}}{{if .PostOutage}} · after an outage{{end}}</p></article>{{end}}</div>{{else}}<p>No open gaps</p>{{end}}
   <h3>Media by state</h3>{{if .MediaStates}}<ul>{{range .MediaStates}}<li>{{.Name}}: {{.Count}}</li>{{end}}</ul>{{else}}<p>No media failures</p>{{end}}

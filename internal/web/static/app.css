@@ -142,6 +142,10 @@ h2 { font-size: 1.05rem; margin: 0 0 0.5rem; }
 .facts dd { margin: 0; }
 .counts { margin: 0.5rem 0 0; padding-left: 1.2rem; }
 .feed-item .name { font-weight: 500; }
+.logging-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr)); gap: 1rem; }
+.logging-cards article { border: 1px solid var(--line); border-radius: 0.6rem; padding: 0.8rem; min-width: 0; }
+.feed-filters { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; align-items: end; margin-bottom: 1rem; }
+.feed-filters label { display: grid; gap: 0.2rem; }
 
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; }
@@ -176,6 +180,8 @@ td.num { font-variant-numeric: tabular-nums; }
 .search-results .meta { color: var(--muted); margin: 0; }
 .search-context { display: -webkit-box; margin: 0.25rem 0; overflow: hidden; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 @media (max-width: 40rem) {
+	.logging-cards { grid-template-columns: 1fr; }
+	.logging-cards article { width: 100%; }
   .top { align-items: stretch; }
   .brand { flex-basis: 100%; }
   .top nav { order: 2; flex: 1 0 100%; }

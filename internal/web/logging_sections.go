@@ -28,6 +28,7 @@ type loggingSectionData struct {
 	Storage                 storageData
 	Backups                 backupsData
 	Feed                    []feedItem
+	FeedChat, FeedKind      string
 }
 
 type loggingOutageView struct {
@@ -99,10 +100,11 @@ func (s *Server) loggingSectionData(r *http.Request, section string) (loggingSec
 		return loggingSectionData{}, err
 	}
 	now := s.d.Now()
-	data := loggingSectionData{page: page{Title: "Logging", Current: "Logging", Live: section == "feed"}, Section: section}
+	data := loggingSectionData{page: page{Title: "Logging", Current: "Logging", Live: section == "feed"}, Section: section,
+		FeedChat: strings.TrimSpace(r.URL.Query().Get("chat")), FeedKind: strings.TrimSpace(r.URL.Query().Get("kind"))}
 	if s.d.Store == nil {
 		if section == "feed" {
-			data.Feed = s.recent(nil, loc)
+			data.Feed = s.recentFiltered(nil, loc, data.FeedChat, data.FeedKind)
 		}
 		return data, nil
 	}
@@ -184,7 +186,7 @@ func (s *Server) loggingSectionData(r *http.Request, section string) (loggingSec
 			return data, readErr
 		}
 	case "feed":
-		data.Feed = s.recent(nil, loc)
+		data.Feed = s.recentFiltered(nil, loc, data.FeedChat, data.FeedKind)
 	case "settings":
 		if _, readErr := s.settingsData(r.Context()); readErr != nil {
 			return data, readErr
@@ -199,8 +201,27 @@ func (s *Server) feedPartial(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "The archive could not be read. Try again.", http.StatusInternalServerError)
 		return
 	}
-	data := loggingSectionData{Feed: s.recent(nil, loc)}
+	data := loggingSectionData{FeedChat: strings.TrimSpace(r.URL.Query().Get("chat")), FeedKind: strings.TrimSpace(r.URL.Query().Get("kind"))}
+	data.Feed = s.recentFiltered(nil, loc, data.FeedChat, data.FeedKind)
 	s.render(w, s.pages["logging_section"], "feed_panel", data)
+}
+
+func (s *Server) recentFiltered(names map[string]string, loc *time.Location, chat, kind string) []feedItem {
+	rows := s.recent(names, loc)
+	if chat == "" && kind == "" {
+		return rows
+	}
+	out := rows[:0]
+	for _, row := range rows {
+		if chat != "" && row.Chat != chat {
+			continue
+		}
+		if kind != "" && row.Kind != kind {
+			continue
+		}
+		out = append(out, row)
+	}
+	return out
 }
 
 func labelledCounts(rows []store.LoggingCount) []store.LoggingCount {

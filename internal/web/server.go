@@ -171,6 +171,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /logging", s.logging)
 	mux.HandleFunc("GET /logging/{section}", s.loggingSection)
 	mux.HandleFunc("GET /partials/health", s.healthPartial)
+	mux.HandleFunc("GET /partials/inactivity", s.inactivityPartial)
 	mux.HandleFunc("GET /partials/feed", s.feedPartial)
 	mux.HandleFunc("GET /events", s.events)
 	mux.HandleFunc("GET /chats", s.chats)

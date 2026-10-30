@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.Title}} · WhatsApp Archiver</title>
-<script>(function(){try{var t=localStorage.getItem("archiver-theme")||"system";if(t!=="system")document.documentElement.dataset.theme=t}catch(e){}})()</script>
+<script>(function(){try{var t=localStorage.getItem("archiver-theme")||"system";if(t!=="system")document.documentElement.dataset.theme=t;window.matchMedia("(prefers-color-scheme: dark)")}catch(e){}})()</script>
 <link rel="stylesheet" href="/static/app.css">
 <script src="/static/htmx.min.js"></script>
 <script src="/static/sse.js"></script>
@@ -42,6 +42,25 @@ document.addEventListener("htmx:sseMessage", function () {
   if (!f) { return; }
   var max = parseInt(f.getAttribute("data-max"), 10) || 200;
   while (f.children.length > max) { f.lastElementChild.remove(); }
+});
+document.addEventListener("htmx:beforeSwap", function (event) {
+  var target = event.detail && event.detail.target;
+  if (target && target.id === "inactivity-warning") {
+    var holder = document.createElement("div");
+    holder.innerHTML = event.detail.xhr.responseText;
+    var next = holder.querySelector("#inactivity-warning");
+    if (next && next.dataset.severity === target.dataset.severity) event.detail.shouldSwap = false;
+  }
+});
+var feedPaused = false;
+document.addEventListener("htmx:beforeSwap", function (event) {
+  if (feedPaused && event.detail && event.detail.target && event.detail.target.id === "feed") event.preventDefault();
+});
+var pauseFeed = document.getElementById("pause-feed");
+if (pauseFeed) pauseFeed.addEventListener("click", function () {
+  feedPaused = !feedPaused;
+  pauseFeed.setAttribute("aria-pressed", feedPaused ? "true" : "false");
+  pauseFeed.textContent = feedPaused ? "Resume updates" : "Pause updates";
 });
 var theme = document.querySelector('[name="theme"]');
 if (theme) {
@@ -99,4 +118,4 @@ document.addEventListener("htmx:afterRequest", function (event) { if (event.deta
 </html>
 {{end}}
 
-{{define "activity_item"}}<li class="feed-item"><time datetime="{{.Stamp}}">{{.Clock}}</time> <span class="kind">{{.Kind}}</span>{{if .Name}} <span class="name">{{.Name}}</span>{{end}}{{if .Chat}} <span class="chat">{{.Chat}}</span>{{end}} <span class="detail">{{.Detail}}</span></li>{{end}}
+{{define "activity_item"}}<li class="feed-item" data-chat="{{.Chat}}" data-kind="{{.Kind}}"><time datetime="{{.Stamp}}">{{.Clock}}</time> <span class="kind">{{.Kind}}</span>{{if .Name}} <span class="name" dir="auto">{{.Name}}</span>{{end}}{{if .Chat}} <bdi class="chat">{{.Chat}}</bdi>{{end}} <span class="detail" dir="auto">{{.Detail}}</span></li>{{end}}

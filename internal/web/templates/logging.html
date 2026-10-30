@@ -1,9 +1,10 @@
 {{define "logging_health"}}<section class="panel" id="health" hx-get="/partials/health" hx-trigger="sse:health" hx-swap="outerHTML">
   <h2>Connection</h2>
   <p class="state {{.StateClass}}"><strong>{{.State}}</strong>{{if eq .State "Logged out"}} · <a href="/pair">Pair again</a>{{end}}{{if .Detail}} <span class="muted">{{.Detail}}</span>{{end}}</p>
-  {{if .PhoneQuiet}}<p class="warn" role="status">Your phone has not been active for {{.PhoneQuietFor}}. Open WhatsApp on your phone soon, or WhatsApp will unlink this archiver after 14 days of inactivity.</p>{{end}}
   <dl class="facts"><dt>WhatsApp client version</dt><dd>{{.Version}}</dd>{{if .SessionAge}}<dt>Session age</dt><dd>{{.SessionAge}}</dd>{{end}}<dt>Last event</dt><dd>{{if .LastEventAgo}}{{.LastEventAgo}} · {{end}}{{.LastEvent}}</dd><dt>Phone last active</dt><dd>{{if .PhoneActiveAgo}}{{.PhoneActiveAgo}} · {{end}}{{.PhoneLastActive}}</dd>{{if .Panics}}<dt>Recovered errors</dt><dd class="warn">{{.Panics}}</dd>{{end}}</dl>
 </section>{{end}}
+
+{{define "logging_inactivity"}}<section id="inactivity-warning" aria-live="polite" aria-atomic="true" data-severity="{{if .PhoneQuiet}}phone-quiet{{else}}none{{end}}" hx-get="/partials/inactivity" hx-trigger="sse:health" hx-swap="outerHTML">{{if .PhoneQuiet}}<p class="warn">Your phone has not been active for {{.PhoneQuietFor}}. Open WhatsApp on your phone soon, or WhatsApp will unlink this archiver after 14 days of inactivity.</p>{{end}}</section>{{end}}
 
 {{define "content"}}
 <h1>Logging</h1>
@@ -12,6 +13,7 @@
 </nav>
 <section id="overview">
   {{template "logging_health" .Overview.Health}}
+  {{template "logging_inactivity" .Overview.Health}}
   {{if .Overview.HasArchive}}<section class="panel"><h2>Archive</h2>{{range .Overview.History}}<p>{{.}}</p>{{end}}
     <ul class="counts"><li>Logging: <strong>{{.Overview.Logging}}</strong> {{.Overview.LoggingNoun}}</li><li>Not logging: <strong>{{.Overview.NotLogging}}</strong> {{.Overview.NotLoggingNoun}}</li><li class="{{if .Overview.Gaps}}warn{{end}}">Open gaps: <strong>{{.Overview.Gaps}}</strong></li><li>Media done within 5 min (24 hours): <strong>{{.Overview.Media24Hours}}</strong></li><li>Media done within 5 min (7 days): <strong>{{.Overview.Media7Days}}</strong></li></ul>
     {{if .Overview.GapGroups}}<h3>Open gaps by cause</h3><ul class="counts">{{range .Overview.GapGroups}}<li>{{.Cause}}: <strong>{{.Count}}</strong> {{.GapNoun}}, oldest {{.Age}} ago{{if .PostOutage}}, after an outage{{end}}</li>{{end}}</ul>{{else}}<p>No open gaps</p>{{end}}
