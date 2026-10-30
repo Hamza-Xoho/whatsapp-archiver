@@ -2,14 +2,10 @@ package web
 
 import (
 	"bytes"
-	"context"
-	"database/sql"
-	"errors"
 	"net/http"
-	"slices"
+	"strconv"
 	"time"
 
-	"whatsapp-archiver/internal/store"
 	"whatsapp-archiver/internal/view"
 )
 
@@ -58,30 +54,35 @@ func (s *Server) viewerEvents(w http.ResponseWriter, r *http.Request) {
 	h.Set("X-Accel-Buffering", "no")
 	w.WriteHeader(http.StatusOK)
 
-	last := r.URL.Query().Get("since")
-	lastDay := ""
-	if last != "" {
-		if ts, _, anchorErr := s.d.Store.ViewerAnchor(r.Context(), jid, last); anchorErr == nil {
-			lastDay = time.Unix(ts, 0).In(loc).Format("2 January 2006")
-		}
+	last, _ := strconv.ParseInt(r.URL.Query().Get("cursor"), 10, 64)
+	if resumed, parseErr := strconv.ParseInt(r.Header.Get("Last-Event-ID"), 10, 64); parseErr == nil && resumed > last {
+		last = resumed
 	}
+	lastDay := r.URL.Query().Get("day")
+	countOnly := r.URL.Query().Get("mode") == "count"
 	appendNew := func() error {
 		for {
-			messages, loadErr := messagesAfter(r.Context(), s.d.Store, jid, last)
+			messages, loadErr := s.d.Store.ViewerLiveAfter(r.Context(), jid, last, viewerPageSize+1)
 			if loadErr != nil {
 				return loadErr
 			}
-			slices.Reverse(messages)
 			for _, message := range messages {
+				last = message.Seq
+				if countOnly {
+					if writeErr := writeEvent(w, strconv.FormatInt(last, 10), "viewer-new", `<span class="new-message-marker" hidden></span>`); writeErr != nil {
+						return writeErr
+					}
+					continue
+				}
 				v := makeViewMessage(loc, message, "", false)
 				v.ChatJID = jid
 				v.NewDay = v.Day != lastDay
-				lastDay, last = v.Day, v.ID
+				lastDay = v.Day
 				var buf bytes.Buffer
 				if renderErr := s.pages["viewer"].ExecuteTemplate(&buf, "bubble", v); renderErr != nil {
 					return renderErr
 				}
-				if writeErr := writeEvent(w, "", "viewer", buf.String()); writeErr != nil {
+				if writeErr := writeEvent(w, strconv.FormatInt(last, 10), "viewer", buf.String()); writeErr != nil {
 					return writeErr
 				}
 			}
@@ -119,19 +120,4 @@ func (s *Server) viewerEvents(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
-}
-
-// messagesAfter returns newest first, matching ViewerPage. An empty cursor is the live edge of an initially empty chat.
-func messagesAfter(ctx context.Context, st *store.Store, jid, id string) ([]store.ViewMessage, error) {
-	if id == "" {
-		return st.ViewerPage(ctx, jid, store.ViewerQuery{Limit: 1})
-	}
-	ts, _, err := st.ViewerAnchor(ctx, jid, id)
-	if errors.Is(err, sql.ErrNoRows) {
-		return st.ViewerPage(ctx, jid, store.ViewerQuery{Limit: 1})
-	}
-	if err != nil {
-		return nil, err
-	}
-	return st.ViewerPage(ctx, jid, store.ViewerQuery{AfterTS: ts, AfterID: id, Limit: viewerPageSize + 1})
 }

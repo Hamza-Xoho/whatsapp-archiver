@@ -27,12 +27,13 @@ type ViewMessage struct {
 	ID, Sender, SenderName, Kind, Text, Caption, Details, EditedText string
 	MediaType, MediaState, QuotedID, QuotedSender                    string
 	QuotedText, QuotedSenderName                                     string
-	TS                                                               int64
-	FromMe, Deleted, ViewOnce                                        bool
+	Seq, TS                                                          int64
+	FromMe, Deleted, ViewOnce, QuotedArchived, HasThumbnail          bool
 	EphemeralSecs                                                    int
 	Reactions                                                        []string
 	ReactionCounts                                                   []ReactionCount
 	PollOptions                                                      []PollOption
+	PollVoteTotal                                                    int
 	PollIncomplete                                                   bool
 	Media                                                            *Media
 }

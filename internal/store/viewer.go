@@ -49,6 +49,16 @@ func (s *Store) ViewerDateAnchor(ctx context.Context, chat string, ts int64) (in
 	return gotTS, id, nil
 }
 
+// ViewerLiveCursor is the last inserted message sequence under any form of chat. Unlike the viewer's chronological
+// keyset, this cursor cannot miss a newly inserted live message whose WhatsApp timestamp ties or predates the page.
+func (s *Store) ViewerLiveCursor(ctx context.Context, chat string) (int64, error) {
+	var seq int64
+	if err := s.read.QueryRowContext(ctx, `SELECT COALESCE(MAX(seq),0) FROM messages WHERE chat_jid IN (`+chatForms+`)`, chat).Scan(&seq); err != nil {
+		return 0, fmt.Errorf("viewer live cursor: %w", err)
+	}
+	return seq, nil
+}
+
 // SearchChat returns matching message ids newest-first. Both original messages and latest edit text are indexed.
 func (s *Store) SearchChat(ctx context.Context, chat, query string, filter ViewerQuery) ([]string, error) {
 	terms := strings.Fields(Fold(query))
@@ -150,15 +160,15 @@ func (s *Store) ViewerPage(ctx context.Context, chat string, q ViewerQuery) ([]V
 		order = "ASC"
 	}
 	query := `WITH m AS (
- SELECT chat_jid,id,sender_jid,from_me,kind,text,caption,details,quoted_id,quoted_sender,view_once,ephemeral_secs,ts,
+	 SELECT seq,chat_jid,id,sender_jid,from_me,kind,text,caption,details,quoted_id,quoted_sender,view_once,ephemeral_secs,ts,
  ROW_NUMBER() OVER (PARTITION BY id ORDER BY received_at,chat_jid) AS rk
  FROM messages WHERE chat_jid IN (` + chatForms + `))
- SELECT m.id,m.sender_jid,m.from_me,m.kind,m.text,m.caption,m.details,m.quoted_id,m.quoted_sender,m.view_once,m.ephemeral_secs,m.ts
+	 SELECT m.seq,m.id,m.sender_jid,m.from_me,m.kind,m.text,m.caption,m.details,m.quoted_id,m.quoted_sender,m.view_once,m.ephemeral_secs,m.ts
  FROM m WHERE ` + strings.Join(where, " AND ") + ` ORDER BY m.ts ` + order + `,m.id ` + order + ` LIMIT ?` + fmt.Sprint(len(args))
 	var page []ViewMessage
 	err := s.scanRows(ctx, query, args, func(rows *sql.Rows) error {
 		var m ViewMessage
-		if err := rows.Scan(&m.ID, &m.Sender, &m.FromMe, &m.Kind, &m.Text, &m.Caption, &m.Details, &m.QuotedID, &m.QuotedSender, &m.ViewOnce, &m.EphemeralSecs, &m.TS); err != nil {
+		if err := rows.Scan(&m.Seq, &m.ID, &m.Sender, &m.FromMe, &m.Kind, &m.Text, &m.Caption, &m.Details, &m.QuotedID, &m.QuotedSender, &m.ViewOnce, &m.EphemeralSecs, &m.TS); err != nil {
 			return err
 		}
 		if slices.Contains([]string{"image", "video", "gif", "audio", "voice", "document", "sticker"}, m.Kind) {
@@ -172,6 +182,39 @@ func (s *Store) ViewerPage(ctx context.Context, chat string, q ViewerQuery) ([]V
 	}
 	if q.AfterTS > 0 {
 		slices.Reverse(page)
+	}
+	if err = s.enrichViewerPage(ctx, chat, page); err != nil {
+		return nil, err
+	}
+	return page, nil
+}
+
+// ViewerLiveAfter returns newly inserted live messages in insertion order. History and replay rows can carry old
+// timestamps and belong on an older chronological page, so they do not append at the live edge.
+func (s *Store) ViewerLiveAfter(ctx context.Context, chat string, after int64, limit int) ([]ViewMessage, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	query := `WITH m AS (
+	 SELECT seq,chat_jid,id,sender_jid,from_me,kind,text,caption,details,quoted_id,quoted_sender,view_once,ephemeral_secs,ts,source,
+	 ROW_NUMBER() OVER (PARTITION BY id ORDER BY received_at,chat_jid) AS rk
+	 FROM messages WHERE chat_jid IN (` + chatForms + `))
+	 SELECT seq,id,sender_jid,from_me,kind,text,caption,details,quoted_id,quoted_sender,view_once,ephemeral_secs,ts
+	 FROM m WHERE rk=1 AND seq>?2 AND source='live' ORDER BY seq LIMIT ?3`
+	var page []ViewMessage
+	err := s.scanRows(ctx, query, []any{chat, after, limit}, func(rows *sql.Rows) error {
+		var m ViewMessage
+		if err := rows.Scan(&m.Seq, &m.ID, &m.Sender, &m.FromMe, &m.Kind, &m.Text, &m.Caption, &m.Details, &m.QuotedID, &m.QuotedSender, &m.ViewOnce, &m.EphemeralSecs, &m.TS); err != nil {
+			return err
+		}
+		if slices.Contains([]string{"image", "video", "gif", "audio", "voice", "document", "sticker"}, m.Kind) {
+			m.MediaType = m.Kind
+		}
+		page = append(page, m)
+		return nil
+	})
+	if err != nil || len(page) == 0 {
+		return page, err
 	}
 	if err = s.enrichViewerPage(ctx, chat, page); err != nil {
 		return nil, err
@@ -289,20 +332,24 @@ func (s *Store) enrichEvents(ctx context.Context, chat, in string, args []any, p
 		for _, option := range details.Options {
 			page[at[id]].PollOptions = append(page[at[id]].PollOptions, PollOption{Text: option, Votes: counts[option]})
 		}
+		page[at[id]].PollVoteTotal = len(bySender)
 		page[at[id]].PollIncomplete = incomplete[id]
 	}
 	return nil
 }
 
 func (s *Store) enrichMedia(ctx context.Context, chat, in string, args []any, page []ViewMessage, at map[string]int) error {
-	return s.scanRows(ctx, `SELECT `+mediaColumns+` FROM media WHERE chat_jid IN (`+chatForms+`) AND message_id IN (`+in+`) ORDER BY chat_jid`, args, func(rows *sql.Rows) error {
+	return s.scanRows(ctx, `SELECT `+mediaColumns+`,length(thumb)>0 FROM media WHERE chat_jid IN (`+chatForms+`) AND message_id IN (`+in+`) ORDER BY chat_jid`, args, func(rows *sql.Rows) error {
 		var media Media
-		if err := rows.Scan(media.fields()...); err != nil {
+		fields := media.fields()
+		var hasThumbnail bool
+		if err := rows.Scan(append(fields, &hasThumbnail)...); err != nil {
 			return err
 		}
 		m := &page[at[media.MessageID]]
 		if m.Media == nil {
 			m.Media, m.MediaState = &media, media.State
+			m.HasThumbnail = hasThumbnail
 		}
 		return nil
 	})
@@ -339,7 +386,7 @@ func (s *Store) enrichQuotes(ctx context.Context, chat string, page []ViewMessag
 		return err
 	}
 	for i := range page {
-		page[i].QuotedText = quotes[page[i].QuotedID]
+		page[i].QuotedText, page[i].QuotedArchived = quotes[page[i].QuotedID]
 	}
 	return nil
 }
