@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -15,7 +16,6 @@ import (
 	"time"
 
 	"whatsapp-archiver/internal/config"
-	"whatsapp-archiver/internal/devseed"
 	"whatsapp-archiver/internal/ingest"
 	"whatsapp-archiver/internal/store"
 	"whatsapp-archiver/internal/web"
@@ -26,7 +26,8 @@ func TestW6IPerformanceTargetIsPinned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"check-w6i:", "W6I_PERF=1", "-run W6I"} {
+	for _, want := range []string{"check-w6i:", "W6I_PERF=1", "W6I_DEVSEED_DATA", "W6B_DEVSEED_DATA", "W6F_DEVSEED_DATA",
+		"--seed 42", "--chats 250", "--messages 300000", "--large-chat-messages 50000", "ChatsW6BAtScale", "LoggingW6FAtScale"} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("Makefile lacks %q", want)
 		}
@@ -37,9 +38,9 @@ func TestW6IPerformanceBudgets(t *testing.T) {
 	if os.Getenv("W6I_PERF") != "1" {
 		t.Skip("run with make check-w6i")
 	}
-	data := filepath.Join(t.TempDir(), "seed-42")
-	if _, err := devseed.Seed(t.Context(), devseed.Options{DataDir: data, Chats: 250, Messages: 50000, LargeChatMessages: 50000, Seed: 42}); err != nil {
-		t.Fatal(err)
+	data := os.Getenv("W6I_DEVSEED_DATA")
+	if data == "" {
+		t.Fatal("make check-w6i did not provide its exact shared seed")
 	}
 	st, err := store.Open(filepath.Join(data, "archive.db"))
 	if err != nil {
@@ -50,9 +51,33 @@ func TestW6IPerformanceBudgets(t *testing.T) {
 	if err != nil || trace.Message.ID != "SEED-42-000000000" || trace.Message.Timestamp != 1761436842 {
 		t.Fatalf("seed identity mismatch: trace=%+v err=%v", trace.Message, err)
 	}
+	report, err := st.StatusReport(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages, large := 0, 0
+	for _, chat := range report.Chats {
+		messages += chat.MessageCount
+		if chat.CanonicalJID == "100000@lid" {
+			large = chat.MessageCount
+		}
+	}
+	if len(report.Chats) != 250 || messages != 300000 || large < 50000 {
+		t.Fatalf("seed identity chats/messages/large = %d/%d/%d, want 250/300000/>=50000", len(report.Chats), messages, large)
+	}
 
 	cfg := &config.Config{DataDir: data, TimeZone: "UTC"}
 	h := web.New(web.Deps{Store: st, Rules: ingest.NewRuleSet(nil), Config: cfg, Now: time.Now}).Handler()
+	chatsBody := timedPath(t, h, "/chats", 150*time.Millisecond)
+	if len(chatsBody) > 100<<10 {
+		t.Fatalf("GET /chats response = %d bytes, want <=100 KiB", len(chatsBody))
+	}
+	_ = timedPath(t, h, "/chats?q=Synthetic&type=direct", 150*time.Millisecond)
+	if next := regexp.MustCompile(`href="([^"]+)"[^>]*>Next</a>`).FindStringSubmatch(chatsBody); len(next) == 2 {
+		_ = timedPath(t, h, html.UnescapeString(next[1]), 150*time.Millisecond)
+	} else {
+		t.Fatal("GET /chats has no next page")
+	}
 	initialBody := timedPath(t, h, "/chats/100000@lid", 150*time.Millisecond)
 	older := edgePath(t, initialBody, "older")
 	olderBody := timedPath(t, h, older, 150*time.Millisecond)
@@ -60,7 +85,17 @@ func TestW6IPerformanceBudgets(t *testing.T) {
 	_ = timedPath(t, h, newer, 150*time.Millisecond)
 	_ = timedPath(t, h, "/chats/100000@lid?date=2025-10-26", 150*time.Millisecond)
 	_ = timedPath(t, h, "/chats/100000@lid?q=archive&match=100", 300*time.Millisecond)
+	_ = timedPath(t, h, "/search?q="+url.QueryEscape("مرحبا"), 300*time.Millisecond)
 	_ = timedPath(t, h, "/pair", 100*time.Millisecond)
+	for _, path := range []string{"/logging", "/logging/outages", "/logging/gaps-media", "/logging/history", "/logging/alerts", "/logging/storage", "/logging/feed", "/logging/settings"} {
+		_ = timedPath(t, h, path, 150*time.Millisecond)
+	}
+	for _, path := range []string{"/partials/health", "/partials/feed"} {
+		body := timedPath(t, h, path, 50*time.Millisecond)
+		if len(body) > 16<<10 {
+			t.Fatalf("GET %s response = %d bytes, want <=16 KiB SSE fragment bound", path, len(body))
+		}
+	}
 
 	headerSamples := make([]time.Duration, 0, 30)
 	for i := 0; i < 35; i++ {
@@ -127,10 +162,11 @@ func timedPath(t *testing.T, h http.Handler, path string, budget time.Duration) 
 			samples = append(samples, elapsed)
 		}
 	}
-	if got := percentile95(samples); got >= budget {
-		t.Fatalf("GET %s p95 = %s, want <%s", path, got, budget)
+	p50, p95, maximum := percentile(samples, 50), percentile(samples, 95), samples[len(samples)-1]
+	if p95 >= budget {
+		t.Fatalf("GET %s p50/p95/max = %s/%s/%s, want p95 <%s", path, p50, p95, maximum, budget)
 	} else {
-		t.Logf("GET %s p95=%s", path, got)
+		t.Logf("GET %s p50=%s p95=%s max=%s bytes=%d", path, p50, p95, maximum, len(body))
 	}
 	return body
 }
@@ -146,8 +182,12 @@ func edgePath(t *testing.T, body, edge string) string {
 }
 
 func percentile95(samples []time.Duration) time.Duration {
+	return percentile(samples, 95)
+}
+
+func percentile(samples []time.Duration, n int) time.Duration {
 	sort.Slice(samples, func(i, j int) bool { return samples[i] < samples[j] })
-	return samples[(len(samples)*95-1)/100]
+	return samples[(len(samples)*n-1)/100]
 }
 
 type discardWriter struct {

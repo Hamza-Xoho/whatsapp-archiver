@@ -206,3 +206,24 @@ func TestChatsW6BAtScale(t *testing.T) {
 		return code
 	})
 }
+
+func TestChatsNormalFiftyRowResponseFitsHTMLBudget(t *testing.T) {
+	u := newChatsUI(t)
+	for i := range 50 {
+		jid := fmt.Sprintf("budget-%03d@g.us", i)
+		u.message(t, jid, "message")
+		if err := u.st.UpsertChat(t.Context(), store.Chat{JID: jid, Name: fmt.Sprintf("Synthetic budget chat %03d", i), Type: "group"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	body, code, _ := get(t, u.handler(), "/chats")
+	if code != http.StatusOK {
+		t.Fatalf("GET /chats = %d", code)
+	}
+	if rows := strings.Count(string(body), `<tr id="chat-`); rows != 50 {
+		t.Fatalf("GET /chats rows = %d, want 50", rows)
+	}
+	if len(body) > 100<<10 {
+		t.Fatalf("GET /chats response = %d bytes, want <=100 KiB", len(body))
+	}
+}
