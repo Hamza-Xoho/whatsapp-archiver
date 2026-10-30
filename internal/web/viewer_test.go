@@ -77,7 +77,7 @@ func TestViewerShowsSenderNameAndChatName(t *testing.T) {
 
 var olderRe = regexp.MustCompile(`href="/chats/g@g\.us\?before=(\d+)&amp;before_id=([^"&]+)"`)
 
-// Review Focus: a large chat pages, newest 200 first, with an "Older" link carrying the 200th message's time.
+// Review Focus: a large chat pages, newest 100 first, with an "Older" link carrying the 100th message's time.
 func TestViewerPagesLargeChat(t *testing.T) {
 	u := newChatsUI(t)
 	const base = 1760000000
@@ -88,15 +88,15 @@ func TestViewerPagesLargeChat(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("status %d", code)
 	}
-	if n := strings.Count(string(body), "body-"); n != 200 {
-		t.Fatalf("first page shows %d messages, want 200", n)
+	if n := strings.Count(string(body), "body-"); n != 100 {
+		t.Fatalf("first page shows %d messages, want 100", n)
 	}
-	if !strings.Contains(string(body), "body-1000") || !strings.Contains(string(body), "body-0801") || strings.Contains(string(body), "body-0800") {
-		t.Fatal("first page is not the newest 200")
+	if !strings.Contains(string(body), "body-1000") || !strings.Contains(string(body), "body-0901") || strings.Contains(string(body), "body-0900") {
+		t.Fatal("first page is not the newest 100")
 	}
 	m := olderRe.FindStringSubmatch(string(body))
-	if m == nil || m[1] != fmt.Sprint(base+801) || m[2] != "m0801" {
-		t.Fatalf("Older link %v, want before=%d&before_id=m0801", m, base+801)
+	if m == nil || m[1] != fmt.Sprint(base+901) || m[2] != "m0901" {
+		t.Fatalf("Older link %v, want before=%d&before_id=m0901", m, base+901)
 	}
 	if !strings.Contains(visibleText(string(body)), "Older") {
 		t.Fatal("no Older link text")
@@ -105,14 +105,14 @@ func TestViewerPagesLargeChat(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("status %d", code)
 	}
-	if n := strings.Count(string(body), "body-"); n != 200 || !strings.Contains(string(body), "body-0800") || strings.Contains(string(body), "body-0801") || !strings.Contains(string(body), "body-0601") {
-		t.Fatalf("second page is not messages 601-800 (%d shown)", n)
+	if n := strings.Count(string(body), "body-"); n != 100 || !strings.Contains(string(body), "body-0900") || strings.Contains(string(body), "body-0901") || !strings.Contains(string(body), "body-0801") {
+		t.Fatalf("second page is not messages 801-900 (%d shown)", n)
 	}
 }
 
 func TestViewerLastPageHasNoOlderLink(t *testing.T) {
 	u := newChatsUI(t)
-	for i := 1; i <= 200; i++ {
+	for i := 1; i <= 100; i++ {
 		u.msg(t, "g@g.us", fmt.Sprintf("m%04d", i), "1@lid", 1760000000+int64(i), "x")
 	}
 	body, _, _ := get(t, u.handler(), "/chats/g@g.us")
@@ -184,14 +184,14 @@ func TestTraceShowsGapForUndecryptable(t *testing.T) {
 	}
 }
 
-// I1: when the 200th and 201st newest messages share a second, the 201st is on the second page.
+// I1: when the 100th and 101st newest messages share a second, the 101st is on the second page.
 func TestViewerOlderPageKeepsMessageSharingBoundarySecond(t *testing.T) {
 	u := newChatsUI(t)
 	const base = 1760000000
-	for i := 1; i <= 201; i++ {
+	for i := 1; i <= 101; i++ {
 		ts := base + int64(i)
 		if i == 1 {
-			ts = base + 2 // m0001 (201st newest) shares the second of m0002 (200th newest)
+			ts = base + 2 // m0001 (101st newest) shares the second of m0002 (100th newest)
 		}
 		u.msg(t, "g@g.us", fmt.Sprintf("m%04d", i), "1@lid", ts, fmt.Sprintf("body-%04d", i))
 	}
@@ -202,7 +202,7 @@ func TestViewerOlderPageKeepsMessageSharingBoundarySecond(t *testing.T) {
 	}
 	body, code, _ := get(t, u.handler(), "/chats/g@g.us?before="+m[1]+"&before_id="+m[2])
 	if code != http.StatusOK || !strings.Contains(string(body), "body-0001") || strings.Contains(string(body), "body-0002") {
-		t.Fatalf("second page (status %d) lacks message 201 or repeats 200: %s", code, visibleText(string(body)))
+		t.Fatalf("second page (status %d) lacks message 101 or repeats 100: %s", code, visibleText(string(body)))
 	}
 }
 
