@@ -38,8 +38,14 @@ func ContactNames(all map[types.JID]types.ContactInfo) []ContactName {
 	return out
 }
 
-// ContactNames is the client's contact store (a local read, whatsmeow's cache over session.db).
-func (c *Client) ContactNames() ContactNameSource { return c.client.Store.Contacts }
+// ContactNames returns a proxy so a syncer created before re-pairing reads the replacement device's contact store.
+func (c *Client) ContactNames() ContactNameSource { return c }
+
+func (c *Client) GetAllContacts(ctx context.Context) (map[types.JID]types.ContactInfo, error) {
+	c.clientMu.RLock()
+	defer c.clientMu.RUnlock()
+	return c.client.Store.Contacts.GetAllContacts(ctx)
+}
 
 // contactDebounce is how long a sync waits after the first event that asks for one, so a burst (an app-state sync
 // delivers hundreds of contact changes) costs one read and one write.

@@ -16,7 +16,11 @@ func NewHistoryParser(ownPN, ownLID types.JID) func(types.JID, *waWeb.WebMessage
 
 // HistoryParser parses history messages with this client's own IDs, read at parse time.
 func (c *Client) HistoryParser() func(types.JID, *waWeb.WebMessageInfo) (*events.Message, error) {
-	return historyParser(c.client)
+	return func(chat types.JID, web *waWeb.WebMessageInfo) (*events.Message, error) {
+		c.clientMu.RLock()
+		defer c.clientMu.RUnlock()
+		return historyParser(c.client)(chat, web)
+	}
 }
 
 // historyParser wraps ParseWebMessage, which rewrites an edit into the edited message under the original ID;

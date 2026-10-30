@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"sync"
+	"time"
 
 	"rsc.io/qr"
 
@@ -82,7 +83,7 @@ func (p *pairing) apply(ch <-chan PairUpdate, u PairUpdate) {
 	case u.Done:
 		p.done, p.qr = true, ""
 	case u.Err != "":
-		p.err, p.qr = u.Err, ""
+		p.err, p.qr = safePairError(u.Err), ""
 	case u.QR != "":
 		p.qr = u.QR
 		p.seq++
@@ -90,6 +91,18 @@ func (p *pairing) apply(ch <-chan PairUpdate, u PairUpdate) {
 		return
 	}
 	p.notifyLocked()
+}
+
+func safePairError(err string) string {
+	switch err {
+	case "Pairing cancelled.", "QR code timed out. Press Pair WhatsApp to try again.", "Pairing stopped before it finished.",
+		"Pairing could not reset the WhatsApp session.":
+		return err
+	case "QR code timed out; run `archiver pair` again.":
+		return "QR code timed out. Press Pair WhatsApp to try again."
+	default:
+		return "Pairing failed safely. Try again. See Logging for operational details."
+	}
 }
 
 // pairActive reports whether a pairing runs or has succeeded here: the states a stream sends on connect.
@@ -112,6 +125,8 @@ type pairView struct {
 	Seq        int
 	Err        string
 	History    []string
+	LoggedOut  bool
+	SessionAge string
 }
 
 type pairData struct {
@@ -127,6 +142,14 @@ func (s *Server) pairView(ctx context.Context) (pairView, error) {
 	p.mu.Lock()
 	v := pairView{Available: true, JustPaired: p.done, Running: p.ch != nil && !p.done && p.err == "", HasQR: p.qr != "", Seq: p.seq, Err: p.err}
 	p.mu.Unlock()
+	if s.d.Health != nil {
+		v.LoggedOut = s.d.Health().State == "logged_out"
+	}
+	if started, ok := s.d.Pairer.(interface{ PairingStarted() time.Time }); ok {
+		if at := started.PairingStarted(); !at.IsZero() {
+			v.SessionAge = sinceWords(max(s.d.Now().Sub(at), 0))
+		}
+	}
 	if v.JustPaired || v.Running || !s.d.Pairer.Paired() {
 		return v, nil
 	}
@@ -167,7 +190,7 @@ func (s *Server) pairStart(w http.ResponseWriter, r *http.Request) {
 		ch, err := s.d.Pairer.StartPairing(context.WithoutCancel(r.Context()))
 		if err != nil {
 			s.pair.mu.Lock()
-			s.pair.err = "Pairing could not start: " + err.Error()
+			s.pair.err = safePairError(err.Error())
 			s.pair.notifyLocked()
 			s.pair.mu.Unlock()
 		} else {
@@ -175,6 +198,40 @@ func (s *Server) pairStart(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	http.Redirect(w, r, "/pair", http.StatusSeeOther)
+}
+
+func (s *Server) pairRestart(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.d.Pairer.(resetPairer)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	ch, err := p.RePair(context.WithoutCancel(r.Context()))
+	if err != nil {
+		s.setPairError(err)
+	} else {
+		s.beginPairing(ch)
+	}
+	http.Redirect(w, r, "/pair", http.StatusSeeOther)
+}
+
+func (s *Server) pairCancel(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.d.Pairer.(resetPairer)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	if err := p.CancelPairing(); err != nil {
+		s.setPairError(err)
+	}
+	http.Redirect(w, r, "/pair", http.StatusSeeOther)
+}
+
+func (s *Server) setPairError(err error) {
+	s.pair.mu.Lock()
+	s.pair.err = safePairError(err.Error())
+	s.pair.notifyLocked()
+	s.pair.mu.Unlock()
 }
 
 // pairQR is GET /pair/qr.png: the current QR code as a PNG (level L). It only renders; it never starts pairing.

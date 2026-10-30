@@ -28,6 +28,7 @@ import (
 type clientVersion struct{ version, reason string }
 
 type Client struct {
+	clientMu  sync.RWMutex
 	client    *whatsmeow.Client
 	container *sqlstore.Container
 	cfg       *config.Config
@@ -46,6 +47,10 @@ type Client struct {
 	// qrChannel is GetQRChannel; tests replace it with a fake channel.
 	qrChannel func(context.Context) (<-chan whatsmeow.QRChannelItem, error)
 	conn      *connectionMonitor
+	http      *http.Client
+	connSink  ingest.ConnectionStateSink
+	// resetDevice is a fake boundary in Pairer tests. Open installs resetForPairing.
+	resetDevice func(context.Context) error
 }
 
 // Socket is the connection boundary the reconnect loop drives; *whatsmeow.Client satisfies it.
@@ -61,14 +66,20 @@ func (c *Client) UseSocket(s Socket) { c.sock = s }
 // UseHTTPClient applies the resilient transport to logged-in websocket dials
 // and media downloads. The two whatsmeow setters are receive-only plumbing.
 func (c *Client) UseHTTPClient(h *http.Client) {
+	c.clientMu.Lock()
+	c.http = h
 	c.client.SetWebsocketHTTPClient(h)
 	c.client.SetMediaHTTPClient(h)
+	c.clientMu.Unlock()
 }
 
 // WithConnectionHealth enables keepalive state reporting and the independent
 // socket watchdog. Call it before Run.
 func (c *Client) WithConnectionHealth(h ingest.ConnectionStateSink) *Client {
+	c.clientMu.Lock()
+	c.connSink = h
 	c.conn = newConnectionMonitor(c.client, h, time.Now)
+	c.clientMu.Unlock()
 	return c
 }
 
@@ -118,6 +129,20 @@ func Open(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Client, e
 	c.ver.Store(&clientVersion{version, reason})
 	c.refresh = c.refreshVersion
 	c.qrChannel = inner.GetQRChannel
+	c.resetDevice = c.resetForPairing
+	c.configureInner(inner)
+	return c, nil
+}
+
+func (c *Client) configureInner(inner *whatsmeow.Client) {
+	inner.AutomaticMessageRerequestFromPhone = true
+	inner.SynchronousAck = true
+	inner.EnableDecryptedEventBuffer = true
+	inner.ManualHistorySyncDownload = true
+	if c.http != nil {
+		inner.SetWebsocketHTTPClient(c.http)
+		inner.SetMediaHTTPClient(c.http)
+	}
 	inner.AutoReconnectHook = func(err error) bool {
 		if c.conn != nil {
 			count := inner.AutoReconnectErrors
@@ -127,7 +152,40 @@ func Open(ctx context.Context, cfg *config.Config, log *slog.Logger) (*Client, e
 		}
 		return true
 	}
-	return c, nil
+}
+
+// resetForPairing replaces only whatsmeow's session device. The archive store is not reachable from Client.
+// A deleted whatsmeow Device is deliberately unusable, so re-pairing requires a fresh Device and Client.
+func (c *Client) resetForPairing(ctx context.Context) error {
+	c.clientMu.Lock()
+	defer c.clientMu.Unlock()
+	old := c.client
+	old.Disconnect()
+	if old.Store.ID != nil && !old.Store.Deleted {
+		if err := old.Store.Delete(ctx); err != nil {
+			return fmt.Errorf("reset WhatsApp device: %w", err)
+		}
+	}
+	device := c.container.NewDevice()
+	inner := whatsmeow.NewClient(device, old.Log)
+	c.configureInner(inner)
+	c.client = inner
+	c.qrChannel = inner.GetQRChannel
+	c.download = liveHistoryDownloader(inner)
+	if c.sock == old {
+		c.sock = inner
+	}
+	if c.connSink != nil {
+		c.conn = newConnectionMonitor(inner, c.connSink, time.Now)
+	}
+	c.setPaired(false)
+	return nil
+}
+
+func (c *Client) inner() *whatsmeow.Client {
+	c.clientMu.RLock()
+	defer c.clientMu.RUnlock()
+	return c.client
 }
 
 func chooseVersion(ctx context.Context, cfg *config.Config) (string, string, error) {
@@ -149,7 +207,11 @@ func chooseVersion(ctx context.Context, cfg *config.Config) (string, string, err
 // writes Store.ID in handlePair, so the device is read once, on the first call (Run and the Pairer make it before
 // any connect), and the answer is then kept in an atomic, set on PairSuccess and cleared on LoggedOut.
 func (c *Client) Paired() bool {
-	c.pairedOnce.Do(func() { c.paired.Store(c.client.Store.ID != nil) })
+	c.pairedOnce.Do(func() {
+		c.clientMu.RLock()
+		defer c.clientMu.RUnlock()
+		c.paired.Store(c.client.Store.ID != nil)
+	})
 	return c.paired.Load()
 }
 
@@ -172,11 +234,20 @@ func (c *Client) VersionReason() string {
 }
 
 // IsConnected reports the websocket state without changing it.
-func (c *Client) IsConnected() bool { return c.client.IsConnected() }
+func (c *Client) IsConnected() bool {
+	c.clientMu.RLock()
+	defer c.clientMu.RUnlock()
+	return c.client.IsConnected()
+}
 
 func (c *Client) Close() error {
 	var err error
-	c.closeOnce.Do(func() { c.client.Disconnect(); err = c.container.Close() })
+	c.closeOnce.Do(func() {
+		c.clientMu.RLock()
+		c.client.Disconnect()
+		c.clientMu.RUnlock()
+		err = c.container.Close()
+	})
 	return err
 }
 
@@ -197,7 +268,10 @@ func (c *Client) run(ctx context.Context, h func(any) bool, pairing bool, show f
 		return fmt.Errorf("not paired")
 	}
 	if pairing {
-		qr, err := c.qrChannel(ctx)
+		c.clientMu.RLock()
+		qrChannel := c.qrChannel
+		c.clientMu.RUnlock()
+		qr, err := qrChannel(ctx)
 		if err != nil {
 			return fmt.Errorf("start QR pairing: %w", err)
 		}
@@ -215,10 +289,11 @@ func (c *Client) run(ctx context.Context, h func(any) bool, pairing bool, show f
 		go func() { defer close(done); c.conn.run(ctx) }()
 		defer func() { <-done }()
 	}
-	id := c.client.AddEventHandlerWithSuccessStatus(handler)
+	inner := c.inner()
+	id := inner.AddEventHandlerWithSuccessStatus(handler)
 	err := c.reconnect(ctx, ctl)
 	if pairing && !c.Paired() {
-		c.client.RemoveEventHandler(id)
+		inner.RemoveEventHandler(id)
 	}
 	return err
 }

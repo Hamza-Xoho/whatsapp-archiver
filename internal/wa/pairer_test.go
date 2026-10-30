@@ -287,9 +287,9 @@ func TestTrackPairingFollowsPairSuccessAndLogout(t *testing.T) {
 	}
 }
 
-// Phase 2 final review F1: after WhatsApp logs a paired device out, nothing reads StartPairing's request (Run is
-// inside the capture loop), so StartPairing says so at once instead of leaving the page waiting for a QR code.
-func TestStartPairingAfterLogoutSaysToRestart(t *testing.T) {
+// W6(g): a LoggedOut device starts a fresh QR flow in the same process. The reset is confined to the device store;
+// this fake boundary never exposes an archive store to the pairer.
+func TestStartPairingAfterLogoutResetsDeviceAndShowsANewQR(t *testing.T) {
 	r := newPairRig(t, true)
 	r.sock.waitConnects(t, 1)
 	select {
@@ -297,16 +297,70 @@ func TestStartPairingAfterLogoutSaysToRestart(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("not ready when already paired")
 	}
+	resets := 0
+	r.p.c.resetDevice = func(context.Context) error {
+		resets++
+		r.device.ID = nil
+		return nil
+	}
 	r.p.c.setPaired(false) // what trackPairing does on LoggedOut
 	ch, err := r.p.StartPairing(t.Context())
-	if ch != nil {
-		t.Fatal("StartPairing after a logout returned a channel nobody reads")
+	if err != nil {
+		t.Fatal(err)
 	}
-	const want = "WhatsApp logged this archiver out. Restart it (sudo systemctl restart archiver) to pair again."
-	if err == nil || err.Error() != want {
-		t.Fatalf("err = %v, want %q", err, want)
+	r.sock.waitConnects(t, 2)
+	r.qrs[0] <- code("2@after-logout")
+	if got, ok := recv(t, ch); !ok || got.QR != "2@after-logout" {
+		t.Fatalf("update=%+v open=%v", got, ok)
 	}
-	if n := r.qrCalls(); n != 0 {
-		t.Fatalf("QR channels=%d after a logout, want 0", n)
+	if resets != 1 {
+		t.Fatalf("device resets=%d, want 1", resets)
 	}
+}
+
+// W6(g): voluntary re-pair uses the same reset-and-pair path without stopping Pairer.Run.
+func TestRePairWhilePairedResetsDeviceAndShowsANewQR(t *testing.T) {
+	r := newPairRig(t, true)
+	r.sock.waitConnects(t, 1)
+	resets := 0
+	r.p.c.resetDevice = func(context.Context) error {
+		resets++
+		r.device.ID = nil
+		r.p.c.setPaired(false)
+		return nil
+	}
+	ch, err := r.p.RePair(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.sock.waitConnects(t, 2)
+	r.qrs[0] <- code("2@replacement")
+	if got, ok := recv(t, ch); !ok || got.QR != "2@replacement" {
+		t.Fatalf("update=%+v open=%v", got, ok)
+	}
+	if resets != 1 {
+		t.Fatalf("device resets=%d, want 1", resets)
+	}
+}
+
+func TestCancelPairingStopsOnlyTheAttempt(t *testing.T) {
+	r := newPairRig(t, false)
+	ch, err := r.p.StartPairing(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.sock.waitConnects(t, 1)
+	if err = r.p.CancelPairing(); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := recv(t, ch); !ok || got.Err != "Pairing cancelled." {
+		t.Fatalf("update=%+v open=%v", got, ok)
+	}
+	if _, ok := recv(t, ch); ok {
+		t.Fatal("pairing channel stayed open after cancellation")
+	}
+	if _, err = r.p.StartPairing(t.Context()); err != nil {
+		t.Fatalf("start after cancel: %v", err)
+	}
+	r.sock.waitConnects(t, 2)
 }
