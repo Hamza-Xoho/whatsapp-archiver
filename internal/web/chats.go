@@ -22,34 +22,51 @@ var mediaTypes = config.MediaTypes
 
 type chatRowView struct {
 	store.ChatRow
-	RowID, LastMessage, HistoryBackTo string
-	OOB                               bool // the row replaces its copy on the page (an htmx out-of-band swap)
+	RowID, LastMessage, HistoryBackTo   string
+	Type, Parent, ParentName, RuleLabel string
+	ChildCount                          int
+	OOB                                 bool // the row replaces its copy on the page (an htmx out-of-band swap)
 }
 
 type chatsData struct {
 	page
-	Query      string
+	Filters    chatFilters
 	Rows       []chatRowView
 	MediaTypes []string
+	Total      int
+	Snapshot   string
+	Next, Prev string
+	HasFilters bool
 }
 
-// chats is GET /chats?q=, the chat list. Like every GET it only reads.
+// chats is GET /chats, the filtered, keyset-paged chat list. Like every GET it only reads.
 func (s *Server) chats(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query().Get("q")
-	rows, err := s.chatRows(r.Context(), q, nil, false)
+	filters := parseChatFilters(r.URL.Query())
+	rows, err := s.chatRows(r.Context(), filters, nil, false)
 	if err != nil {
 		http.Error(w, "the archive could not be read", http.StatusInternalServerError)
 		return
 	}
-	s.render(w, s.pages["chats"], "layout", chatsData{page: page{Title: "Chats", Current: "Chats"}, Query: q, Rows: rows, MediaTypes: mediaTypes})
+	pageRows, next, prev, err := paginateChats(rows, r.URL.Query().Get("cursor"), filters)
+	if err != nil {
+		http.Error(w, "invalid page cursor", http.StatusBadRequest)
+		return
+	}
+	s.render(w, s.pages["chats"], "layout", chatsData{page: page{Title: "Chats", Current: "Chats"}, Filters: filters,
+		Rows: pageRows, MediaTypes: mediaTypes, Total: len(rows), Snapshot: chatSnapshot(rows), Next: next, Prev: prev,
+		HasFilters: filters.active()})
 }
 
-// chatRows is the list filtered by q; with only set, just those chats. oob marks the rows for an out-of-band swap.
-func (s *Server) chatRows(ctx context.Context, q string, only map[string]bool, oob bool) ([]chatRowView, error) {
+// chatRows reads the derived chat list and small control tables. With only set, it returns just those rows.
+func (s *Server) chatRows(ctx context.Context, filters chatFilters, only map[string]bool, oob bool) ([]chatRowView, error) {
 	if s.d.Store == nil {
 		return nil, nil
 	}
-	list, err := s.d.Store.ChatList(ctx, q)
+	list, err := s.d.Store.ChatList(ctx, filters.Query)
+	if err != nil {
+		return nil, err
+	}
+	controls, err := s.d.Store.ChatControls(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -57,12 +74,42 @@ func (s *Server) chatRows(ctx context.Context, q string, only map[string]bool, o
 	if err != nil {
 		return nil, err
 	}
+	names := make(map[string]string, len(list))
+	for _, c := range list {
+		names[c.CanonicalJID] = c.DisplayName
+	}
+	children := map[string]int{}
+	for _, c := range controls {
+		if c.Parent != "" {
+			children[c.Parent]++
+		}
+	}
 	out := make([]chatRowView, 0, len(list))
 	for _, c := range list {
 		if only != nil && !only[c.CanonicalJID] {
 			continue
 		}
-		row := chatRowView{ChatRow: c, RowID: rowID(c.CanonicalJID), LastMessage: view.FormatUnix(loc, c.Newest), OOB: oob}
+		control := controls[c.CanonicalJID]
+		typ := normalizedChatType(control.Type, c.CanonicalJID)
+		label := "Default"
+		if control.Parent != "" {
+			parent := controls[control.Parent]
+			if control.Rule == nil && parent.Rule != nil {
+				c.Logging, c.HasMediaRule = parent.Rule.Logging, parent.Rule.Media != nil
+			}
+			if parent.Rule != nil && (control.Rule == nil || sameRule(control.Rule, parent.Rule)) {
+				label = "Inherited from " + names[control.Parent]
+			} else if control.Rule != nil {
+				label = "Own rule"
+			}
+		} else if control.Rule != nil {
+			label = "Own rule"
+		}
+		if !filters.match(c, typ) {
+			continue
+		}
+		row := chatRowView{ChatRow: c, RowID: rowID(c.CanonicalJID), LastMessage: view.FormatUnix(loc, c.Newest), OOB: oob,
+			Type: typ, Parent: control.Parent, ParentName: names[control.Parent], RuleLabel: label, ChildCount: children[c.CanonicalJID]}
 		if c.OldestHistory > 0 {
 			row.HistoryBackTo = time.Unix(c.OldestHistory, 0).In(loc).Format("2 Jan 2006")
 		}
@@ -156,6 +203,14 @@ func (s *Server) chatRules(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "the form could not be read", http.StatusBadRequest)
 		return
 	}
+	if r.PostForm.Get("scope") == "filtered" {
+		jids, err := s.filteredFormJIDs(r)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		r.PostForm["jid[]"] = jids
+	}
 	change, err := parseRuleForm(r)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -185,6 +240,11 @@ func (s *Server) applyRules(ctx context.Context, change ruleChange) string {
 	for _, rule := range existing {
 		byJID[rule.JID] = rule
 	}
+	controls, err := s.d.Store.ChatControls(ctx)
+	if err != nil {
+		return "the archive could not be read"
+	}
+	change.jids = expandCommunityTargets(change.jids, controls)
 	now := s.d.Now().Unix()
 	var write []store.ChatRule
 	written := map[string]bool{}
@@ -221,7 +281,7 @@ func (s *Server) applyRules(ctx context.Context, change ruleChange) string {
 	if err := s.d.Store.SetChatRules(ctx, write); err != nil {
 		return "the change could not be saved"
 	}
-	all, err := s.d.Store.ChatRules(ctx)
+	all, err := s.effectiveRules(ctx)
 	if err != nil {
 		return "the change was saved but could not be applied; restart the archiver"
 	}
@@ -275,7 +335,7 @@ func (s *Server) updatedRows(w http.ResponseWriter, r *http.Request, jids []stri
 	for _, j := range jids {
 		only[j] = true
 	}
-	rows, err := s.chatRows(r.Context(), "", only, true)
+	rows, err := s.chatRows(r.Context(), chatFilters{}, only, true)
 	if err != nil {
 		http.Error(w, "the archive could not be read", http.StatusInternalServerError)
 		return

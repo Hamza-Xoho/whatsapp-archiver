@@ -151,6 +151,13 @@ td.num { font-variant-numeric: tabular-nums; }
 .actions form { display: inline; }
 .bulk label, .search label { margin-right: 1rem; }
 .bulk fieldset { border: 1px solid var(--line); margin: 0.5rem 0; }
+.page-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
+.filters { display: inline-block; margin: 0.5rem 1rem 0.5rem 0; }
+.filters > summary, .row-rule > summary, .community > summary { cursor: pointer; min-height: 44px; padding: 0.6rem 0; }
+.pagination { display: flex; justify-content: space-between; gap: 1rem; margin: 1rem 0; }
+.pagination a { display: inline-flex; min-height: 44px; align-items: center; padding: 0 0.75rem; }
+.rule-preview { border-color: var(--accent); }
+.row-rule { display: inline-block; }
 .messages { list-style: none; margin: 0; padding: 0; }
 .msg { padding: 0.5rem 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .msg .meta time { color: var(--muted); margin: 0 0.5rem; }
@@ -172,6 +179,9 @@ td.num { font-variant-numeric: tabular-nums; }
   .chats td { border: 0; padding: 0.3rem; }
   .chats td::before { content: attr(data-label); display: inline-block; min-width: 7rem; margin-right: 0.5rem; color: var(--muted); font-weight: 600; }
   .chats td.actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  body:has(.chat-select:checked) .bulk { position: sticky; bottom: 0; z-index: 5; box-shadow: 0 -0.25rem 1rem #0004; }
+  .filters { display: block; }
+  .filters label { display: block; margin: 0.4rem 0; }
   .facts { grid-template-columns: 1fr; }
   .facts dd { margin-bottom: 0.5rem; }
   .msg { max-width: 88%; }
