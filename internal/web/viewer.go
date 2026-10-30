@@ -1,7 +1,6 @@
 package web
 
 import (
-	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -90,7 +89,7 @@ func (s *Server) viewer(w http.ResponseWriter, r *http.Request) {
 	if query.FocusID == "" {
 		query.FocusID = legacyFocusID
 	}
-	matches, matchIndex, err := s.viewerSearch(ctx, jid, r.URL.Query(), &query)
+	match, err := s.viewerSearch(ctx, jid, r.URL.Query(), &query)
 	if errors.Is(err, sql.ErrNoRows) {
 		http.NotFound(w, r)
 		return
@@ -153,7 +152,7 @@ func (s *Server) viewer(w http.ResponseWriter, r *http.Request) {
 	data.HasNewer = data.HasNewer || query.BeforeTS > 0
 	data.HasOlder = data.HasOlder || query.AfterTS > 0
 	data.Filtered = data.Query != "" || data.Sender != "" || data.Media != "" || data.FromDate != "" || data.ToDate != ""
-	data.ViewerLive = query.BeforeTS == 0 && query.AfterTS == 0 && query.FocusID == "" && len(matches) == 0 && !data.Filtered
+	data.ViewerLive = query.BeforeTS == 0 && query.AfterTS == 0 && query.FocusID == "" && match.Count == 0 && !data.Filtered
 	data.AwayLive = !data.ViewerLive
 	if len(msgs) > 0 {
 		oldest, newest := msgs[len(msgs)-1], msgs[0]
@@ -169,14 +168,14 @@ func (s *Server) viewer(w http.ResponseWriter, r *http.Request) {
 	}
 	slices.Reverse(msgs)
 	currentMatch := ""
-	if len(matches) > 0 {
-		currentMatch = matches[matchIndex]
-		data.MatchCount, data.MatchPosition = len(matches), matchIndex+1
-		if matchIndex > 0 {
-			data.PreviousMatchURL = matchURL(jid, values, matchIndex-1, matches[matchIndex-1])
+	if match.Count > 0 {
+		currentMatch = match.CurrentID
+		data.MatchCount, data.MatchPosition = match.Count, match.Index+1
+		if match.PreviousID != "" {
+			data.PreviousMatchURL = matchURL(jid, values, match.Index-1, match.PreviousID)
 		}
-		if matchIndex+1 < len(matches) {
-			data.NextMatchURL = matchURL(jid, values, matchIndex+1, matches[matchIndex+1])
+		if match.NextID != "" {
+			data.NextMatchURL = matchURL(jid, values, match.Index+1, match.NextID)
 		}
 	}
 	var lastDay string
@@ -246,27 +245,6 @@ func parseViewerQuery(values url.Values, loc *time.Location) (store.ViewerQuery,
 		}
 	}
 	return q, nil
-}
-
-func (s *Server) viewerSearch(ctx context.Context, jid string, values url.Values, q *store.ViewerQuery) ([]string, int, error) {
-	text := strings.TrimSpace(values.Get("q"))
-	if text == "" {
-		return nil, 0, nil
-	}
-	ids, err := s.d.Store.SearchChat(ctx, jid, text, *q)
-	if err != nil || len(ids) == 0 {
-		return ids, 0, err
-	}
-	index := 0
-	if raw := values.Get("match"); raw != "" {
-		n, parseErr := strconv.Atoi(raw)
-		if parseErr != nil || n < 0 || n >= len(ids) {
-			return nil, 0, fmt.Errorf("match is out of range")
-		}
-		index = n
-	}
-	q.FocusID = ids[index]
-	return ids, index, nil
 }
 
 func cloneValues(in url.Values) url.Values {

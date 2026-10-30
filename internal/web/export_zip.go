@@ -79,7 +79,7 @@ func (s *Server) streamZIP(ctx context.Context, w io.Writer, x exportScope) erro
 	if err != nil {
 		return err
 	}
-	err = s.eachExport(ctx, x, func(r store.ExportRecord) error {
+	err = s.eachExportMedia(ctx, x, func(r store.ExportRecord) error {
 		m := r.Media
 		if m == nil {
 			return nil
@@ -113,7 +113,7 @@ func (s *Server) streamZIP(ctx context.Context, w io.Writer, x exportScope) erro
 	if err = s.streamText(ctx, tw, x); err != nil {
 		return err
 	}
-	err = s.eachExport(ctx, x, func(r store.ExportRecord) error {
+	err = s.eachExportMedia(ctx, x, func(r store.ExportRecord) error {
 		m := r.Media
 		if m == nil || m.State != "done" {
 			return nil
@@ -131,7 +131,7 @@ func (s *Server) streamZIP(ctx context.Context, w io.Writer, x exportScope) erro
 			_ = f.Close()
 			return e
 		}
-		zw, e := z.Create(name)
+		zw, e := z.CreateHeader(&zip.FileHeader{Name: name, Method: zip.Store})
 		if e == nil {
 			e = copyContext(ctx, zw, f)
 		}
@@ -145,4 +145,28 @@ func (s *Server) streamZIP(ctx context.Context, w io.Writer, x exportScope) erro
 		return err
 	}
 	return z.Close()
+}
+
+func (s *Server) eachExportMedia(ctx context.Context, x exportScope, fn func(store.ExportRecord) error) error {
+	var ts int64
+	var id string
+	hasCursor := false
+	for {
+		page, err := s.d.Store.ExportMediaPage(ctx, store.ExportParams{CanonicalJID: x.jid, From: x.from, To: x.to, AfterTS: ts, AfterID: id, HasCursor: hasCursor, Limit: exportPageSize})
+		if err != nil {
+			return err
+		}
+		for _, record := range page {
+			if err = ctx.Err(); err != nil {
+				return err
+			}
+			if err = fn(record); err != nil {
+				return err
+			}
+			ts, id, hasCursor = record.Message.Timestamp, record.Message.ID, true
+		}
+		if len(page) < exportPageSize {
+			return nil
+		}
+	}
 }

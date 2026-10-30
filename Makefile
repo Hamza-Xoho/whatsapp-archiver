@@ -34,9 +34,13 @@ BUILD_TARGETS := linux/amd64 linux/arm64 darwin/arm64 darwin/amd64 windows/amd64
 VERSION ?= $(shell git describe --always --dirty --tags 2>/dev/null || echo dev)
 LDFLAGS := -X main.version=$(VERSION)
 
-.PHONY: check check-fast test test-quiet lint build build-all fmt tools
+.PHONY: check check-fast check-w6i test test-quiet lint build build-all fmt tools
 
 check: test lint build-all
+
+# Deterministic opt-in release budgets on the synthetic W6(i) dataset.
+check-w6i: $(GO)
+	W6I_PERF=1 $(GO) test -v -count=1 -run W6I ./internal/devseed ./internal/store
 
 # Fast gate for the Stop hook: race tests on packages with Go changes vs HEAD, then lint. No build-all.
 check-fast: $(GO)
