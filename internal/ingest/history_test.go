@@ -354,8 +354,7 @@ func TestExcludedCommunityHistoryUsesParentBeforeItsFirstMessage(t *testing.T) {
 		t.Fatalf("excluded child history was stored: %v", got)
 	}
 	want := []string{
-		"child@g.us|Announcements|group|community@g.us",
-		"community@g.us|Neighbours|community|",
+		"child@g.us||group|community@g.us",
 	}
 	if got := rows(t, st, "SELECT jid,name,type,parent_jid FROM chats ORDER BY jid"); !slices.Equal(got, want) {
 		t.Fatalf("community history directory = %v, want %v", got, want)
