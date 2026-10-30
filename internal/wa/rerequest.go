@@ -24,6 +24,8 @@ func (c *Client) RequestMediaRetry(ctx context.Context, ref MediaRef, raw []byte
 	if err != nil {
 		return err
 	}
+	c.clientMu.RLock()
+	defer c.clientMu.RUnlock()
 	if err = c.client.SendMediaRetryReceipt(ctx, info, key); err != nil {
 		return fmt.Errorf("send media retry receipt for %s: %w", ref.ID, err)
 	}

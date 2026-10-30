@@ -1,12 +1,22 @@
-{{define "pair_panel"}}{{if not .Available}}<p>Pairing is not available in this process.</p>
+{{define "pair_panel"}}{{if not .Available}}<p>Pairing is unavailable in this process.</p>
 {{else if .JustPaired}}<p class="ok" role="status"><strong>Paired. Capture is running.</strong></p>
+  <p>Open WhatsApp on your phone regularly. WhatsApp may unlink inactive linked devices after 14 days.</p>
   <p><a href="/">Open the dashboard</a></p>
 {{else if .Paired}}<p class="ok"><strong>Paired</strong></p>
+  {{if .SessionAge}}<p>Session age: {{.SessionAge}} <span class="muted">(observed by this archiver process)</span>.</p>{{end}}
   {{range .History}}<p>{{.}}</p>{{end}}
-{{else if .Running}}{{if .HasQR}}<p>On your phone open WhatsApp, then Settings, Linked devices, Link a device, and scan this code. A new code appears every 20 seconds.</p>
+  <p>Open WhatsApp on your phone regularly. WhatsApp may unlink inactive linked devices after 14 days.</p>
+  <details><summary>Pair a different device…</summary>
+    <h2>Re-pair WhatsApp?</h2><p>This signs this archiver out of its current linked-device session and starts a fresh pairing. The archive is not changed, but no new messages are logged until pairing finishes.</p>
+    <form method="post" action="/pair/restart"><button class="danger">Re-pair WhatsApp</button></form>
+  </details>
+{{else if .Running}}{{if .HasQR}}<h2>Pairing in progress</h2><ol><li>Open WhatsApp on your phone</li><li>Settings → Linked devices → Link a device</li><li>Scan the QR code below</li></ol><p>A new code appears every 20 seconds.</p>
   <p><img class="qr" src="/pair/qr.png?n={{.Seq}}" alt="QR code to scan with WhatsApp" width="264" height="264"></p>
-{{else}}<p>Waiting for WhatsApp to send a QR code…</p>
-{{end}}{{else}}{{if .Err}}<p class="bad" role="alert">{{.Err}}</p>
+{{else}}<p>Waiting for WhatsApp to provide a QR code…</p>
+{{end}}<form method="post" action="/pair/cancel"><button>Cancel pairing</button></form>
+{{else if .LoggedOut}}<p class="bad" role="alert"><strong>WhatsApp logged this archiver out.</strong> New messages are not being archived.</p>
+  <p>The archive and downloaded media are unchanged.</p><form method="post" action="/pair/start"><button>Pair again</button></form>
+{{else}}{{if .Err}}<p class="bad" role="alert">{{.Err}} <a href="/logging">Open Logging</a>.</p>
 {{end}}<p>This archiver is not paired with WhatsApp yet. Pairing links it as a device of your account, like WhatsApp Web; nothing is sent to your contacts.</p>
   <form method="post" action="/pair/start"><button>Pair WhatsApp</button></form>
 {{end}}{{end}}

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"sync"
+	"time"
 
 	"whatsapp-archiver/internal/wa"
 	"whatsapp-archiver/internal/web"
@@ -26,7 +27,43 @@ type browserPairer struct {
 func (b *browserPairer) Paired() bool { return b.p.Paired() }
 
 func (b *browserPairer) StartPairing(ctx context.Context) (<-chan web.PairUpdate, error) {
-	src, err := b.p.StartPairing(ctx)
+	return b.start(ctx, false)
+}
+
+func (b *browserPairer) RePair(ctx context.Context) (<-chan web.PairUpdate, error) {
+	return b.start(ctx, true)
+}
+
+func (b *browserPairer) CancelPairing() error {
+	p, ok := b.p.(interface{ CancelPairing() error })
+	if !ok {
+		return context.Canceled
+	}
+	return p.CancelPairing()
+}
+
+func (b *browserPairer) PairingStarted() time.Time {
+	p, ok := b.p.(interface{ PairingStarted() time.Time })
+	if !ok {
+		return time.Time{}
+	}
+	return p.PairingStarted()
+}
+
+func (b *browserPairer) start(ctx context.Context, reset bool) (<-chan web.PairUpdate, error) {
+	var src <-chan wa.PairUpdate
+	var err error
+	if reset {
+		p, ok := b.p.(interface {
+			RePair(context.Context) (<-chan wa.PairUpdate, error)
+		})
+		if !ok {
+			return nil, context.Canceled
+		}
+		src, err = p.RePair(ctx)
+	} else {
+		src, err = b.p.StartPairing(ctx)
+	}
 	if err != nil {
 		return nil, err
 	}
