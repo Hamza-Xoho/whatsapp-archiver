@@ -127,6 +127,15 @@ func TestMiddlewareRecoversAndLogsOnlySafeRouteFacts(t *testing.T) {
 	if !strings.Contains(got, "request panic") || !strings.Contains(got, "GET /chats/{jid}") || strings.Contains(got, "private") || strings.Contains(got, "secret") {
 		t.Fatalf("unsafe or incomplete recovery log:\n%s", got)
 	}
+	var timing string
+	for line := range strings.SplitSeq(got, "\n") {
+		if strings.Contains(line, `msg="http request"`) {
+			timing = line
+		}
+	}
+	if !strings.Contains(timing, "status=500") || !strings.Contains(timing, "bytes=22") {
+		t.Fatalf("panic timing does not describe the recovered response:\n%s", got)
+	}
 }
 
 func TestResponsiveThemeCSSDoesNotHideTableData(t *testing.T) {
@@ -142,5 +151,19 @@ func TestResponsiveThemeCSSDoesNotHideTableData(t *testing.T) {
 	}
 	if strings.Contains(css, "nth-child") {
 		t.Fatal("mobile CSS hides table data with nth-child")
+	}
+}
+
+func TestExplicitThemesOverrideTheSystemPreference(t *testing.T) {
+	body, code, _ := get(t, New(Deps{}).Handler(), "/static/app.css")
+	if code != http.StatusOK {
+		t.Fatalf("GET app.css = %d", code)
+	}
+	css := string(body)
+	system := strings.Index(css, "@media (prefers-color-scheme: dark)")
+	light := strings.LastIndex(css, `[data-theme="light"]`)
+	dark := strings.LastIndex(css, `[data-theme="dark"]`)
+	if system < 0 || light < system || dark < system {
+		t.Fatal("explicit Light and Dark rules must follow the system-theme rules so the user's choice wins")
 	}
 }
