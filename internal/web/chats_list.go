@@ -181,9 +181,13 @@ func chatSnapshot(rows []chatRowView) string {
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
-func chatFilterSnapshot(filters chatFilters, total int) string {
-	h := sha256.Sum256([]byte(filters.values().Encode() + "\n" + strconv.Itoa(total)))
-	return fmt.Sprintf("%x", h[:])
+func chatFilterSnapshot(filters chatFilters, jids []string) string {
+	h := sha256.New()
+	_, _ = h.Write([]byte(filters.values().Encode() + "\n"))
+	for _, jid := range jids {
+		_, _ = h.Write([]byte(jid + "\n"))
+	}
+	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
 func (s *Server) filteredFormJIDs(r *http.Request) ([]string, error) {
@@ -192,13 +196,13 @@ func (s *Server) filteredFormJIDs(r *http.Request) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("the archive could not be read")
 	}
-	snapshot := chatFilterSnapshot(filters, len(rows))
-	if r.PostForm.Get("snapshot") == "" || r.PostForm.Get("snapshot") != snapshot {
-		return nil, &staleFilterError{rows: rows, filters: filters, snapshot: snapshot}
-	}
 	jids := make([]string, len(rows))
 	for i := range rows {
 		jids[i] = rows[i].CanonicalJID
+	}
+	snapshot := chatFilterSnapshot(filters, jids)
+	if r.PostForm.Get("snapshot") == "" || r.PostForm.Get("snapshot") != snapshot {
+		return nil, &staleFilterError{rows: rows, filters: filters, snapshot: snapshot}
 	}
 	return jids, nil
 }

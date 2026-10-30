@@ -63,6 +63,29 @@ func (s *Store) ChatListPage(ctx context.Context, f ChatListFilter, after ChatLi
 	return rows, total, more, nil
 }
 
+// ChatListJIDs returns the complete matching membership in the same stable order as ChatListPage. It selects only the
+// identifier column and is used to bind an all-filtered confirmation to the exact server-side set.
+func (s *Store) ChatListJIDs(ctx context.Context, f ChatListFilter) ([]string, error) {
+	where, args := chatListWhere(f)
+	rows, err := s.read.QueryContext(ctx, `SELECT canonical FROM (`+chatListPageBase+where+`) ORDER BY last_ts DESC,messages=0,canonical`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query chat list membership: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var jid string
+		if err = rows.Scan(&jid); err != nil {
+			return nil, fmt.Errorf("scan chat list membership: %w", err)
+		}
+		out = append(out, jid)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("read chat list membership: %w", err)
+	}
+	return out, nil
+}
+
 const chatListPageBase = `WITH
 r AS (SELECT a.canonical AS c,MIN(x.logging) AS logging,MAX(x.media<>'') AS media FROM chat_rules x JOIN chat_canonical a ON a.alias=x.jid GROUP BY a.canonical),
 f AS (SELECT a.canonical AS c,MAX(x.acknowledged) AS acked FROM chat_seen x JOIN chat_canonical a ON a.alias=x.jid GROUP BY a.canonical),

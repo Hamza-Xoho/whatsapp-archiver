@@ -20,6 +20,7 @@ type RuleSet struct {
 type ruleState struct {
 	excluded map[string]struct{}
 	media    map[string]*config.MediaRules
+	explicit map[string]struct{}
 }
 
 func NewRuleSet(rules []store.ChatRule) *RuleSet {
@@ -32,8 +33,11 @@ func NewRuleSet(rules []store.ChatRule) *RuleSet {
 func (r *RuleSet) Replace(rules []store.ChatRule) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	st := &ruleState{excluded: map[string]struct{}{}, media: map[string]*config.MediaRules{}}
+	st := &ruleState{excluded: map[string]struct{}{}, media: map[string]*config.MediaRules{}, explicit: map[string]struct{}{}}
 	for _, rule := range rules {
+		if rule.InheritedFrom == "" {
+			st.explicit[rule.JID] = struct{}{}
+		}
 		if !rule.Logging {
 			st.excluded[rule.JID] = struct{}{}
 		}
@@ -57,19 +61,29 @@ func (r *RuleSet) Discover(child, parent string) {
 	if old == nil {
 		return
 	}
-	next := &ruleState{excluded: make(map[string]struct{}, len(old.excluded)+1), media: make(map[string]*config.MediaRules, len(old.media)+1)}
+	if _, explicit := old.explicit[child]; explicit {
+		return
+	}
+	next := &ruleState{excluded: make(map[string]struct{}, len(old.excluded)+1), media: make(map[string]*config.MediaRules, len(old.media)+1), explicit: make(map[string]struct{}, len(old.explicit))}
 	for jid := range old.excluded {
 		next.excluded[jid] = struct{}{}
 	}
 	for jid, media := range old.media {
 		next.media[jid] = media
 	}
+	for jid := range old.explicit {
+		next.explicit[jid] = struct{}{}
+	}
 	if _, excluded := old.excluded[parent]; excluded {
 		next.excluded[child] = struct{}{}
+	} else {
+		delete(next.excluded, child)
 	}
 	if media := old.media[parent]; media != nil {
 		copy := *media
 		next.media[child] = &copy
+	} else {
+		delete(next.media, child)
 	}
 	r.cur.Store(next)
 }

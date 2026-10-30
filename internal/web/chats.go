@@ -65,6 +65,14 @@ func (s *Server) chats(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	membership := []string{}
+	if s.d.Store != nil {
+		membership, err = s.d.Store.ChatListJIDs(r.Context(), filters.storeFilter())
+		if err != nil {
+			http.Error(w, "the archive could not be read", http.StatusInternalServerError)
+			return
+		}
+	}
 	rows, err := s.chatRowViews(r.Context(), list, nil, false)
 	if err != nil {
 		http.Error(w, "the archive could not be read", http.StatusInternalServerError)
@@ -79,7 +87,7 @@ func (s *Server) chats(w http.ResponseWriter, r *http.Request) {
 	}
 	next, prev := pageLinks(filters, rawCursor, cursor, rows, more)
 	s.render(w, s.pages["chats"], "layout", chatsData{page: page{Title: "Chats", Current: "Chats"}, Filters: filters,
-		Rows: rows, MediaTypes: mediaTypes, Total: total, Snapshot: chatFilterSnapshot(filters, total), Next: next, Prev: prev,
+		Rows: rows, MediaTypes: mediaTypes, Total: total, Snapshot: chatFilterSnapshot(filters, membership), Next: next, Prev: prev,
 		HasFilters: filters.active()})
 }
 
