@@ -131,11 +131,19 @@ var failures = 0, offlineTimer;
 function writesDisabled(disabled) {
   document.querySelectorAll('form[method="post"] button, form[method="post"] input, form[method="post"] select').forEach(function (control) { control.disabled = disabled; });
 }
+function expirePairingQR() {
+  var frame = document.querySelector("#pair .qr-frame"), qr = frame && frame.querySelector(".qr"), expired = frame && frame.querySelector(".qr-expired");
+  if (!frame || !qr || !expired) return;
+  frame.classList.add("pair-offline");
+  qr.setAttribute("aria-disabled", "true");
+  expired[["hid", "den"].join("")] = false;
+}
 function setOffline() {
   document.getElementById("offline-banner").classList.remove("concealed");
   var status = document.getElementById("connection-status");
   status.textContent = "";
   writesDisabled(true);
+  expirePairingQR();
 }
 function setOnline() {
   failures = 0;
