@@ -198,7 +198,7 @@ func expandCommunityTargets(jids []string, controls map[string]store.ChatControl
 			continue
 		}
 		for child, control := range controls {
-			if control.Parent == jid && (control.Rule == nil || sameRule(control.Rule, community.Rule)) && !slices.Contains(out, child) {
+			if control.Parent == jid && (control.Rule == nil || control.Rule.InheritedFrom == jid) && !slices.Contains(out, child) {
 				out = append(out, child)
 			}
 		}
@@ -207,25 +207,7 @@ func expandCommunityTargets(jids []string, controls map[string]store.ChatControl
 }
 
 func (s *Server) effectiveRules(ctx context.Context) ([]store.ChatRule, error) {
-	rules, err := s.d.Store.ChatRules(ctx)
-	if err != nil {
-		return nil, err
-	}
-	controls, err := s.d.Store.ChatControls(ctx)
-	if err != nil {
-		return nil, err
-	}
-	for jid, control := range controls {
-		if control.Parent == "" || control.Rule != nil {
-			continue
-		}
-		if parent := controls[control.Parent].Rule; parent != nil {
-			copy := *parent
-			copy.JID = jid
-			rules = append(rules, copy)
-		}
-	}
-	return rules, nil
+	return s.d.Store.ChatRules(ctx)
 }
 
 func (s *Server) refreshEffectiveRules(ctx context.Context) error {
@@ -249,6 +231,7 @@ type rulePreviewData struct {
 	Logging, Media, VideoMax  string
 	Downloads                 []string
 	Changed                   bool
+	AffectedChildren          int
 }
 
 func (s *Server) chatRulePreview(w http.ResponseWriter, r *http.Request) {
@@ -275,6 +258,13 @@ func (s *Server) chatRulePreview(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	controls, err := s.d.Store.ChatControls(r.Context())
+	if err != nil {
+		http.Error(w, "the archive could not be read", http.StatusInternalServerError)
+		return
+	}
+	originalCount := len(change.jids)
+	change.jids = expandCommunityTargets(change.jids, controls)
 	rows, err := s.chatRows(r.Context(), chatFilters{}, jidSet(change.jids), false)
 	if err != nil {
 		http.Error(w, "the archive could not be read", http.StatusInternalServerError)
@@ -285,7 +275,7 @@ func (s *Server) chatRulePreview(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "the estimate could not be prepared", http.StatusInternalServerError)
 		return
 	}
-	data := rulePreviewData{Rows: rows, Count: len(change.jids), Scope: r.PostForm.Get("scope"),
+	data := rulePreviewData{Rows: rows, Count: len(change.jids), AffectedChildren: len(change.jids) - originalCount, Scope: r.PostForm.Get("scope"),
 		Snapshot: r.PostForm.Get("snapshot"), Filters: parsePostedChatFilters(r.PostForm), Logging: r.PostForm.Get("logging"),
 		Media: r.PostForm.Get("media"), VideoMax: r.PostForm.Get("video_max_mb"), Downloads: r.PostForm["download"]}
 	addEstimate(&data, estimate)

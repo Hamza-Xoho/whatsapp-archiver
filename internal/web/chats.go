@@ -25,8 +25,13 @@ type chatRowView struct {
 	RowID, LastMessage, HistoryBackTo   string
 	Type, Parent, ParentName, RuleLabel string
 	ChildCount                          int
+	Children                            []chatChildView
+	MediaTypes                          []string
+	StopConfirm                         string
 	OOB                                 bool // the row replaces its copy on the page (an htmx out-of-band swap)
 }
+
+type chatChildView struct{ JID, Name string }
 
 type chatsData struct {
 	page
@@ -85,10 +90,10 @@ func (s *Server) chatRows(ctx context.Context, filters chatFilters, only map[str
 	for _, c := range list {
 		names[c.CanonicalJID] = c.DisplayName
 	}
-	children := map[string]int{}
-	for _, c := range controls {
+	children := map[string][]chatChildView{}
+	for child, c := range controls {
 		if c.Parent != "" {
-			children[c.Parent]++
+			children[c.Parent] = append(children[c.Parent], chatChildView{JID: child, Name: names[child]})
 		}
 	}
 	out := make([]chatRowView, 0, len(list))
@@ -101,10 +106,10 @@ func (s *Server) chatRows(ctx context.Context, filters chatFilters, only map[str
 		label := "Default"
 		if control.Parent != "" {
 			parent := controls[control.Parent]
-			if control.Rule == nil && parent.Rule != nil {
+			if (control.Rule == nil || control.Rule.InheritedFrom != "") && parent.Rule != nil {
 				c.Logging, c.HasMediaRule = parent.Rule.Logging, parent.Rule.Media != nil
 			}
-			if parent.Rule != nil && (control.Rule == nil || sameRule(control.Rule, parent.Rule)) {
+			if parent.Rule != nil && (control.Rule == nil || control.Rule.InheritedFrom != "") {
 				label = "Inherited from " + names[control.Parent]
 			} else if control.Rule != nil {
 				label = "Own rule"
@@ -115,8 +120,14 @@ func (s *Server) chatRows(ctx context.Context, filters chatFilters, only map[str
 		if !filters.match(c, typ) {
 			continue
 		}
+		kids := children[c.CanonicalJID]
+		confirm := "Stop logging this chat? Messages that arrive while logging is off are not saved."
+		if len(kids) > 0 {
+			confirm = fmt.Sprintf("Stop logging %s? This also affects %d child chats.", c.DisplayName, len(kids))
+		}
 		row := chatRowView{ChatRow: c, RowID: rowID(c.CanonicalJID), LastMessage: view.FormatUnix(loc, c.Newest), OOB: oob,
-			Type: typ, Parent: control.Parent, ParentName: names[control.Parent], RuleLabel: label, ChildCount: children[c.CanonicalJID]}
+			Type: typ, Parent: control.Parent, ParentName: names[control.Parent], RuleLabel: label, ChildCount: len(kids), Children: kids,
+			MediaTypes: mediaTypes, StopConfirm: confirm}
 		if c.OldestHistory > 0 {
 			row.HistoryBackTo = time.Unix(c.OldestHistory, 0).In(loc).Format("2 Jan 2006")
 		}
@@ -243,7 +254,7 @@ func (s *Server) chatRules(w http.ResponseWriter, r *http.Request) {
 func (s *Server) applyRules(ctx context.Context, change ruleChange) string {
 	s.rulesMu.Lock()
 	defer s.rulesMu.Unlock()
-	existing, err := s.d.Store.ChatRules(ctx)
+	existing, err := s.d.Store.ExplicitChatRules(ctx)
 	if err != nil {
 		return "the archive could not be read"
 	}
@@ -255,6 +266,7 @@ func (s *Server) applyRules(ctx context.Context, change ruleChange) string {
 	if err != nil {
 		return "the archive could not be read"
 	}
+	selected := jidSet(change.jids)
 	change.jids = expandCommunityTargets(change.jids, controls)
 	now := s.d.Now().Unix()
 	var write []store.ChatRule
@@ -284,6 +296,11 @@ func (s *Server) applyRules(ctx context.Context, change ruleChange) string {
 			}
 			if change.media != nil {
 				rule.Media = *change.media
+			}
+			if selected[jid] {
+				rule.InheritedFrom = ""
+			} else {
+				rule.InheritedFrom = controls[jid].Parent
 			}
 			rule.UpdatedAt = now
 			write = append(write, rule)

@@ -264,6 +264,9 @@ func (p *Pipeline) ingest(ctx context.Context, r Result, publish bool) error {
 			return err
 		}
 	}
+	if r.Chat.ParentJID != "" {
+		p.filter.DiscoverCommunityChild(r.Chat.JID, r.Chat.ParentJID)
+	}
 	if keep, excluded, err := p.decide(ctx, r.Chat.JID, r.Kind); err != nil || !keep {
 		if err == nil && excluded && publish { // status posts and never-stored kinds are refused silently
 			p.publish(r, false)

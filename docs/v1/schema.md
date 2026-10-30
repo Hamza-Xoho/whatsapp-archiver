@@ -287,7 +287,7 @@ CREATE INDEX history_spool_todo ON history_spool(id) WHERE imported_at IS NULL;
 -- Kept unchanged from 0002_settings.sql.
 CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL);
 CREATE TABLE chat_rules (jid TEXT PRIMARY KEY, logging INTEGER NOT NULL DEFAULT 1,
-  media TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL);
+  media TEXT NOT NULL DEFAULT '', inherited_from TEXT NOT NULL DEFAULT '', updated_at INTEGER NOT NULL);
 CREATE TABLE chat_seen (jid TEXT PRIMARY KEY, first_seen INTEGER NOT NULL,
   acknowledged INTEGER NOT NULL DEFAULT 0);
 ```

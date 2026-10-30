@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"strings"
 )
@@ -74,7 +73,7 @@ func (s *Store) ChatControls(ctx context.Context) (map[string]ChatControl, error
 	}
 	_ = rows.Close()
 
-	rules, err := s.ChatRules(ctx)
+	rules, err := s.ExplicitChatRules(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -122,14 +121,10 @@ func (s *Store) EstimateChats(ctx context.Context, canonical []string) (ChatEsti
 		marks[i], args[i] = "?", jid
 	}
 	in := strings.Join(marks, ",")
-	q := `SELECT COALESCE(SUM(messages),0),COALESCE(SUM(messages)*300,0),COALESCE(MIN(oldest_ts),0),COALESCE(MAX(last_ts),0)
+	q := `SELECT COALESCE(SUM(messages),0),COALESCE(SUM(messages)*300,0),COALESCE(SUM(media_bytes),0),COALESCE(MIN(oldest_ts),0),COALESCE(MAX(last_ts),0)
 FROM chat_stats WHERE canonical IN (` + in + `)`
-	if err := s.read.QueryRowContext(ctx, q, args...).Scan(&out.Messages, &out.TextBytes, &out.Oldest, &out.Newest); err != nil {
+	if err := s.read.QueryRowContext(ctx, q, args...).Scan(&out.Messages, &out.TextBytes, &out.MediaBytes, &out.Oldest, &out.Newest); err != nil {
 		return out, fmt.Errorf("estimate chat text: %w", err)
-	}
-	q = `SELECT COALESCE(SUM(m.declared_size),0) FROM media m JOIN chat_canonical a ON a.alias=m.chat_jid WHERE a.canonical IN (` + in + `)`
-	if err := s.read.QueryRowContext(ctx, q, args...).Scan(&out.MediaBytes); err != nil && err != sql.ErrNoRows {
-		return out, fmt.Errorf("estimate chat media: %w", err)
 	}
 	return out, nil
 }
