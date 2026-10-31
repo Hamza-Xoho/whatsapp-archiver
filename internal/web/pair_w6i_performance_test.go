@@ -52,4 +52,3 @@ func mustPairWire(t *testing.T, s *Server) []byte {
 	}
 	return wire
 }
-

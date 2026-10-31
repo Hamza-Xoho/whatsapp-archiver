@@ -63,10 +63,10 @@ type pairStopWriter struct {
 	status int
 }
 
-func newPairStopWriter() *pairStopWriter { return &pairStopWriter{header: make(http.Header)} }
-func (w *pairStopWriter) Header() http.Header { return w.header }
+func newPairStopWriter() *pairStopWriter         { return &pairStopWriter{header: make(http.Header)} }
+func (w *pairStopWriter) Header() http.Header    { return w.header }
 func (w *pairStopWriter) WriteHeader(status int) { w.status = status }
-func (w *pairStopWriter) Flush() {}
+func (w *pairStopWriter) Flush()                 {}
 func (w *pairStopWriter) Write(p []byte) (int, error) {
 	if w.status == 0 {
 		w.status = http.StatusOK
@@ -77,4 +77,3 @@ func (w *pairStopWriter) Write(p []byte) (int, error) {
 	}
 	return len(p), nil
 }
-
