@@ -72,8 +72,9 @@ func (s *Server) viewerEvents(w http.ResponseWriter, r *http.Request) {
 			}
 			for _, message := range messages {
 				last = message.Seq
+				lastID := strconv.FormatInt(last, 10)
 				if countOnly {
-					if writeErr := writeEvent(w, strconv.FormatInt(last, 10), "viewer-new", `<span class="new-message-marker" hidden></span>`); writeErr != nil {
+					if writeErr := writeEvent(w, lastID, "viewer-new", `<span class="new-message-marker" hidden></span>`); writeErr != nil {
 						return writeErr
 					}
 					continue
@@ -86,15 +87,16 @@ func (s *Server) viewerEvents(w http.ResponseWriter, r *http.Request) {
 				if renderErr := s.pages["viewer"].ExecuteTemplate(&buf, "bubble", v); renderErr != nil {
 					return renderErr
 				}
-				if buf.Len() >= maxViewerSSEPayload-1024 {
+				wire := encodeEvent(lastID, "viewer", buf.String())
+				if len(wire) >= maxViewerSSEPayload {
 					path := "/chats/" + url.PathEscape(jid) + "/m/" + url.PathEscape(message.ID)
 					marker := fmt.Sprintf(`<li class="live-refetch"><a href="%s">New archived message. Open the full message</a></li>`, path)
-					if writeErr := writeEvent(w, strconv.FormatInt(last, 10), "viewer-refetch", marker); writeErr != nil {
+					if writeErr := writeEvent(w, lastID, "viewer-refetch", marker); writeErr != nil {
 						return writeErr
 					}
 					continue
 				}
-				if writeErr := writeEvent(w, strconv.FormatInt(last, 10), "viewer", buf.String()); writeErr != nil {
+				if _, writeErr := w.Write(wire); writeErr != nil {
 					return writeErr
 				}
 			}
