@@ -76,9 +76,9 @@ func (s *Store) newExportSnapshot(ctx context.Context, canonical string) (*Expor
 
 func exportSnapshotBoundsQuery(_ string) string {
 	return `SELECT
-	 COALESCE((SELECT MAX(seq) FROM messages),0),
-	 COALESCE((SELECT MAX(seq) FROM message_events),0),
-	 COALESCE((SELECT MAX(rowid) FROM chat_events),0)
+		 COALESCE((SELECT seq FROM messages ORDER BY seq DESC LIMIT 1),0),
+		 COALESCE((SELECT seq FROM message_events ORDER BY seq DESC LIMIT 1),0),
+		 COALESCE((SELECT rowid FROM chat_events ORDER BY rowid DESC LIMIT 1),0)
 	 WHERE ?1 IS NOT NULL`
 }
 
