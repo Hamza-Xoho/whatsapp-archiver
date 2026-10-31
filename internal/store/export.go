@@ -32,6 +32,8 @@ type ExportRecord struct {
 	Events     []MessageEvent `json:"events,omitempty"`
 	Media      *Media         `json:"media,omitempty"`
 	SenderName string         `json:"sender_name,omitempty"`
+	// MediaNameCount lets renderers choose a collision-safe name without another query.
+	MediaNameCount int `json:"-"`
 }
 
 // ExportAliases returns every stored form of canonicalJID in stable order.
@@ -222,59 +224,5 @@ ORDER BY ts,id LIMIT ?` + fmt.Sprint(limitParam)
 	return out, nil
 }
 
-// ExportMediaPage reads a bounded media-only page for ZIP passes without
-// rescanning and enriching every message in the chat.
-func (s *Store) ExportMediaPage(ctx context.Context, p ExportParams) ([]ExportRecord, error) {
-	snapshot, err := s.exportSnapshot(ctx, p.CanonicalJID, p.Snapshot)
-	if err != nil {
-		return nil, err
-	}
-	limit := p.Limit
-	if limit <= 0 || limit > 500 {
-		limit = 200
-	}
-	hasCursor := p.HasCursor || p.AfterTS != 0 || p.AfterID != ""
-	forms, args := exportFormMarks(snapshot.forms)
-	args = append(args, snapshot.maxMessageSeq, p.From, p.To, hasCursor, p.AfterTS, p.AfterID, limit)
-	maxParam, fromParam, toParam := len(snapshot.forms)+1, len(snapshot.forms)+2, len(snapshot.forms)+3
-	cursorParam, tsParam, idParam, limitParam := len(snapshot.forms)+4, len(snapshot.forms)+5, len(snapshot.forms)+6, len(snapshot.forms)+7
-	mediaSelect := "x." + strings.ReplaceAll(mediaColumns, ",", ",x.")
-	query := `WITH message_ranked AS (
-	 SELECT id,ts,ROW_NUMBER() OVER (PARTITION BY id ORDER BY received_at,chat_jid) rk
-	 FROM messages WHERE chat_jid IN (` + forms + `) AND seq<=?` + fmt.Sprint(maxParam) + `
-	 AND (?` + fmt.Sprint(fromParam) + `=0 OR ts>=?` + fmt.Sprint(fromParam) + `)
-	 AND (?` + fmt.Sprint(toParam) + `=0 OR ts<=?` + fmt.Sprint(toParam) + `)),
-	 selected AS (SELECT id,ts FROM message_ranked WHERE rk=1
-	 AND (?` + fmt.Sprint(cursorParam) + `=0 OR ts>?` + fmt.Sprint(tsParam) + ` OR (ts=?` + fmt.Sprint(tsParam) + ` AND id>?` + fmt.Sprint(idParam) + `))
-	 ORDER BY ts,id LIMIT ?` + fmt.Sprint(limitParam) + `),
-	 media_ranked AS (SELECT ` + mediaColumns + `,ROW_NUMBER() OVER (PARTITION BY message_id ORDER BY chat_jid) rk
-	 FROM media WHERE chat_jid IN (` + forms + `))
-	 SELECT ` + mediaSelect + `,s.ts FROM selected s JOIN media_ranked x ON x.message_id=s.id AND x.rk=1
-	 ORDER BY s.ts,s.id`
-	var out []ExportRecord
-	err = s.scanRows(ctx, query, args, func(rows *sql.Rows) error {
-		var media Media
-		var messageTS int64
-		if err := rows.Scan(append(media.fields(), &messageTS)...); err != nil {
-			return err
-		}
-		out = append(out, ExportRecord{Message: Message{ChatJID: p.CanonicalJID, ID: media.MessageID, Timestamp: messageTS}, Media: &media})
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("export media page: %w", err)
-	}
-	return out, nil
-}
-
-// ExportMediaNameFacts supplies deterministic naming facts without retaining archive-sized state in the exporter.
-func (s *Store) ExportMediaNameFacts(ctx context.Context, canonical, filename, candidate, messageID string, ts int64) (int, bool, error) {
-	var ordinal int
-	err := s.read.QueryRowContext(ctx, `SELECT COUNT(*) FROM media x JOIN chat_canonical c ON c.alias=x.chat_jid WHERE c.canonical=?1 AND x.filename=?2 AND (x.message_ts<?3 OR (x.message_ts=?3 AND x.message_id<=?4))`, canonical, filename, ts, messageID).Scan(&ordinal)
-	if err != nil {
-		return 0, false, err
-	}
-	var collision bool
-	err = s.read.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM media x JOIN chat_canonical c ON c.alias=x.chat_jid WHERE c.canonical=?1 AND x.filename=?2 AND x.message_id<>?3)`, canonical, candidate, messageID).Scan(&collision)
-	return ordinal, collision, err
-}
+// ExportMediaPage lives in export_media.go; its bounded messages_chat_ts keyset and batched collision count avoid
+// both archive-wide reranking and per-media naming queries.

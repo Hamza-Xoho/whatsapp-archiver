@@ -8,8 +8,9 @@ import (
 
 // ExportTextRecord contains only the facts required by the WhatsApp-compatible text transcript.
 type ExportTextRecord struct {
-	Message Message
-	Media   *Media
+	Message        Message
+	Media          *Media
+	MediaNameCount int
 }
 
 // ExportTextRows owns one cancellable, ordered transcript query. The open SQLite cursor keeps memory constant and
@@ -27,7 +28,7 @@ func (r *ExportTextRows) Scan() (ExportTextRecord, error) {
 	var mediaTS sql.NullInt64
 	m := &out.Message
 	if err := r.rows.Scan(&m.ChatJID, &m.ID, &m.SenderJID, &m.Kind, &m.Text, &m.Caption, &m.Details,
-		&m.Timestamp, &filename, &mediaTS); err != nil {
+		&m.Timestamp, &filename, &mediaTS, &out.MediaNameCount); err != nil {
 		return out, err
 	}
 	if filename.Valid {
@@ -59,9 +60,11 @@ func (s *Store) OpenExportText(ctx context.Context, canonical string, snapshot *
 	}
 	query := `WITH selected AS (` + messageSQL + `), media_ranked AS (
 	 SELECT message_id,filename,message_ts,ROW_NUMBER() OVER (PARTITION BY message_id ORDER BY chat_jid) rk
-	 FROM media WHERE chat_jid IN (` + forms + `))
-	 SELECT m.chat_jid,m.id,m.sender_jid,m.kind,m.text,m.caption,m.details,m.ts,x.filename,x.message_ts
-	 FROM selected m LEFT JOIN media_ranked x ON x.message_id=m.id AND x.rk=1 ORDER BY m.ts,m.id`
+	 FROM media WHERE chat_jid IN (` + forms + `)), name_counts AS (
+	 SELECT filename,COUNT(*) AS total FROM media WHERE chat_jid IN (` + forms + `) GROUP BY filename)
+	 SELECT m.chat_jid,m.id,m.sender_jid,m.kind,m.text,m.caption,m.details,m.ts,x.filename,x.message_ts,
+	 COALESCE(c.total,0) FROM selected m LEFT JOIN media_ranked x ON x.message_id=m.id AND x.rk=1
+	 LEFT JOIN name_counts c ON c.filename=x.filename ORDER BY m.ts,m.id`
 	rows, err := s.read.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("open text export: %w", err)

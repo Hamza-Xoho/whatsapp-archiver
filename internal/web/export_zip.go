@@ -10,7 +10,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"whatsapp-archiver/internal/store"
@@ -23,36 +22,20 @@ func archiveMediaName(chat, id, filename string) string {
 	sum := sha256.Sum256([]byte(chat + "\x00" + id))
 	return stem + "_" + hex.EncodeToString(sum[:]) + ext
 }
-func ordinalName(base string, n int) string {
-	if n <= 1 {
-		return base
-	}
-	ext := filepath.Ext(base)
-	return base[:len(base)-len(ext)] + "_" + strconv.Itoa(n) + ext
-}
 
-// exportArchiveName is deterministic per record and stores no archive-sized state. Familiar basenames are retained
-// when unambiguous; reserved or adversarial collisions use the full canonical-chat/message-id hash.
-func (s *Server) exportArchiveName(ctx context.Context, x exportScope, r store.ExportRecord) (string, error) {
+// exportArchiveName is deterministic per record and stores no archive-sized state. The Store batches the exact
+// collision count into each record; unique safe basenames remain familiar and every other name uses a full hash.
+func exportArchiveName(x exportScope, r store.ExportRecord) string {
 	m := r.Media
 	if m == nil {
-		return "", nil
+		return ""
 	}
 	base := safeMediaName(m.Filename, r.Message.ID)
-	ordinal, _, err := s.d.Store.ExportMediaNameFacts(ctx, x.jid, m.Filename, base, r.Message.ID, m.MessageTimestamp)
-	if err != nil {
-		return "", err
-	}
-	candidate := ordinalName(base, ordinal)
-	_, collision, err := s.d.Store.ExportMediaNameFacts(ctx, x.jid, m.Filename, candidate, r.Message.ID, m.MessageTimestamp)
-	if err != nil {
-		return "", err
-	}
 	originalBase := filepath.Base(strings.ReplaceAll(m.Filename, "\\", "/"))
-	if collision || base != originalBase || candidate == "_chat.txt" || candidate == "missing-media.txt" {
-		candidate = archiveMediaName(x.jid, r.Message.ID, base)
+	if r.MediaNameCount != 1 || base != originalBase || base == "_chat.txt" || base == "missing-media.txt" {
+		return archiveMediaName(x.jid, r.Message.ID, base)
 	}
-	return candidate, nil
+	return base
 }
 
 type contextReader struct {
@@ -85,21 +68,18 @@ func (s *Server) streamZIP(ctx context.Context, w io.Writer, x exportScope) erro
 		if m == nil {
 			return nil
 		}
-		name, e := s.exportArchiveName(ctx, x, r)
-		if e != nil {
-			return e
-		}
+		name := exportArchiveName(x, r)
 		path, ok := s.insideMediaDir(m.Path)
 		state := m.State
 		if !ok || state != "done" {
 			if state == "done" {
 				state = "missing"
 			}
-			_, e = fmt.Fprintf(manifest, "%s\t%s\t%s\n", r.Message.ID, name, state)
+			_, e := fmt.Fprintf(manifest, "%s\t%s\t%s\n", r.Message.ID, name, state)
 			return e
 		}
 		if st, e2 := os.Stat(path); e2 != nil || !st.Mode().IsRegular() {
-			_, e = fmt.Fprintf(manifest, "%s\t%s\tmissing\n", r.Message.ID, name)
+			_, e := fmt.Fprintf(manifest, "%s\t%s\tmissing\n", r.Message.ID, name)
 			return e
 		}
 		return nil
@@ -131,11 +111,7 @@ func (s *Server) streamZIP(ctx context.Context, w io.Writer, x exportScope) erro
 		if e != nil {
 			return nil
 		}
-		name, e := s.exportArchiveName(ctx, x, r)
-		if e != nil {
-			_ = f.Close()
-			return e
-		}
+		name := exportArchiveName(x, r)
 		zw, e := z.CreateHeader(&zip.FileHeader{Name: name, Method: zip.Store})
 		if e == nil {
 			e = copyContext(ctx, zw, f)

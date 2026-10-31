@@ -423,10 +423,7 @@ func (s *Server) streamText(ctx context.Context, w io.Writer, x exportScope) err
 			if body != "" {
 				body += " "
 			}
-			name, err := s.exportArchiveName(ctx, x, store.ExportRecord{Message: m, Media: r.Media})
-			if err != nil {
-				return err
-			}
+			name := exportArchiveName(x, store.ExportRecord{Message: m, Media: r.Media, MediaNameCount: r.MediaNameCount})
 			body += "[attachment: " + name + "]"
 		}
 		if err := writeWALine(w, time.Unix(m.Timestamp, 0).In(x.loc), sender, body); err != nil {
