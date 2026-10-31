@@ -42,13 +42,10 @@ func (s *Store) newExportSnapshot(ctx context.Context, canonical string) (*Expor
 			_ = tx.Rollback()
 		}
 	}()
-	var known bool
+	var distinctMessages, messageRows int64
 	queries := 1
-	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM chat_stats WHERE canonical=?1)`, canonical).Scan(&known); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT messages,message_rows FROM chat_stats WHERE canonical=?1`, canonical).Scan(&distinctMessages, &messageRows); err != nil {
 		return nil, queries, err
-	}
-	if !known {
-		return nil, queries, sql.ErrNoRows
 	}
 	queries++
 	rows, err := tx.QueryContext(ctx, `SELECT alias FROM chat_canonical WHERE canonical=? ORDER BY alias=? DESC,alias`, canonical, canonical)
@@ -67,10 +64,9 @@ func (s *Store) newExportSnapshot(ctx context.Context, canonical string) (*Expor
 	if err = rows.Close(); err != nil {
 		return nil, queries, err
 	}
-	marks, args := exportFormMarks(forms)
-	snapshot := ExportSnapshot{tx: tx, canonical: canonical, forms: forms}
+	snapshot := ExportSnapshot{tx: tx, canonical: canonical, forms: forms, hasDuplicates: messageRows > distinctMessages}
 	queries++
-	if err = tx.QueryRowContext(ctx, exportSnapshotBoundsQuery(marks), args...).Scan(&snapshot.maxMessageSeq, &snapshot.hasDuplicates,
+	if err = tx.QueryRowContext(ctx, exportSnapshotBoundsQuery("?1"), canonical).Scan(&snapshot.maxMessageSeq,
 		&snapshot.maxEventSeq, &snapshot.maxChatEvent); err != nil {
 		return nil, queries, fmt.Errorf("snapshot export %s: %w", canonical, err)
 	}
@@ -78,12 +74,12 @@ func (s *Store) newExportSnapshot(ctx context.Context, canonical string) (*Expor
 	return &snapshot, queries, nil
 }
 
-func exportSnapshotBoundsQuery(marks string) string {
+func exportSnapshotBoundsQuery(_ string) string {
 	return `SELECT
-	 COALESCE((SELECT MAX(seq) FROM messages WHERE chat_jid IN (` + marks + `)),0),
-	 (SELECT COUNT(*)<>COUNT(DISTINCT id) FROM messages WHERE chat_jid IN (` + marks + `)),
-	 COALESCE((SELECT MAX(seq) FROM message_events WHERE chat_jid IN (` + marks + `)),0),
-	 COALESCE((SELECT MAX(rowid) FROM chat_events WHERE chat_jid IN (` + marks + `)),0)`
+	 COALESCE((SELECT MAX(seq) FROM messages),0),
+	 COALESCE((SELECT MAX(seq) FROM message_events),0),
+	 COALESCE((SELECT MAX(rowid) FROM chat_events),0)
+	 WHERE ?1 IS NOT NULL`
 }
 
 // Close releases the SQLite read snapshot held for the whole artifact.

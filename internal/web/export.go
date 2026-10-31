@@ -10,7 +10,6 @@ import (
 	"io"
 	"mime"
 	"net/http"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -82,17 +81,6 @@ func (s *Server) exportDownload(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	spool, err := os.CreateTemp("", "whatsapp-archiver-export-*")
-	if err != nil {
-		_ = scope.snapshot.Close()
-		http.Error(w, errExportFailed.Error(), http.StatusInternalServerError)
-		return
-	}
-	spoolName := spool.Name()
-	defer func() {
-		_ = spool.Close()
-		_ = os.Remove(spoolName)
-	}()
 	ext := map[string]string{"json": "json", "html": "html", "txt": "_chat.txt", "zip": "zip"}[scope.format]
 	filename := safeExportName(scope.name) + "." + ext
 	h := w.Header()
@@ -110,35 +98,13 @@ func (s *Server) exportDownload(w http.ResponseWriter, r *http.Request) {
 		h.Set("Content-Type", "application/zip")
 	}
 	w.WriteHeader(http.StatusOK)
-	err = s.writeExport(r.Context(), spool, scope)
-	closeErr := scope.snapshot.Close()
-	scope.snapshot = nil
-	if err == nil {
-		err = closeErr
-	}
-	if err == nil {
-		_, err = spool.Seek(0, io.SeekStart)
-	}
-	if err == nil {
-		err = copyContext(r.Context(), w, spool)
+	if scope.format == "zip" {
+		err = s.streamZIP(r.Context(), w, scope)
+	} else {
+		err = s.streamSpooledExport(r.Context(), w, scope)
 	}
 	if err != nil {
 		s.d.Logger.Error("chat export ended", "format", scope.format, "err", err)
-	}
-}
-
-func (s *Server) writeExport(ctx context.Context, w io.Writer, scope exportScope) error {
-	switch scope.format {
-	case "json":
-		return s.streamJSON(ctx, w, scope)
-	case "html":
-		return s.streamHTML(ctx, w, scope)
-	case "txt":
-		return s.streamText(ctx, w, scope)
-	case "zip":
-		return s.streamZIP(ctx, w, scope)
-	default:
-		return errExportFailed
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -50,7 +51,7 @@ func (r contextReader) Read(p []byte) (int, error) {
 	return r.r.Read(p)
 }
 func copyContext(ctx context.Context, w io.Writer, r io.Reader) error {
-	_, err := io.CopyBuffer(w, contextReader{ctx, r}, make([]byte, 32<<10))
+	_, err := io.CopyBuffer(w, contextReader{ctx, r}, make([]byte, 1<<20))
 	if err == nil {
 		err = ctx.Err()
 	}
@@ -58,13 +59,87 @@ func copyContext(ctx context.Context, w io.Writer, r io.Reader) error {
 }
 
 func (s *Server) streamZIP(ctx context.Context, w io.Writer, x exportScope) error {
+	plan, err := s.prepareZIP(ctx, x)
+	closeErr := x.snapshot.Close()
+	if err != nil {
+		return err
+	}
+	defer plan.close()
+	if closeErr != nil {
+		return closeErr
+	}
+	return s.writePreparedZIP(ctx, w, plan)
+}
+
+type preparedZIP struct {
+	transcript *os.File
+	media      *os.File
+}
+
+type preparedZIPMedia struct {
+	ID, Name, State, Path string
+}
+
+func (s *Server) prepareZIP(ctx context.Context, x exportScope) (*preparedZIP, error) {
+	transcript, err := os.CreateTemp("", "whatsapp-archiver-transcript-*")
+	if err != nil {
+		return nil, err
+	}
+	media, err := os.CreateTemp("", "whatsapp-archiver-media-plan-*")
+	if err != nil {
+		_ = transcript.Close()
+		_ = os.Remove(transcript.Name())
+		return nil, err
+	}
+	plan := &preparedZIP{transcript: transcript, media: media}
+	ok := false
+	defer func() {
+		if !ok {
+			plan.close()
+		}
+	}()
+	if err = s.streamText(ctx, transcript, x); err != nil {
+		return nil, err
+	}
+	encoder := json.NewEncoder(media)
+	err = s.eachExportMedia(ctx, x, func(r store.ExportRecord) error {
+		m := r.Media
+		if m == nil {
+			return nil
+		}
+		return encoder.Encode(preparedZIPMedia{ID: r.Message.ID, Name: exportArchiveName(x, r), State: m.State, Path: m.Path})
+	})
+	if err != nil {
+		return nil, err
+	}
+	if _, err = transcript.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	if _, err = media.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	ok = true
+	return plan, nil
+}
+
+func (p *preparedZIP) close() {
+	for _, f := range []*os.File{p.transcript, p.media} {
+		if f != nil {
+			name := f.Name()
+			_ = f.Close()
+			_ = os.Remove(name)
+		}
+	}
+}
+
+func (s *Server) writePreparedZIP(ctx context.Context, w io.Writer, plan *preparedZIP) error {
 	z := zip.NewWriter(w)
 	tw, err := z.CreateHeader(&zip.FileHeader{Name: "_chat.txt", Method: zip.Store})
 	if err != nil {
 		return err
 	}
 	textBuffer := bufio.NewWriterSize(tw, 64<<10)
-	if err = s.streamText(ctx, textBuffer, x); err != nil {
+	if err = copyContext(ctx, textBuffer, plan.transcript); err != nil {
 		return err
 	}
 	if err = textBuffer.Flush(); err != nil {
@@ -76,39 +151,48 @@ func (s *Server) streamZIP(ctx context.Context, w io.Writer, x exportScope) erro
 	}
 	manifestName := manifest.Name()
 	defer func() { _ = os.Remove(manifestName) }()
-	err = s.eachExportMedia(ctx, x, func(r store.ExportRecord) error {
-		m := r.Media
-		if m == nil {
-			return nil
+	decoder := json.NewDecoder(plan.media)
+	for {
+		var item preparedZIPMedia
+		if err = decoder.Decode(&item); err == io.EOF {
+			break
 		}
-		name := exportArchiveName(x, r)
-		path, ok := s.insideMediaDir(m.Path)
-		if m.State != "done" || !ok {
-			state := m.State
+		if err != nil {
+			_ = manifest.Close()
+			return err
+		}
+		path, ok := s.insideMediaDir(item.Path)
+		if item.State != "done" || !ok {
+			state := item.State
 			if state == "done" {
 				state = "missing"
 			}
-			_, e := fmt.Fprintf(manifest, "%s\t%s\t%s\n", r.Message.ID, name, state)
-			return e
+			if _, err = fmt.Fprintf(manifest, "%s\t%s\t%s\n", item.ID, item.Name, state); err != nil {
+				_ = manifest.Close()
+				return err
+			}
+			continue
 		}
-		f, e := os.Open(path)
-		if e != nil {
-			_, e = fmt.Fprintf(manifest, "%s\t%s\tmissing\n", r.Message.ID, name)
-			return e
+		f, openErr := os.Open(path)
+		if openErr != nil {
+			if _, err = fmt.Fprintf(manifest, "%s\t%s\tmissing\n", item.ID, item.Name); err != nil {
+				_ = manifest.Close()
+				return err
+			}
+			continue
 		}
-		zw, e := z.CreateHeader(&zip.FileHeader{Name: name, Method: zip.Store})
-		if e == nil {
-			e = copyContext(ctx, zw, f)
+		zw, writeErr := z.CreateHeader(&zip.FileHeader{Name: item.Name, Method: zip.Store})
+		if writeErr == nil {
+			writeErr = copyContext(ctx, zw, f)
 		}
 		closeErr := f.Close()
-		if e == nil {
-			e = closeErr
+		if writeErr == nil {
+			writeErr = closeErr
 		}
-		return e
-	})
-	if err != nil {
-		_ = manifest.Close()
-		return err
+		if writeErr != nil {
+			_ = manifest.Close()
+			return writeErr
+		}
 	}
 	if _, err = manifest.Seek(0, io.SeekStart); err != nil {
 		_ = manifest.Close()

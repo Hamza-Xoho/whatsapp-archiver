@@ -151,27 +151,46 @@ func Open(path string) (*Store, error) {
 // ensureV1Columns upgrades archives created by an earlier V1 build without changing their schema version. V1 is not
 // yet released, and its migration remains version 1; fresh archives already contain these columns.
 func ensureV1Columns(db *sql.DB) error {
-	rows, err := db.Query(`PRAGMA table_info(chat_rules)`)
-	if err != nil {
-		return fmt.Errorf("inspect chat rules schema: %w", err)
-	}
-	found := false
-	for rows.Next() {
-		var cid, notNull, primaryKey int
-		var name, typ string
-		var defaultValue any
-		if err = rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &primaryKey); err != nil {
-			_ = rows.Close()
-			return fmt.Errorf("inspect chat rules column: %w", err)
+	hasColumn := func(table, column string) (bool, error) {
+		rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
+		if err != nil {
+			return false, err
 		}
-		found = found || name == "inherited_from"
+		found := false
+		for rows.Next() {
+			var cid, notNull, primaryKey int
+			var name, typ string
+			var defaultValue any
+			if err = rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &primaryKey); err != nil {
+				_ = rows.Close()
+				return false, err
+			}
+			found = found || name == column
+		}
+		if err = rows.Close(); err != nil {
+			return false, err
+		}
+		return found, nil
 	}
-	if err = rows.Close(); err != nil {
+	found, err := hasColumn("chat_rules", "inherited_from")
+	if err != nil {
 		return fmt.Errorf("inspect chat rules schema: %w", err)
 	}
 	if !found {
 		if _, err = db.Exec(`ALTER TABLE chat_rules ADD COLUMN inherited_from TEXT NOT NULL DEFAULT ''`); err != nil {
 			return fmt.Errorf("upgrade chat rules inheritance: %w", err)
+		}
+	}
+	found, err = hasColumn("chat_stats", "message_rows")
+	if err != nil {
+		return fmt.Errorf("inspect chat stats schema: %w", err)
+	}
+	if !found {
+		if _, err = db.Exec(`ALTER TABLE chat_stats ADD COLUMN message_rows INTEGER NOT NULL DEFAULT 0`); err != nil {
+			return fmt.Errorf("upgrade chat stats message rows: %w", err)
+		}
+		if _, err = db.Exec(`UPDATE chat_stats SET message_rows=(SELECT COUNT(*) FROM chat_canonical a JOIN messages m ON m.chat_jid=a.alias WHERE a.canonical=chat_stats.canonical)`); err != nil {
+			return fmt.Errorf("backfill chat stats message rows: %w", err)
 		}
 	}
 	return ensureV1IndexShapes(db)

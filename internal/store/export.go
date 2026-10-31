@@ -92,59 +92,32 @@ func (s *Store) ExportPage(ctx context.Context, p ExportParams) ([]ExportRecord,
 		limit = 200
 	}
 	hasCursor := p.HasCursor || p.AfterTS != 0 || p.AfterID != ""
-	const columns = `chat_jid,id,sender_jid,from_me,push_name,kind,text,caption,quoted_id,quoted_sender,mentions,forwarded,forward_score,view_once,ephemeral_secs,details,source,ts,received_at`
-	var q string
-	var queryArgs []any
-	if snapshot.hasDuplicates {
-		forms, formArgs := exportFormMarks(snapshot.forms)
-		queryArgs = append(queryArgs, formArgs...)
-		maxParam := len(queryArgs) + 1
-		queryArgs = append(queryArgs, snapshot.maxMessageSeq)
-		fromParam := len(queryArgs) + 1
-		queryArgs = append(queryArgs, p.From)
-		toParam := len(queryArgs) + 1
-		queryArgs = append(queryArgs, p.To)
-		cursorParam := len(queryArgs) + 1
-		queryArgs = append(queryArgs, hasCursor)
-		tsParam := len(queryArgs) + 1
-		queryArgs = append(queryArgs, p.AfterTS)
-		idParam := len(queryArgs) + 1
-		queryArgs = append(queryArgs, p.AfterID)
-		limitParam := len(queryArgs) + 1
-		queryArgs = append(queryArgs, limit)
-		q = `WITH ranked AS (
- SELECT chat_jid,id,sender_jid,from_me,push_name,kind,text,caption,quoted_id,quoted_sender,mentions,forwarded,forward_score,view_once,ephemeral_secs,details,source,ts,received_at,
- ROW_NUMBER() OVER (PARTITION BY id ORDER BY received_at,chat_jid) rk
- FROM messages WHERE chat_jid IN (` + forms + `) AND seq<=?` + fmt.Sprint(maxParam) + `
- AND (?` + fmt.Sprint(fromParam) + `=0 OR ts>=?` + fmt.Sprint(fromParam) + `)
- AND (?` + fmt.Sprint(toParam) + `=0 OR ts<=?` + fmt.Sprint(toParam) + `)
-)
-SELECT chat_jid,id,sender_jid,from_me,push_name,kind,text,caption,quoted_id,quoted_sender,mentions,forwarded,forward_score,view_once,ephemeral_secs,details,source,ts,received_at
-FROM ranked WHERE rk=1 AND (?` + fmt.Sprint(cursorParam) + `=0 OR ts>?` + fmt.Sprint(tsParam) + ` OR (ts=?` + fmt.Sprint(tsParam) + ` AND id>?` + fmt.Sprint(idParam) + `))
-ORDER BY ts,id LIMIT ?` + fmt.Sprint(limitParam)
-	} else {
-		parts := make([]string, 0, len(snapshot.forms))
-		for _, form := range snapshot.forms {
-			where := []string{"chat_jid=?", "seq<=?"}
-			queryArgs = append(queryArgs, form, snapshot.maxMessageSeq)
-			if p.From > 0 {
-				where = append(where, "ts>=?")
-				queryArgs = append(queryArgs, p.From)
-			}
-			if p.To > 0 {
-				where = append(where, "ts<=?")
-				queryArgs = append(queryArgs, p.To)
-			}
-			if hasCursor {
-				where = append(where, "(ts,id)>(?,?)")
-				queryArgs = append(queryArgs, p.AfterTS, p.AfterID)
-			}
-			queryArgs = append(queryArgs, limit)
-			parts = append(parts, `SELECT * FROM (SELECT `+columns+` FROM messages INDEXED BY messages_chat_ts WHERE `+strings.Join(where, " AND ")+` ORDER BY ts,id LIMIT ?)`)
+	const columns = `m.chat_jid,m.id,m.sender_jid,m.from_me,m.push_name,m.kind,m.text,m.caption,m.quoted_id,m.quoted_sender,m.mentions,m.forwarded,m.forward_score,m.view_once,m.ephemeral_secs,m.details,m.source,m.ts,m.received_at`
+	forms, queryArgs := exportFormMarks(snapshot.forms)
+	queryArgs = append(queryArgs, snapshot.maxMessageSeq, p.From, p.To, hasCursor, p.AfterTS, p.AfterID, limit)
+	maxParam := len(snapshot.forms) + 1
+	fromParam, toParam := len(snapshot.forms)+2, len(snapshot.forms)+3
+	cursorParam, tsParam, idParam, limitParam := len(snapshot.forms)+4, len(snapshot.forms)+5, len(snapshot.forms)+6, len(snapshot.forms)+7
+	parts := make([]string, 0, len(snapshot.forms))
+	for formIndex := range snapshot.forms {
+		where := []string{
+			fmt.Sprintf("m.chat_jid=?%d", formIndex+1),
+			fmt.Sprintf("m.seq<=?%d", maxParam),
+			fmt.Sprintf("(?%d=0 OR m.ts>=?%d)", fromParam, fromParam),
+			fmt.Sprintf("(?%d=0 OR m.ts<=?%d)", toParam, toParam),
+			fmt.Sprintf("(?%d=0 OR m.ts>?%d OR (m.ts=?%d AND m.id>?%d))", cursorParam, tsParam, tsParam, idParam),
 		}
-		queryArgs = append(queryArgs, limit)
-		q = `SELECT * FROM (` + strings.Join(parts, " UNION ALL ") + `) ORDER BY ts,id LIMIT ?`
+		if snapshot.hasDuplicates {
+			where = append(where, `NOT EXISTS (SELECT 1 FROM messages d WHERE d.id=m.id AND d.chat_jid IN (`+forms+`)
+			 AND d.seq<=?`+fmt.Sprint(maxParam)+`
+			 AND (?`+fmt.Sprint(fromParam)+`=0 OR d.ts>=?`+fmt.Sprint(fromParam)+`)
+			 AND (?`+fmt.Sprint(toParam)+`=0 OR d.ts<=?`+fmt.Sprint(toParam)+`)
+			 AND (d.received_at<m.received_at OR (d.received_at=m.received_at AND d.chat_jid<m.chat_jid)))`)
+		}
+		parts = append(parts, `SELECT * FROM (SELECT `+columns+` FROM messages m INDEXED BY messages_chat_ts WHERE `+
+			strings.Join(where, " AND ")+` ORDER BY m.ts,m.id LIMIT ?`+fmt.Sprint(limitParam)+`)`)
 	}
+	q := `SELECT * FROM (` + strings.Join(parts, " UNION ALL ") + `) ORDER BY ts,id LIMIT ?` + fmt.Sprint(limitParam)
 	var out []ExportRecord
 	err = s.scanRows(ctx, q, queryArgs, func(rows *sql.Rows) error {
 		var r ExportRecord

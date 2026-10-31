@@ -123,6 +123,7 @@ CREATE TABLE chat_stats (
   name TEXT NOT NULL DEFAULT '',              -- chat name, else contact/push name, else ''
   type TEXT NOT NULL DEFAULT '',
   messages INTEGER NOT NULL DEFAULT 0,        -- distinct ids over all aliases
+	message_rows INTEGER NOT NULL DEFAULT 0,    -- raw rows; greater than messages means alias duplicates
   last_ts INTEGER NOT NULL DEFAULT 0, oldest_ts INTEGER NOT NULL DEFAULT 0,
   oldest_history_ts INTEGER,                  -- NULL: no history message
   media_done INTEGER NOT NULL DEFAULT 0, media_failed INTEGER NOT NULL DEFAULT 0,
