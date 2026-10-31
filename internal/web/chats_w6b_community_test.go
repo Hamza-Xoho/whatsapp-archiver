@@ -26,6 +26,7 @@ func TestCommunityExpansionConfirmationAndPerRowMediaControls(t *testing.T) {
 	for _, want := range []string{
 		`href="/chats/announcements@g.us"`, `href="/chats/chat@g.us"`,
 		`name="download" value="image"`, `name="download" value="audio"`, `name="video_max_mb"`,
+		">Photos</label>", ">Videos</label>", ">Audio</label>", ">Documents</label>",
 		"Stop logging Neighbours?", "2 child chats",
 	} {
 		if !strings.Contains(community, want) {

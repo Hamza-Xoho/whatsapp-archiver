@@ -87,6 +87,67 @@ func TestW6IDevPairerUsesOnlySyntheticUpdatesAndStops(t *testing.T) {
 	}
 }
 
+func TestW6IStalePairRunCannotOverwriteCancelOrReplacement(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	p := newDevPairerWithTiming(ctx, devPairTiming{Waiting: time.Hour, QR: time.Hour, Finish: time.Hour})
+	if _, err := p.StartPairing(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	p.mu.Lock()
+	stale := p.active
+	p.mu.Unlock()
+	if err := p.CancelPairing(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.StartPairing(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	p.mu.Lock()
+	current := p.active
+	p.mu.Unlock()
+	if stale == current {
+		t.Fatal("cancel/start reused the stale run")
+	}
+	if p.setStateForRun(stale, "connected", true) {
+		t.Fatal("a stale run was allowed to mutate pairing state")
+	}
+	if p.Paired() || p.HealthState() != "starting" {
+		t.Fatalf("stale success overwrote replacement: paired=%v state=%q", p.Paired(), p.HealthState())
+	}
+	if !p.setStateForRun(current, "connected", true) {
+		t.Fatal("the active uncancelled run could not mutate pairing state")
+	}
+	if !p.Paired() || p.HealthState() != "connected" {
+		t.Fatalf("active success was lost: paired=%v state=%q", p.Paired(), p.HealthState())
+	}
+	if err := p.CancelPairing(); err != nil {
+		t.Fatal(err)
+	}
+	if p.setStateForRun(current, "logged_out", false) {
+		t.Fatal("a cancelled run was allowed to publish its logout timer")
+	}
+	if p.Paired() || p.HealthState() != "not_paired" {
+		t.Fatalf("cancel was overwritten: paired=%v state=%q", p.Paired(), p.HealthState())
+	}
+}
+
+func TestW6IPairingCopyIsGenericAndStateSpecific(t *testing.T) {
+	body, err := os.ReadFile(filepath.Join("..", "web", "templates", "pair.html"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	if strings.Contains(strings.ToLower(text), "devseed") || strings.Contains(strings.ToLower(text), "synthetic") {
+		t.Fatalf("production pairing template leaks dev-only copy: %s", text)
+	}
+	for _, want := range []string{"Starting pairing…", "Waiting for WhatsApp to provide a QR code…"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("pairing template lacks exact state copy %q", want)
+		}
+	}
+}
+
 func TestW6ILaunchConfigurationsAreDevseedOnly(t *testing.T) {
 	body, err := os.ReadFile(filepath.Join("..", "..", ".claude", "launch.json"))
 	if err != nil {
