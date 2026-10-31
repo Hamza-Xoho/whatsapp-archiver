@@ -45,7 +45,7 @@
   <nav class="page-controls" aria-label="Message pages">{{if .HasOlder}}<a href="{{.OlderURL}}">Load older messages <span class="visually-hidden">Older</span></a>{{end}}{{if .HasNewer}} <a href="{{.NewerURL}}">Load newer messages</a>{{else}} <a href="/chats/{{pathEscape .JID}}">Jump to newest</a>{{end}}</nav>
   <section class="conversation">
     {{if not .Messages}}{{if .Filtered}}<p>No messages match these filters. <a href="/chats/{{pathEscape .JID}}">Clear filters</a></p>{{else}}<p>No messages are archived for this chat yet.</p>{{end}}{{end}}
-    <ol id="message-list" class="messages"{{if .ViewerLive}} hx-ext="sse" sse-connect="/chats/{{pathEscape .JID}}/events?cursor={{urlquery .LiveCursor}}&amp;day={{urlquery .LiveDay}}" sse-swap="viewer" hx-swap="beforeend"{{end}}>
+    <ol id="message-list" class="messages"{{if .ViewerLive}} hx-ext="sse" sse-connect="/chats/{{pathEscape .JID}}/events?cursor={{urlquery .LiveCursor}}&amp;day={{urlquery .LiveDay}}" sse-swap="viewer,viewer-refetch" hx-swap="beforeend"{{end}}>
     {{template "older_edge" .}}
     {{range .Messages}}{{template "bubble" .}}{{end}}
     {{template "newer_edge" .}}

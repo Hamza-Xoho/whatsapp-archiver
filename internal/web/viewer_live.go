@@ -2,12 +2,16 @@ package web
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
 	"whatsapp-archiver/internal/view"
 )
+
+const maxViewerSSEPayload = 16 << 10
 
 // viewerEvents appends newly archived messages while a browser is at an unfiltered chat's live edge. The activity
 // bus remains metadata-only: this handler re-reads the stored message and renders it only into this chat's response.
@@ -81,6 +85,14 @@ func (s *Server) viewerEvents(w http.ResponseWriter, r *http.Request) {
 				var buf bytes.Buffer
 				if renderErr := s.pages["viewer"].ExecuteTemplate(&buf, "bubble", v); renderErr != nil {
 					return renderErr
+				}
+				if buf.Len() >= maxViewerSSEPayload-1024 {
+					path := "/chats/" + url.PathEscape(jid) + "/m/" + url.PathEscape(message.ID)
+					marker := fmt.Sprintf(`<li class="live-refetch"><a href="%s">New archived message. Open the full message</a></li>`, path)
+					if writeErr := writeEvent(w, strconv.FormatInt(last, 10), "viewer-refetch", marker); writeErr != nil {
+						return writeErr
+					}
+					continue
 				}
 				if writeErr := writeEvent(w, strconv.FormatInt(last, 10), "viewer", buf.String()); writeErr != nil {
 					return writeErr
