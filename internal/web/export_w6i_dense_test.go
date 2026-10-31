@@ -108,19 +108,82 @@ func TestDenseMediaQueryShapeHasNoPerMediaNamingOrFullWindowRank(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	storeSource, err := os.ReadFile(filepath.Join("..", "store", "export.go"))
+	storeSource, err := os.ReadFile(filepath.Join("..", "store", "export_media.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(zipSource), "ExportMediaNameFacts(") {
 		t.Error("ZIP still performs per-media naming queries")
 	}
-	if strings.Contains(string(storeSource), "ROW_NUMBER() OVER (PARTITION BY message_id ORDER BY chat_jid)") {
+	if strings.Contains(string(storeSource), "ROW_NUMBER() OVER (PARTITION BY message_id ORDER BY chat_jid)") ||
+		strings.Contains(string(storeSource), "name_counts AS") {
 		t.Error("ExportMediaPage still reranks the full canonical media window on each page")
 	}
 	for _, required := range []string{"messages_chat_ts", "bounded", "collision"} {
 		if !strings.Contains(string(storeSource), required) && !strings.Contains(string(zipSource), required) {
 			t.Errorf("dense export sources lack %q query/batching evidence", required)
+		}
+	}
+}
+
+func TestDenseMediaPagingCrossesTwoBoundariesWithStableCollisionNames(t *testing.T) {
+	u := newChatsUI(t)
+	u.cfg = &config.Config{DataDir: t.TempDir(), TimeZone: "UTC"}
+	const count = 2201
+	for i := range count {
+		id := fmt.Sprintf("page-%04d", i)
+		message := store.Message{ChatJID: "paged@g.us", ID: id, Kind: "document", Source: "live", Timestamp: int64(i + 1), ReceivedAt: int64(i + 1), RawProto: []byte("x")}
+		media := store.Media{ChatJID: message.ChatJID, MessageID: id, Source: "live", Type: "document", Filename: "same.txt", State: "failed", MessageTimestamp: message.Timestamp}
+		if _, err := u.st.Apply(t.Context(), store.Batch{Message: &message, Media: &media}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	snapshot, err := u.st.NewExportSnapshot(t.Context(), "paged@g.us")
+	if err != nil {
+		t.Fatal(err)
+	}
+	x := exportScope{jid: "paged@g.us", snapshot: snapshot}
+	seen := make(map[string]bool, count)
+	var ts int64
+	var id string
+	calls := 0
+	for {
+		page, pageErr := u.st.ExportMediaPage(t.Context(), store.ExportParams{CanonicalJID: x.jid, Snapshot: snapshot,
+			AfterTS: ts, AfterID: id, HasCursor: calls > 0, Limit: 1000})
+		if pageErr != nil {
+			t.Fatal(pageErr)
+		}
+		calls++
+		for _, record := range page {
+			name := exportArchiveName(x, record)
+			if seen[name] {
+				t.Fatalf("collision across page boundary for %q", name)
+			}
+			seen[name] = true
+			ts, id = record.Message.Timestamp, record.Message.ID
+		}
+		if len(page) < 1000 {
+			break
+		}
+	}
+	if calls != 3 || len(seen) != count {
+		t.Fatalf("bounded pages/names = %d/%d, want 3/%d", calls, len(seen), count)
+	}
+}
+
+func TestTextExportIteratorHasNoArchiveSizedCursorOrSenderCache(t *testing.T) {
+	body, err := os.ReadFile("export_text_iter.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"OpenExportText", "names map[string]string", "ChatName(i.ctx"} {
+		if strings.Contains(string(body), forbidden) {
+			t.Errorf("text iterator retains archive-wide state/query %q", forbidden)
+		}
+	}
+	for _, required := range []string{"ExportPage", "Limit: exportPageSize", "SkipEvents: true"} {
+		if !strings.Contains(string(body), required) {
+			t.Errorf("text iterator lacks bounded page contract %q", required)
 		}
 	}
 }
