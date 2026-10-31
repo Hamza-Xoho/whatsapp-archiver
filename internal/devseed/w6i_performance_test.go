@@ -29,7 +29,8 @@ func TestW6IPerformanceTargetIsPinned(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"check-w6i:", "W6I_PERF=1", "W6I_DEVSEED_DATA", "W6B_DEVSEED_DATA", "W6F_DEVSEED_DATA",
-		"--seed 42", "--chats 250", "--messages 300000", "--large-chat-messages 50000", "ChatsW6BAtScale", "LoggingW6FAtScale"} {
+		"--seed 42", "--chats 250", "--messages 300000", "--large-chat-messages 50000", "ChatsW6BAtScale", "LoggingW6FAtScale",
+		"seed_revision=", "ready_identity=", "-p 1", "for pkg in", "w6i-perf-$${pkg##*/}"} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("Makefile lacks %q", want)
 		}

@@ -3,10 +3,12 @@ package devseed
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +16,7 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+	"whatsapp-archiver/internal/activity"
 	"whatsapp-archiver/internal/config"
 	"whatsapp-archiver/internal/health"
 	"whatsapp-archiver/internal/ingest"
@@ -213,6 +216,54 @@ func TestW6IDevPairerHTTPScenarioCoversEverySafeStateWithoutArchiveWrites(t *tes
 		if strings.Contains(string(body), "internal/wa") || strings.Contains(string(body), `"go.mau.fi/whatsmeow"`) {
 			t.Fatalf("%s imports a WhatsApp boundary", path)
 		}
+	}
+}
+
+func TestW6ISimulatedMessageObeysStopThenKeepThroughHTTPAndStore(t *testing.T) {
+	data := filepath.Join(t.TempDir(), "rules")
+	st, err := store.Open(filepath.Join(data, "archive.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	pipe, rules := newPipeline(st, activity.NewBus(20))
+	g := newGenerator(Options{Chats: 2, Messages: 16, Seed: 42})
+	first, _, _ := g.liveMessage(0, 100)
+	if err = pipe.Ingest(t.Context(), first); err != nil {
+		t.Fatal(err)
+	}
+	h := web.New(web.Deps{Store: st, Rules: rules, Config: &config.Config{DataDir: data, TimeZone: "UTC"}}).Handler()
+	postRule := func(logging string) {
+		t.Helper()
+		form := url.Values{"jid[]": {first.Message.ChatJID}, "logging": {logging}}
+		req := httptest.NewRequest(http.MethodPost, "/chats/rules", strings.NewReader(form.Encode()))
+		req.Host = "localhost:8090"
+		req.Header.Set("Origin", "http://localhost:8090")
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("HX-Request", "true")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("logging=%s status=%d body=%s", logging, w.Code, w.Body.String())
+		}
+	}
+	postRule("off")
+	rejected, _, _ := g.liveMessage(2, 100)
+	rejected.Message.ChatJID = first.Message.ChatJID
+	if err = pipe.Ingest(t.Context(), rejected); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = st.Trace(t.Context(), first.Message.ChatJID, rejected.Message.ID); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("stopped simulated message was stored: %v", err)
+	}
+	postRule("on")
+	kept, _, _ := g.liveMessage(4, 100)
+	kept.Message.ChatJID = first.Message.ChatJID
+	if err = pipe.Ingest(t.Context(), kept); err != nil {
+		t.Fatal(err)
+	}
+	if trace, traceErr := st.Trace(t.Context(), first.Message.ChatJID, kept.Message.ID); traceErr != nil || trace.Message.ID != kept.Message.ID {
+		t.Fatalf("kept simulated message missing: trace=%+v err=%v", trace, traceErr)
 	}
 }
 
