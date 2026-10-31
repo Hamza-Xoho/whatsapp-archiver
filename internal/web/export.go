@@ -412,12 +412,12 @@ func (s *Server) streamHTML(ctx context.Context, w io.Writer, x exportScope) err
 }
 
 func (s *Server) streamText(ctx context.Context, w io.Writer, x exportScope) error {
-	return s.eachTimeline(ctx, x, func(r *store.ExportRecord, e *store.ExportEvent) error {
+	return s.eachTextTimeline(ctx, x, func(r *store.ExportTextRecord, e *store.ExportEvent) error {
 		if e != nil {
 			return writeWALine(w, time.Unix(e.TS, 0).In(x.loc), exportEventSender(*e), exportEventLabel(*e))
 		}
 		m := r.Message
-		sender := r.SenderName
+		sender := m.PushName
 		if sender == "" {
 			sender = m.SenderJID
 		}
@@ -426,7 +426,7 @@ func (s *Server) streamText(ctx context.Context, w io.Writer, x exportScope) err
 			if body != "" {
 				body += " "
 			}
-			name, err := s.exportArchiveName(ctx, x, *r)
+			name, err := s.exportArchiveName(ctx, x, store.ExportRecord{Message: m, Media: r.Media})
 			if err != nil {
 				return err
 			}

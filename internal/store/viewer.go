@@ -145,7 +145,25 @@ func (s *Store) SearchChatPosition(ctx context.Context, chat, query string, filt
 	for i := range terms {
 		terms[i] = `"` + strings.ReplaceAll(terms[i], `"`, `""`) + `"`
 	}
-	args := []any{chat, strings.Join(terms, " AND ")}
+	match := strings.Join(terms, " AND ")
+	dense, err := s.denseSearch(ctx, table, match)
+	if err != nil {
+		return position, err
+	}
+	if dense && table == "search_tri" {
+		hasDuplicates, duplicateErr := s.viewerHasDuplicates(ctx, chat)
+		if duplicateErr != nil {
+			return position, duplicateErr
+		}
+		hasEdits, editErr := s.hasEditSearchHit(ctx, table, match)
+		if editErr != nil {
+			return position, editErr
+		}
+		if !hasDuplicates && !hasEdits {
+			return s.searchDenseChatPosition(ctx, chat, table, match, filter, index)
+		}
+	}
+	args := []any{chat, match}
 	where := []string{"m.chat_jid IN (" + chatForms + ")"}
 	add := func(column string, value any) {
 		args = append(args, value)

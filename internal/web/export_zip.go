@@ -2,6 +2,7 @@ package web
 
 import (
 	"archive/zip"
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -106,11 +107,15 @@ func (s *Server) streamZIP(ctx context.Context, w io.Writer, x exportScope) erro
 	if err != nil {
 		return err
 	}
-	tw, err := z.Create("_chat.txt")
+	tw, err := z.CreateHeader(&zip.FileHeader{Name: "_chat.txt", Method: zip.Store})
 	if err != nil {
 		return err
 	}
-	if err = s.streamText(ctx, tw, x); err != nil {
+	textBuffer := bufio.NewWriterSize(tw, 64<<10)
+	if err = s.streamText(ctx, textBuffer, x); err != nil {
+		return err
+	}
+	if err = textBuffer.Flush(); err != nil {
 		return err
 	}
 	err = s.eachExportMedia(ctx, x, func(r store.ExportRecord) error {

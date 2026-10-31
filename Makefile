@@ -40,7 +40,19 @@ check: test lint build-all
 
 # Deterministic opt-in release budgets on the synthetic W6(i) dataset.
 check-w6i: $(GO)
-	W6I_PERF=1 $(GO) test -v -count=1 -run W6I ./internal/devseed ./internal/store
+	@mkdir -p $(ROOT)/data; \
+	seed_data="$(ROOT)/data/w6i-seed-42-250-300000-50000"; \
+	if [ ! -f "$$seed_data/.ready" ]; then \
+	  seed_build=$$(mktemp -d "$(ROOT)/data/w6i-seed-build.XXXXXX"); \
+	  $(GO) run ./cmd/archiver devseed --data "$$seed_build" --seed 42 --chats 250 --messages 300000 --large-chat-messages 50000 || exit 1; \
+	  touch "$$seed_build/.ready"; mv "$$seed_build" "$$seed_data"; \
+	fi; \
+	perf_data=$$(mktemp -d "$(ROOT)/data/w6i-perf.XXXXXX"); \
+	trap 'rm -rf "$$perf_data"' EXIT HUP INT TERM; \
+	cp -R "$$seed_data/." "$$perf_data/"; \
+	W6I_PERF=1 W6I_DEVSEED_DATA="$$perf_data" W6B_DEVSEED_DATA="$$perf_data" W6F_DEVSEED_DATA="$$perf_data" \
+	  $(GO) test -v -count=1 -run 'W6I|ChatsW6BAtScale|ChatsSQLAtScale|LoggingW6FAtScale|LoggingReviewScale' \
+	  ./internal/devseed ./internal/store ./internal/web
 
 # Fast gate for the Stop hook: race tests on packages with Go changes vs HEAD, then lint. No build-all.
 check-fast: $(GO)

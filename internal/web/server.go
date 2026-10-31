@@ -232,7 +232,34 @@ func (s *Server) render(w http.ResponseWriter, t *template.Template, name string
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(buf.Bytes())
+	body := buf.Bytes()
+	if _, ok := data.(chatsData); ok {
+		body = compactIntertagSpace(body)
+	}
+	_, _ = w.Write(body)
+}
+
+// compactIntertagSpace removes template indentation from the dense chat list without changing text or attributes.
+// It is deliberately scoped to chatsData: whitespace can be meaningful on pages that contain preformatted content.
+func compactIntertagSpace(body []byte) []byte {
+	out := make([]byte, 0, len(body))
+	for at := 0; at < len(body); {
+		if body[at] != '>' {
+			out = append(out, body[at])
+			at++
+			continue
+		}
+		out = append(out, '>')
+		at++
+		next := at
+		for next < len(body) && (body[next] == ' ' || body[next] == '\t' || body[next] == '\r' || body[next] == '\n') {
+			next++
+		}
+		if next < len(body) && body[next] == '<' {
+			at = next
+		}
+	}
+	return out
 }
 
 // fileOnly answers 404 unless the path names an embedded file, so /static/ never lists the folder: its stripped path

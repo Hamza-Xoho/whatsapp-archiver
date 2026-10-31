@@ -25,7 +25,16 @@ func mTime(ts int64, loc *time.Location) string {
 func writeWALine(w io.Writer, at time.Time, sender, body string) error {
 	body = strings.ReplaceAll(strings.ReplaceAll(body, "\r\n", "\n"), "\n", "\n\u200e")
 	sender = strings.ReplaceAll(strings.ReplaceAll(strings.ReplaceAll(sender, "\\", "\\\\"), ":", "\\:"), "\n", " ")
-	_, err := fmt.Fprintf(w, "[%s] %s: %s\n", at.Format("02/01/2006, 15:04:05"), sender, body)
+	var line strings.Builder
+	line.Grow(25 + len(sender) + len(body))
+	line.WriteByte('[')
+	line.WriteString(at.Format("02/01/2006, 15:04:05"))
+	line.WriteString("] ")
+	line.WriteString(sender)
+	line.WriteString(": ")
+	line.WriteString(body)
+	line.WriteByte('\n')
+	_, err := io.WriteString(w, line.String())
 	return err
 }
 
