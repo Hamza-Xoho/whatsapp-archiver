@@ -154,7 +154,7 @@ Single status record for V1 (max 150 lines, update in place; history lives in gi
 
 ## W6(i) evaluation
 
-- Automated/static evaluation complete 31 Oct on exact seed 42 (250 chats, 300,000 messages, one 50,000-message chat): every section 11 server budget, response bound, fake pairing state, stop/keep ingestion, Pipeline-to-SSE path and bounded snapshot export assertion passes. W6(i) fixes are strict red/green commits from `d28bb2d` through `a51c54c`; full checks pass, with no Critical/Important static finding or golden change.
+- Automated/static evaluation complete 31 Oct on exact seed 42 (250 chats, 300,000 messages, one 50,000-message chat): every section 11 server budget, response bound, fake pairing state, stop/keep ingestion, Pipeline-to-SSE path and bounded snapshot export assertion passes. Final review adds measured pair SSE, exact encoded viewer-event bounds, mutable-media read snapshots, one-pass ZIP media and three-query/media-free snapshot startup through `c04ddae`. Full checks pass, with no Critical/Important static finding or golden change.
 - Browser evaluation is blocked, not passed: T3 `preview_status`/`preview_open` could not attach to the 18090 fallback after 8090 was occupied; its tabs remained Chrome error pages. Therefore screenshots, mobile/dark/RTL visual review, keyboard/screen-reader smoke, playback/download interaction and console/network inspection remain unavailable. Exact evidence and the PASS/BLOCKED matrix are in `docs/v1/ui-evaluation.md`; no real WhatsApp, ryzen access or deployment was used.
 
 ## Rulings

@@ -1,6 +1,6 @@
 # W6(i) UI evaluation
 
-Status: automated and static evaluation complete at `a51c54c`; interactive browser
+Status: automated and static evaluation complete at `c04ddae`; interactive browser
 evaluation blocked by the T3 preview environment on 31 Oct 2026. This evaluation
 used synthetic data and fake WhatsApp boundaries only. It did not pair, import a
 session, connect to WhatsApp, access ryzen, or deploy anything.
@@ -9,7 +9,7 @@ session, connect to WhatsApp, access ryzen, or deploy anything.
 
 - Host: Linux 7.0.0-38-generic x86_64, UTC; Go 1.26.9 linux/amd64.
 - Branch/base: `v1/w6i-evaluation` from `origin/main` `41e91d9`.
-- Evaluated implementation revision: `a51c54c` (the documentation commit is later).
+- Evaluated implementation revision: `c04ddae` (the documentation commit is later).
 - Data: ignored `data/` copies of deterministic seed 42: 250 canonical chats,
   exactly 300,000 messages, and 50,000 messages concentrated in one chat. The
   sentinel is `SEED-42-000000000` at timestamp 1761436842.
@@ -24,6 +24,11 @@ Commands and checks used:
 make check-w6i
 make check
 make check-fast
+mkdir -p data/ui-evaluation-18090
+printf 'web:\n  listen: 127.0.0.1:18090\n' > data/ui-evaluation-18090/config.yaml
+./.tools/go/bin/go run ./cmd/archiver devseed --data data/ui-evaluation-18090 --seed 42 --chats 250 --messages 300000 --large-chat-messages 50000 --simulate-live 5/s
+preview_status
+preview_open http://127.0.0.1:18090
 ```
 
 `make check-w6i` verifies the exact seed identity, gives each sequential package
@@ -76,29 +81,34 @@ required bounded shape were asserted, not only elapsed time.
 
 | Operation | Captured result | Budget/result |
 |---|---:|---|
-| Shell / pairing | pair 0.039/0.059 ms p50/p95 | <100 ms, PASS |
+| Shell / pairing page | pair 0.070/0.266 ms p50/p95 | <100 ms, PASS |
+| Pair SSE fragment | devseed 0.139/0.226 ms p50/p95; 738 bytes | <50 ms, PASS |
 | Chats first / filtered / next | 11.171/12.334; 14.003/26.267; 12.075/20.473 ms p50/p95 | <150 ms, PASS |
 | Row swap / bulk preview | 21.229/30.649; 15.778/21.969 ms p50/p95 | <50 / 150 ms, PASS |
 | Viewer initial / older / newer / jump | 131.018/139.298; 24.537/29.217; 23.915/31.244; 14.827/16.813 ms p50/p95 | <150 ms, PASS |
 | In-chat / Arabic global search | 264.395/271.013; 8.043/10.461 ms p50/p95 | <300 ms, PASS |
 | Logging overview / slowest section | 15.104/20.532; feed 3.361/4.424 ms p50/p95 | <150 ms, PASS |
 | Health / feed fragments | 0.154/0.184; 5.025/6.907 ms p50/p95 | <50 ms, PASS |
-| Export headers | about 61.3/64.377 ms p50/p95 | <150 ms, PASS |
-| Validated 20 MiB local ZIP | 465.590 ms, 43.0 MiB/s | >=20 MiB/s, PASS |
+| Export headers | 62.817 ms p95 | <150 ms, PASS |
+| Validated 20 MiB local ZIP | 618.857 ms, 32.3 MiB/s | >=20 MiB/s, PASS |
 
 Additional bounds:
 
 - Normal Chats HTML is 102,270 bytes, below the 100 KiB (102,400-byte) aim while
   retaining 50 rows, statuses, actions and visible media-rule labels.
-- Viewer live SSE for the large-message refetch case is 772 bytes; health, feed
-  and viewer SSE/fragment responses remain below 16 KiB.
+- Viewer live SSE for the large-message refetch case is 772 bytes; health, feed,
+  pair and viewer events remain below 16 KiB after exact SSE wire encoding. A
+  2,300-line message regression includes every `data: ` prefix in that bound.
 - Viewer pages contain at most 100 messages; Chats/search fragments contain at
   most 50 rows.
 - Dense export coverage crosses two 1,000-row boundaries with 2,201 colliding
   media names in exactly three pages (1,000/1,000/201). Text export keeps one
   bounded page and per-page sender/media facts; filename collision detection uses
-  a fixed 8 KiB snapshot Bloom filter. Export cancellation and snapshot upper
-  bounds are asserted.
+  a fixed 8 KiB snapshot Bloom filter. Snapshot startup is exactly three queries
+  (known chat, aliases and indexed insert-only bounds), with an executable EXPLAIN
+  assertion that no startup query touches media. A held read transaction freezes
+  mutable media rows; ZIP uses one media traversal and a private on-disk missing
+  manifest spool. Export cancellation and snapshot upper bounds are asserted.
 - The slowest measured Chats SQL was filtered ordered membership at 2.327 ms p95;
   the slowest Logging read model was gaps at 2.816 ms. The slowest full HTTP
   operation was in-chat search at 271.013 ms p95. No page hides server work behind
@@ -120,8 +130,9 @@ labels and insufficient bidi isolation. Red/green fixes now provide:
 - 375 px trace cards, 44 px viewer actions, visible Photos/Videos/Audio/Documents
   labels and bidi isolation for user-controlled names;
 - generic production pairing copy; fake/devseed wording is not exposed;
-- bounded SSE events that require refetch for large archived content rather than
-  presenting a truncated message as complete.
+- bounded SSE events measured after exact wire framing that require refetch for
+  large or highly multiline archived content rather than presenting truncation as
+  complete.
 
 No Critical or Important static/spec finding remains. Browser-dependent contrast,
 layout, focus order, media playback, console/network cleanliness and announcement
