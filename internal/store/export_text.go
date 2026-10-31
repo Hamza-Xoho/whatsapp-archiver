@@ -45,8 +45,9 @@ func (s *Store) OpenExportText(ctx context.Context, canonical string, snapshot *
 		return nil, err
 	}
 	forms, args := exportFormMarks(snapshot.forms)
-	args = append(args, snapshot.maxMessageSeq, from, to)
-	maxParam, fromParam, toParam := len(snapshot.forms)+1, len(snapshot.forms)+2, len(snapshot.forms)+3
+	args = append(args, snapshot.maxMessageSeq, snapshot.maxMediaRowID, from, to)
+	maxParam, mediaMaxParam := len(snapshot.forms)+1, len(snapshot.forms)+2
+	fromParam, toParam := len(snapshot.forms)+3, len(snapshot.forms)+4
 	const columns = `chat_jid,id,sender_jid,kind,text,caption,details,ts`
 	messageSQL := `SELECT ` + columns + ` FROM messages WHERE chat_jid IN (` + forms + `) AND seq<=?` + fmt.Sprint(maxParam) + `
 	 AND (?` + fmt.Sprint(fromParam) + `=0 OR ts>=?` + fmt.Sprint(fromParam) + `)
@@ -60,8 +61,8 @@ func (s *Store) OpenExportText(ctx context.Context, canonical string, snapshot *
 	}
 	query := `WITH selected AS (` + messageSQL + `), media_ranked AS (
 	 SELECT message_id,filename,message_ts,ROW_NUMBER() OVER (PARTITION BY message_id ORDER BY chat_jid) rk
-	 FROM media WHERE chat_jid IN (` + forms + `)), name_counts AS (
-	 SELECT filename,COUNT(*) AS total FROM media WHERE chat_jid IN (` + forms + `) GROUP BY filename)
+	 FROM media WHERE chat_jid IN (` + forms + `) AND rowid<=?` + fmt.Sprint(mediaMaxParam) + `), name_counts AS (
+	 SELECT filename,COUNT(*) AS total FROM media WHERE chat_jid IN (` + forms + `) AND rowid<=?` + fmt.Sprint(mediaMaxParam) + ` GROUP BY filename)
 	 SELECT m.chat_jid,m.id,m.sender_jid,m.kind,m.text,m.caption,m.details,m.ts,x.filename,x.message_ts,
 	 COALESCE(c.total,0) FROM selected m LEFT JOIN media_ranked x ON x.message_id=m.id AND x.rk=1
 	 LEFT JOIN name_counts c ON c.filename=x.filename ORDER BY m.ts,m.id`

@@ -147,7 +147,7 @@ func (s *Server) validateExport(r *http.Request) (exportScope, int, error) {
 	if x.name == "" {
 		x.name = x.jid
 	}
-	found, err := s.d.Store.ExportHasMessages(r.Context(), x.jid, x.from, x.to)
+	found, err := s.d.Store.ExportSnapshotHasMessages(r.Context(), x.snapshot, x.from, x.to)
 	if err != nil {
 		return x, 500, errExportFailed
 	}

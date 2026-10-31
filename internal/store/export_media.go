@@ -20,9 +20,10 @@ func (s *Store) ExportMediaPage(ctx context.Context, p ExportParams) ([]ExportRe
 		limit = 200
 	}
 	forms, args := exportFormMarks(snapshot.forms)
-	args = append(args, snapshot.maxMessageSeq, p.From, p.To, p.HasCursor || p.AfterTS != 0 || p.AfterID != "", p.AfterTS, p.AfterID, limit)
-	maxParam, fromParam, toParam := len(snapshot.forms)+1, len(snapshot.forms)+2, len(snapshot.forms)+3
-	cursorParam, tsParam, idParam, limitParam := len(snapshot.forms)+4, len(snapshot.forms)+5, len(snapshot.forms)+6, len(snapshot.forms)+7
+	args = append(args, snapshot.maxMessageSeq, snapshot.maxMediaRowID, p.From, p.To, p.HasCursor || p.AfterTS != 0 || p.AfterID != "", p.AfterTS, p.AfterID, limit)
+	maxParam, mediaMaxParam := len(snapshot.forms)+1, len(snapshot.forms)+2
+	fromParam, toParam := len(snapshot.forms)+3, len(snapshot.forms)+4
+	cursorParam, tsParam, idParam, limitParam := len(snapshot.forms)+5, len(snapshot.forms)+6, len(snapshot.forms)+7, len(snapshot.forms)+8
 
 	parts := make([]string, 0, len(snapshot.forms))
 	for formIndex := range snapshot.forms {
@@ -32,7 +33,7 @@ func (s *Store) ExportMediaPage(ctx context.Context, p ExportParams) ([]ExportRe
 			fmt.Sprintf("(?%d=0 OR m.ts>=?%d)", fromParam, fromParam),
 			fmt.Sprintf("(?%d=0 OR m.ts<=?%d)", toParam, toParam),
 			fmt.Sprintf("(?%d=0 OR m.ts>?%d OR (m.ts=?%d AND m.id>?%d))", cursorParam, tsParam, tsParam, idParam),
-			"EXISTS (SELECT 1 FROM media mx WHERE mx.message_id=m.id AND mx.chat_jid IN (" + forms + "))",
+			"EXISTS (SELECT 1 FROM media mx WHERE mx.message_id=m.id AND mx.chat_jid IN (" + forms + ") AND mx.rowid<=?" + fmt.Sprint(mediaMaxParam) + ")",
 		}
 		if snapshot.hasDuplicates {
 			where = append(where, `NOT EXISTS (SELECT 1 FROM messages d WHERE d.id=m.id AND d.chat_jid IN (`+forms+`)
@@ -47,11 +48,11 @@ func (s *Store) ExportMediaPage(ctx context.Context, p ExportParams) ([]ExportRe
 	selected := `SELECT * FROM (` + strings.Join(parts, " UNION ALL ") + `) ORDER BY ts,id LIMIT ?` + fmt.Sprint(limitParam)
 	mediaSelect := "x." + strings.ReplaceAll(mediaColumns, ",", ",x.")
 	query := `WITH selected AS (` + selected + `), selected_media AS MATERIALIZED (
-	 SELECT x.*,s.ts AS selected_ts FROM selected s JOIN media x ON x.message_id=s.id AND x.chat_jid IN (` + forms + `)
+	 SELECT x.*,s.ts AS selected_ts FROM selected s JOIN media x ON x.message_id=s.id AND x.chat_jid IN (` + forms + `) AND x.rowid<=?` + fmt.Sprint(mediaMaxParam) + `
 	 WHERE NOT EXISTS (SELECT 1 FROM media y WHERE y.message_id=x.message_id
-	  AND y.chat_jid IN (` + forms + `) AND y.chat_jid<x.chat_jid)),
+	  AND y.chat_jid IN (` + forms + `) AND y.rowid<=?` + fmt.Sprint(mediaMaxParam) + ` AND y.chat_jid<x.chat_jid)),
 	 name_counts AS (SELECT filename,COUNT(*) AS total FROM media n WHERE n.chat_jid IN (` + forms + `)
-	  AND n.filename IN (SELECT filename FROM selected_media) GROUP BY filename)
+	  AND n.rowid<=?` + fmt.Sprint(mediaMaxParam) + ` AND n.filename IN (SELECT filename FROM selected_media) GROUP BY filename)
 	 SELECT ` + mediaSelect + `,x.selected_ts,c.total FROM selected_media x JOIN name_counts c ON c.filename=x.filename
 	 ORDER BY x.selected_ts,x.message_id`
 	var out []ExportRecord
