@@ -38,33 +38,31 @@ func (r *ExportTextRows) Scan() (ExportTextRecord, error) {
 
 // OpenExportText reads the complete selected message stream without archive-sized materialisation. Canonical aliases,
 // duplicate selection, date scope, and one deterministic media filename are all fixed by the same SQLite snapshot.
-func (s *Store) OpenExportText(ctx context.Context, canonical string, from, to int64) (*ExportTextRows, error) {
-	known, err := s.ChatKnown(ctx, canonical)
+func (s *Store) OpenExportText(ctx context.Context, canonical string, snapshot *ExportSnapshot, from, to int64) (*ExportTextRows, error) {
+	snapshot, err := s.exportSnapshot(ctx, canonical, snapshot)
 	if err != nil {
 		return nil, err
 	}
-	if !known {
-		return nil, sql.ErrNoRows
-	}
-	hasDuplicates, err := s.viewerHasDuplicates(ctx, canonical)
-	if err != nil {
-		return nil, err
-	}
+	forms, args := exportFormMarks(snapshot.forms)
+	args = append(args, snapshot.maxMessageSeq, from, to)
+	maxParam, fromParam, toParam := len(snapshot.forms)+1, len(snapshot.forms)+2, len(snapshot.forms)+3
 	const columns = `chat_jid,id,sender_jid,kind,text,caption,details,ts`
-	messageSQL := `SELECT ` + columns + ` FROM messages WHERE chat_jid IN (` + chatForms + `)
-	 AND (?2=0 OR ts>=?2) AND (?3=0 OR ts<=?3)`
-	if hasDuplicates {
+	messageSQL := `SELECT ` + columns + ` FROM messages WHERE chat_jid IN (` + forms + `) AND seq<=?` + fmt.Sprint(maxParam) + `
+	 AND (?` + fmt.Sprint(fromParam) + `=0 OR ts>=?` + fmt.Sprint(fromParam) + `)
+	 AND (?` + fmt.Sprint(toParam) + `=0 OR ts<=?` + fmt.Sprint(toParam) + `)`
+	if snapshot.hasDuplicates {
 		messageSQL = `SELECT ` + columns + ` FROM (
 	 SELECT ` + columns + `,ROW_NUMBER() OVER (PARTITION BY id ORDER BY received_at,chat_jid) rk
-	 FROM messages WHERE chat_jid IN (` + chatForms + `)
-	 AND (?2=0 OR ts>=?2) AND (?3=0 OR ts<=?3)) WHERE rk=1`
+	 FROM messages WHERE chat_jid IN (` + forms + `) AND seq<=?` + fmt.Sprint(maxParam) + `
+	 AND (?` + fmt.Sprint(fromParam) + `=0 OR ts>=?` + fmt.Sprint(fromParam) + `)
+	 AND (?` + fmt.Sprint(toParam) + `=0 OR ts<=?` + fmt.Sprint(toParam) + `)) WHERE rk=1`
 	}
 	query := `WITH selected AS (` + messageSQL + `), media_ranked AS (
 	 SELECT message_id,filename,message_ts,ROW_NUMBER() OVER (PARTITION BY message_id ORDER BY chat_jid) rk
-	 FROM media WHERE chat_jid IN (` + chatForms + `))
+	 FROM media WHERE chat_jid IN (` + forms + `))
 	 SELECT m.chat_jid,m.id,m.sender_jid,m.kind,m.text,m.caption,m.details,m.ts,x.filename,x.message_ts
 	 FROM selected m LEFT JOIN media_ranked x ON x.message_id=m.id AND x.rk=1 ORDER BY m.ts,m.id`
-	rows, err := s.read.QueryContext(ctx, query, canonical, from, to)
+	rows, err := s.read.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("open text export: %w", err)
 	}

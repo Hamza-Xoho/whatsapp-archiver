@@ -157,7 +157,7 @@ func (s *Server) eachExportMedia(ctx context.Context, x exportScope, fn func(sto
 	var id string
 	hasCursor := false
 	for {
-		page, err := s.d.Store.ExportMediaPage(ctx, store.ExportParams{CanonicalJID: x.jid, From: x.from, To: x.to, AfterTS: ts, AfterID: id, HasCursor: hasCursor, Limit: exportPageSize})
+		page, err := s.d.Store.ExportMediaPage(ctx, store.ExportParams{CanonicalJID: x.jid, Snapshot: x.snapshot, From: x.from, To: x.to, AfterTS: ts, AfterID: id, HasCursor: hasCursor, Limit: exportPageSize})
 		if err != nil {
 			return err
 		}

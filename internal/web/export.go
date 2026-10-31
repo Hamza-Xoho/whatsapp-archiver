@@ -67,7 +67,7 @@ type exportScope struct {
 	from, to          int64
 	loc               *time.Location
 	aliases           []string
-	hasDuplicates     bool
+	snapshot          *store.ExportSnapshot
 	generated         time.Time
 }
 
@@ -132,13 +132,14 @@ func (s *Server) validateExport(r *http.Request) (exportScope, int, error) {
 	if x.from > 0 && x.to > 0 && x.from > x.to {
 		return x, 400, errors.New("from must not be after to")
 	}
-	x.aliases, err = s.d.Store.ExportAliases(r.Context(), x.jid)
+	x.snapshot, err = s.d.Store.NewExportSnapshot(r.Context(), x.jid)
 	if errors.Is(err, sql.ErrNoRows) {
 		return x, 404, err
 	}
 	if err != nil {
 		return x, 500, errExportFailed
 	}
+	x.aliases = x.snapshot.Aliases()
 	x.name, err = s.d.Store.ChatName(r.Context(), x.jid)
 	if err != nil {
 		return x, 500, errExportFailed
@@ -152,10 +153,6 @@ func (s *Server) validateExport(r *http.Request) (exportScope, int, error) {
 	}
 	if !found {
 		return x, 400, errExportEmpty
-	}
-	x.hasDuplicates, err = s.d.Store.ExportHasDuplicates(r.Context(), x.jid)
-	if err != nil {
-		return x, 500, errExportFailed
 	}
 	return x, 200, nil
 }
@@ -200,7 +197,7 @@ func (s *Server) eachExport(ctx context.Context, x exportScope, fn func(store.Ex
 	var id string
 	hasCursor := false
 	for {
-		page, err := s.d.Store.ExportPage(ctx, store.ExportParams{CanonicalJID: x.jid, From: x.from, To: x.to, AfterTS: ts, AfterID: id, HasCursor: hasCursor, DuplicateStateKnown: true, HasDuplicates: x.hasDuplicates, Forms: x.aliases, Limit: exportPageSize})
+		page, err := s.d.Store.ExportPage(ctx, store.ExportParams{CanonicalJID: x.jid, Snapshot: x.snapshot, From: x.from, To: x.to, AfterTS: ts, AfterID: id, HasCursor: hasCursor, Limit: exportPageSize})
 		if err != nil {
 			return err
 		}

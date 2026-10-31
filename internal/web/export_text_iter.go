@@ -17,7 +17,7 @@ type textMessageIter struct {
 
 func (i *textMessageIter) next() (*store.ExportTextRecord, error) {
 	if !i.started {
-		rows, err := i.s.d.Store.OpenExportText(i.ctx, i.x.jid, i.x.from, i.x.to)
+		rows, err := i.s.d.Store.OpenExportText(i.ctx, i.x.jid, i.x.snapshot, i.x.from, i.x.to)
 		if err != nil {
 			return nil, err
 		}

@@ -16,8 +16,8 @@ type ExportParams struct {
 	AfterTS      int64
 	AfterID      string
 	HasCursor    bool
-	// DuplicateStateKnown and HasDuplicates carry a Store-derived fact across
-	// pages so a streaming export need not recount the full chat each time.
+	Snapshot     *ExportSnapshot
+	// Legacy caller hints are intentionally ignored. Store owns canonical forms and duplicate state.
 	DuplicateStateKnown, HasDuplicates bool
 	Forms                              []string
 	SkipEvents                         bool
@@ -74,50 +74,50 @@ func (s *Store) ExportHasDuplicates(ctx context.Context, canonicalJID string) (b
 
 // ExportPage reads a bounded, chronological page and gathers names, events and media with three bounded queries.
 func (s *Store) ExportPage(ctx context.Context, p ExportParams) ([]ExportRecord, error) {
-	known, err := s.ChatKnown(ctx, p.CanonicalJID)
+	snapshot, err := s.exportSnapshot(ctx, p.CanonicalJID, p.Snapshot)
 	if err != nil {
 		return nil, err
-	}
-	if !known {
-		return nil, sql.ErrNoRows
 	}
 	limit := p.Limit
 	if limit <= 0 || limit > 1000 {
 		limit = 200
 	}
-	hasDuplicates := p.HasDuplicates
-	if !p.DuplicateStateKnown {
-		hasDuplicates, err = s.viewerHasDuplicates(ctx, p.CanonicalJID)
-		if err != nil {
-			return nil, err
-		}
-	}
 	hasCursor := p.HasCursor || p.AfterTS != 0 || p.AfterID != ""
 	const columns = `chat_jid,id,sender_jid,from_me,push_name,kind,text,caption,quoted_id,quoted_sender,mentions,forwarded,forward_score,view_once,ephemeral_secs,details,source,ts,received_at`
 	var q string
 	var queryArgs []any
-	if hasDuplicates {
+	if snapshot.hasDuplicates {
+		forms, formArgs := exportFormMarks(snapshot.forms)
+		queryArgs = append(queryArgs, formArgs...)
+		maxParam := len(queryArgs) + 1
+		queryArgs = append(queryArgs, snapshot.maxMessageSeq)
+		fromParam := len(queryArgs) + 1
+		queryArgs = append(queryArgs, p.From)
+		toParam := len(queryArgs) + 1
+		queryArgs = append(queryArgs, p.To)
+		cursorParam := len(queryArgs) + 1
+		queryArgs = append(queryArgs, hasCursor)
+		tsParam := len(queryArgs) + 1
+		queryArgs = append(queryArgs, p.AfterTS)
+		idParam := len(queryArgs) + 1
+		queryArgs = append(queryArgs, p.AfterID)
+		limitParam := len(queryArgs) + 1
+		queryArgs = append(queryArgs, limit)
 		q = `WITH ranked AS (
  SELECT chat_jid,id,sender_jid,from_me,push_name,kind,text,caption,quoted_id,quoted_sender,mentions,forwarded,forward_score,view_once,ephemeral_secs,details,source,ts,received_at,
  ROW_NUMBER() OVER (PARTITION BY id ORDER BY received_at,chat_jid) rk
- FROM messages WHERE chat_jid IN (` + chatForms + `)
- AND (?2=0 OR ts>=?2) AND (?3=0 OR ts<=?3)
+ FROM messages WHERE chat_jid IN (` + forms + `) AND seq<=?` + fmt.Sprint(maxParam) + `
+ AND (?` + fmt.Sprint(fromParam) + `=0 OR ts>=?` + fmt.Sprint(fromParam) + `)
+ AND (?` + fmt.Sprint(toParam) + `=0 OR ts<=?` + fmt.Sprint(toParam) + `)
 )
 SELECT chat_jid,id,sender_jid,from_me,push_name,kind,text,caption,quoted_id,quoted_sender,mentions,forwarded,forward_score,view_once,ephemeral_secs,details,source,ts,received_at
-FROM ranked WHERE rk=1 AND (?4=0 OR ts>?5 OR (ts=?5 AND id>?6)) ORDER BY ts,id LIMIT ?7`
-		queryArgs = []any{p.CanonicalJID, p.From, p.To, hasCursor, p.AfterTS, p.AfterID, limit}
+FROM ranked WHERE rk=1 AND (?` + fmt.Sprint(cursorParam) + `=0 OR ts>?` + fmt.Sprint(tsParam) + ` OR (ts=?` + fmt.Sprint(tsParam) + ` AND id>?` + fmt.Sprint(idParam) + `))
+ORDER BY ts,id LIMIT ?` + fmt.Sprint(limitParam)
 	} else {
-		forms := p.Forms
-		if len(forms) == 0 {
-			forms, err = s.ExportAliases(ctx, p.CanonicalJID)
-			if err != nil {
-				return nil, err
-			}
-		}
-		parts := make([]string, 0, len(forms))
-		for _, form := range forms {
-			where := []string{"chat_jid=?"}
-			queryArgs = append(queryArgs, form)
+		parts := make([]string, 0, len(snapshot.forms))
+		for _, form := range snapshot.forms {
+			where := []string{"chat_jid=?", "seq<=?"}
+			queryArgs = append(queryArgs, form, snapshot.maxMessageSeq)
 			if p.From > 0 {
 				where = append(where, "ts>=?")
 				queryArgs = append(queryArgs, p.From)
@@ -225,26 +225,40 @@ FROM ranked WHERE rk=1 AND (?4=0 OR ts>?5 OR (ts=?5 AND id>?6)) ORDER BY ts,id L
 // ExportMediaPage reads a bounded media-only page for ZIP passes without
 // rescanning and enriching every message in the chat.
 func (s *Store) ExportMediaPage(ctx context.Context, p ExportParams) ([]ExportRecord, error) {
+	snapshot, err := s.exportSnapshot(ctx, p.CanonicalJID, p.Snapshot)
+	if err != nil {
+		return nil, err
+	}
 	limit := p.Limit
 	if limit <= 0 || limit > 500 {
 		limit = 200
 	}
 	hasCursor := p.HasCursor || p.AfterTS != 0 || p.AfterID != ""
-	query := `WITH ranked AS (
-	 SELECT ` + mediaColumns + `,ROW_NUMBER() OVER (PARTITION BY message_id ORDER BY chat_jid) rk
-	 FROM media WHERE chat_jid IN (` + chatForms + `)
-	 AND (?2=0 OR message_ts>=?2) AND (?3=0 OR message_ts<=?3)
-	)
-	SELECT ` + mediaColumns + ` FROM ranked WHERE rk=1
-	 AND (?4=0 OR message_ts>?5 OR (message_ts=?5 AND message_id>?6))
-	 ORDER BY message_ts,message_id LIMIT ?7`
+	forms, args := exportFormMarks(snapshot.forms)
+	args = append(args, snapshot.maxMessageSeq, p.From, p.To, hasCursor, p.AfterTS, p.AfterID, limit)
+	maxParam, fromParam, toParam := len(snapshot.forms)+1, len(snapshot.forms)+2, len(snapshot.forms)+3
+	cursorParam, tsParam, idParam, limitParam := len(snapshot.forms)+4, len(snapshot.forms)+5, len(snapshot.forms)+6, len(snapshot.forms)+7
+	mediaSelect := "x." + strings.ReplaceAll(mediaColumns, ",", ",x.")
+	query := `WITH message_ranked AS (
+	 SELECT id,ts,ROW_NUMBER() OVER (PARTITION BY id ORDER BY received_at,chat_jid) rk
+	 FROM messages WHERE chat_jid IN (` + forms + `) AND seq<=?` + fmt.Sprint(maxParam) + `
+	 AND (?` + fmt.Sprint(fromParam) + `=0 OR ts>=?` + fmt.Sprint(fromParam) + `)
+	 AND (?` + fmt.Sprint(toParam) + `=0 OR ts<=?` + fmt.Sprint(toParam) + `)),
+	 selected AS (SELECT id,ts FROM message_ranked WHERE rk=1
+	 AND (?` + fmt.Sprint(cursorParam) + `=0 OR ts>?` + fmt.Sprint(tsParam) + ` OR (ts=?` + fmt.Sprint(tsParam) + ` AND id>?` + fmt.Sprint(idParam) + `))
+	 ORDER BY ts,id LIMIT ?` + fmt.Sprint(limitParam) + `),
+	 media_ranked AS (SELECT ` + mediaColumns + `,ROW_NUMBER() OVER (PARTITION BY message_id ORDER BY chat_jid) rk
+	 FROM media WHERE chat_jid IN (` + forms + `))
+	 SELECT ` + mediaSelect + `,s.ts FROM selected s JOIN media_ranked x ON x.message_id=s.id AND x.rk=1
+	 ORDER BY s.ts,s.id`
 	var out []ExportRecord
-	err := s.scanRows(ctx, query, []any{p.CanonicalJID, p.From, p.To, hasCursor, p.AfterTS, p.AfterID, limit}, func(rows *sql.Rows) error {
+	err = s.scanRows(ctx, query, args, func(rows *sql.Rows) error {
 		var media Media
-		if err := rows.Scan(media.fields()...); err != nil {
+		var messageTS int64
+		if err := rows.Scan(append(media.fields(), &messageTS)...); err != nil {
 			return err
 		}
-		out = append(out, ExportRecord{Message: Message{ChatJID: p.CanonicalJID, ID: media.MessageID, Timestamp: media.MessageTimestamp}, Media: &media})
+		out = append(out, ExportRecord{Message: Message{ChatJID: p.CanonicalJID, ID: media.MessageID, Timestamp: messageTS}, Media: &media})
 		return nil
 	})
 	if err != nil {

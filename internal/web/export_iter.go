@@ -57,7 +57,7 @@ func (i *messageIter) next() (*store.ExportRecord, error) {
 		return nil, nil
 	}
 	if i.at >= len(i.page) {
-		p, err := i.s.d.Store.ExportPage(i.ctx, store.ExportParams{CanonicalJID: i.x.jid, From: i.x.from, To: i.x.to, AfterTS: i.ts, AfterID: i.id, HasCursor: i.cursor, DuplicateStateKnown: true, HasDuplicates: i.x.hasDuplicates, Forms: i.x.aliases, SkipEvents: true, SkipMentions: true, Limit: exportPageSize})
+		p, err := i.s.d.Store.ExportPage(i.ctx, store.ExportParams{CanonicalJID: i.x.jid, Snapshot: i.x.snapshot, From: i.x.from, To: i.x.to, AfterTS: i.ts, AfterID: i.id, HasCursor: i.cursor, SkipEvents: true, SkipMentions: true, Limit: exportPageSize})
 		if err != nil {
 			return nil, err
 		}
