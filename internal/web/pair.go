@@ -261,13 +261,22 @@ func (s *Server) pairQR(w http.ResponseWriter, r *http.Request) {
 
 // writePair sends the pair panel as the SSE event "pair".
 func (s *Server) writePair(ctx context.Context, w http.ResponseWriter) error {
-	v, err := s.pairView(ctx)
+	wire, err := s.renderPairEvent(ctx)
 	if err != nil {
 		return err
 	}
+	_, err = w.Write(wire)
+	return err
+}
+
+func (s *Server) renderPairEvent(ctx context.Context) ([]byte, error) {
+	v, err := s.pairView(ctx)
+	if err != nil {
+		return nil, err
+	}
 	var buf bytes.Buffer
 	if err := s.pages["pair"].ExecuteTemplate(&buf, "pair_panel", v); err != nil {
-		return err
+		return nil, err
 	}
-	return writeEvent(w, "", "pair", buf.String())
+	return encodeEvent("", "pair", buf.String()), nil
 }
