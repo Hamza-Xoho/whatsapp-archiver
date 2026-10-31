@@ -37,6 +37,7 @@ func TestW6IDevseedPairFragmentBudget(t *testing.T) {
 	for i := 0; i < 35; i++ {
 		w := newPairStopWriter()
 		req := httptest.NewRequest(http.MethodGet, "/events", nil)
+		req.Host = "localhost:8090"
 		start := time.Now()
 		s.Handler().ServeHTTP(w, req)
 		elapsed := time.Since(start)
