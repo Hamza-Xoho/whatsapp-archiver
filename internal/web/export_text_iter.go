@@ -10,46 +10,44 @@ type textMessageIter struct {
 	s       *Server
 	ctx     context.Context
 	x       exportScope
-	rows    *store.ExportTextRows
-	names   map[string]string
+	stream  *store.ExportTextStream
+	page    []store.ExportTextRecord
+	at      int
 	started bool
+	done    bool
 }
 
 func (i *textMessageIter) next() (*store.ExportTextRecord, error) {
+	if i.done {
+		return nil, nil
+	}
 	if !i.started {
-		rows, err := i.s.d.Store.OpenExportText(i.ctx, i.x.jid, i.x.snapshot, i.x.from, i.x.to)
+		stream, err := i.s.d.Store.OpenExportPageStream(i.ctx, store.ExportParams{CanonicalJID: i.x.jid, Snapshot: i.x.snapshot,
+			From: i.x.from, To: i.x.to, SkipEvents: true, SkipMentions: true, Limit: exportPageSize})
 		if err != nil {
 			return nil, err
 		}
-		i.rows, i.names, i.started = rows, make(map[string]string), true
+		i.stream, i.started = stream, true
 	}
-	if !i.rows.Next() {
-		return nil, i.rows.Err()
-	}
-	record, err := i.rows.Scan()
-	if err != nil {
-		return nil, err
-	}
-	sender := record.Message.SenderJID
-	if sender != "" {
-		name, ok := i.names[sender]
-		if !ok {
-			name, err = i.s.d.Store.ChatName(i.ctx, sender)
-			if err != nil {
-				return nil, err
-			}
-			i.names[sender] = name
+	if i.at >= len(i.page) {
+		page, err := i.stream.NextPage(i.ctx)
+		if err != nil {
+			return nil, err
 		}
-		if name != "" {
-			record.Message.PushName = name
+		i.page, i.at = page, 0
+		if len(page) == 0 {
+			i.done = true
+			return nil, nil
 		}
 	}
-	return &record, nil
+	r := i.page[i.at]
+	i.at++
+	return &r, nil
 }
 
 func (i *textMessageIter) close() {
-	if i.rows != nil {
-		_ = i.rows.Close()
+	if i.stream != nil {
+		_ = i.stream.Close()
 	}
 }
 

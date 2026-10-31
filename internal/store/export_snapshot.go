@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/binary"
 	"fmt"
 	"strings"
 )
@@ -10,13 +12,17 @@ import (
 // ExportSnapshot is Store-owned canonicalization state for one export. Its fields are deliberately private so callers
 // cannot inject aliases, suppress duplicate handling, or move the upper bound while a stream is in progress.
 type ExportSnapshot struct {
-	canonical     string
-	forms         []string
-	maxMessageSeq int64
-	maxEventSeq   int64
-	maxChatEvent  int64
-	maxMediaRowID int64
-	hasDuplicates bool
+	canonical      string
+	forms          []string
+	maxMessageSeq  int64
+	maxEventSeq    int64
+	maxChatEvent   int64
+	maxMediaRowID  int64
+	mediaCount     int64
+	mediaMinTS     int64
+	mediaMaxTS     int64
+	duplicateNames filenameBloom
+	hasDuplicates  bool
 }
 
 // NewExportSnapshot captures forms and every insert-only/artifact upper bound in one SQLite read snapshot.
@@ -56,10 +62,40 @@ func (s *Store) NewExportSnapshot(ctx context.Context, canonical string) (*Expor
 	 (SELECT COUNT(*)<>COUNT(DISTINCT id) FROM messages WHERE chat_jid IN (` + marks + `)),
 	 COALESCE((SELECT MAX(seq) FROM message_events WHERE chat_jid IN (` + marks + `)),0),
 	 COALESCE((SELECT MAX(rowid) FROM chat_events WHERE chat_jid IN (` + marks + `)),0),
-	 COALESCE((SELECT MAX(rowid) FROM media WHERE chat_jid IN (` + marks + `)),0)`
+	 COALESCE((SELECT MAX(rowid) FROM media WHERE chat_jid IN (` + marks + `)),0),
+	 (SELECT COUNT(*) FROM media WHERE chat_jid IN (` + marks + `))`
 	if err = tx.QueryRowContext(ctx, query, args...).Scan(&snapshot.maxMessageSeq, &snapshot.hasDuplicates,
-		&snapshot.maxEventSeq, &snapshot.maxChatEvent, &snapshot.maxMediaRowID); err != nil {
+		&snapshot.maxEventSeq, &snapshot.maxChatEvent, &snapshot.maxMediaRowID, &snapshot.mediaCount); err != nil {
 		return nil, fmt.Errorf("snapshot export %s: %w", canonical, err)
+	}
+	if snapshot.mediaCount > 0 {
+		mediaArgs := append(append([]any(nil), args...), snapshot.maxMediaRowID, snapshot.maxMessageSeq)
+		mediaMax, messageMax := len(args)+1, len(args)+2
+		mediaRange := `SELECT COALESCE(MIN((SELECT MIN(m.ts) FROM messages m WHERE m.id=x.message_id AND m.chat_jid IN (` + marks + `) AND m.seq<=?` + fmt.Sprint(messageMax) + `)),0),
+		 COALESCE(MAX((SELECT MAX(m.ts) FROM messages m WHERE m.id=x.message_id AND m.chat_jid IN (` + marks + `) AND m.seq<=?` + fmt.Sprint(messageMax) + `)),0)
+		 FROM media x WHERE x.chat_jid IN (` + marks + `) AND x.rowid<=?` + fmt.Sprint(mediaMax)
+		if err = tx.QueryRowContext(ctx, mediaRange, mediaArgs...).Scan(&snapshot.mediaMinTS, &snapshot.mediaMaxTS); err != nil {
+			return nil, fmt.Errorf("snapshot export media range %s: %w", canonical, err)
+		}
+	}
+	if snapshot.mediaCount > 1 {
+		duplicateArgs := append(append([]any(nil), args...), snapshot.maxMediaRowID)
+		duplicateRows, queryErr := tx.QueryContext(ctx, `SELECT filename FROM media WHERE chat_jid IN (`+marks+
+			`) AND rowid<=?`+fmt.Sprint(len(args)+1)+` GROUP BY filename HAVING COUNT(*)>1`, duplicateArgs...)
+		if queryErr != nil {
+			return nil, queryErr
+		}
+		for duplicateRows.Next() {
+			var filename string
+			if err = duplicateRows.Scan(&filename); err != nil {
+				_ = duplicateRows.Close()
+				return nil, err
+			}
+			snapshot.duplicateNames.add(filename)
+		}
+		if err = duplicateRows.Close(); err != nil {
+			return nil, err
+		}
 	}
 	if err = tx.Commit(); err != nil {
 		return nil, err
@@ -69,6 +105,39 @@ func (s *Store) NewExportSnapshot(ctx context.Context, canonical string) (*Expor
 
 // Aliases returns a copy suitable for export metadata.
 func (s *ExportSnapshot) Aliases() []string { return append([]string(nil), s.forms...) }
+
+const filenameBloomBytes = 8 << 10
+
+type filenameBloom [filenameBloomBytes]byte
+
+func (b *filenameBloom) add(name string) {
+	for _, bit := range filenameBloomBits(name) {
+		b[bit/8] |= 1 << (bit % 8)
+	}
+}
+
+func (b *filenameBloom) contains(name string) bool {
+	for _, bit := range filenameBloomBits(name) {
+		if b[bit/8]&(1<<(bit%8)) == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func filenameBloomBits(name string) [3]uint64 {
+	sum := sha256.Sum256([]byte(name))
+	const bits = filenameBloomBytes * 8
+	return [3]uint64{binary.LittleEndian.Uint64(sum[0:8]) % bits, binary.LittleEndian.Uint64(sum[8:16]) % bits,
+		binary.LittleEndian.Uint64(sum[16:24]) % bits}
+}
+
+func (s *ExportSnapshot) mediaNameCount(filename string) int {
+	if s.duplicateNames.contains(filename) {
+		return 2
+	}
+	return 1
+}
 
 func (s *Store) exportSnapshot(ctx context.Context, canonical string, supplied *ExportSnapshot) (*ExportSnapshot, error) {
 	if supplied == nil {

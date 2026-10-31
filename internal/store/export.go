@@ -36,6 +36,13 @@ type ExportRecord struct {
 	MediaNameCount int `json:"-"`
 }
 
+// ExportTextRecord is one bounded-page record shaped for the WhatsApp-compatible text transcript.
+type ExportTextRecord struct {
+	Message        Message
+	Media          *Media
+	MediaNameCount int
+}
+
 // ExportAliases returns every stored form of canonicalJID in stable order.
 func (s *Store) ExportAliases(ctx context.Context, canonicalJID string) ([]string, error) {
 	known, err := s.ChatKnown(ctx, canonicalJID)
@@ -221,6 +228,9 @@ ORDER BY ts,id LIMIT ?` + fmt.Sprint(limitParam)
 	}
 	for i := range out {
 		out[i].Message.RawProto = nil
+		if out[i].Media != nil {
+			out[i].MediaNameCount = snapshot.mediaNameCount(out[i].Media.Filename)
+		}
 		for j := range out[i].Events {
 			out[i].Events[j].RawProto = nil
 		}
