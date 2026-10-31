@@ -115,11 +115,11 @@ func TestW6IStalePairRunCannotOverwriteCancelOrReplacement(t *testing.T) {
 	if p.Paired() || p.HealthState() != "starting" {
 		t.Fatalf("stale success overwrote replacement: paired=%v state=%q", p.Paired(), p.HealthState())
 	}
-	if !p.setStateForRun(current, "connected", true) {
+	if !p.setStateForRun(current, "pairing", false) {
 		t.Fatal("the active uncancelled run could not mutate pairing state")
 	}
-	if !p.Paired() || p.HealthState() != "connected" {
-		t.Fatalf("active success was lost: paired=%v state=%q", p.Paired(), p.HealthState())
+	if p.Paired() || p.HealthState() != "pairing" {
+		t.Fatalf("active state was lost: paired=%v state=%q", p.Paired(), p.HealthState())
 	}
 	if err := p.CancelPairing(); err != nil {
 		t.Fatal(err)
@@ -185,7 +185,7 @@ func TestW6IDevPairerHTTPScenarioCoversEverySafeStateWithoutArchiveWrites(t *tes
 
 	wantPage(t, h, "Pair WhatsApp") // not paired
 	postPair(t, h, "/pair/start")
-	wantPage(t, h, "Preparing a QR code") // starting/waiting
+	wantPage(t, h, "Starting pairing") // starting/waiting
 	wantPage(t, h, `src="/pair/qr.png?n=1"`)
 	wantPage(t, h, `src="/pair/qr.png?n=2"`) // renewed QR
 	wantPage(t, h, "Pairing failed safely")
@@ -196,7 +196,7 @@ func TestW6IDevPairerHTTPScenarioCoversEverySafeStateWithoutArchiveWrites(t *tes
 	postPair(t, h, "/pair/restart") // LoggedOut / Pair again
 	wantPage(t, h, "Paired. Capture is running.")
 	postPair(t, h, "/pair/restart") // voluntary re-pair
-	wantPage(t, h, "Preparing a QR code")
+	wantPage(t, h, "Starting pairing")
 	postPair(t, h, "/pair/cancel")
 	wantPage(t, h, "Pairing cancelled")
 	postPair(t, h, "/pair/start") // Cancel -> immediate Start must not reuse the cancelled run.
