@@ -185,13 +185,31 @@ func ensureV1Columns(db *sql.DB) error {
 	if err != nil {
 		return fmt.Errorf("inspect chat stats schema: %w", err)
 	}
+	tx, err := db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin chat stats message rows upgrade: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
 	if !found {
-		if _, err = db.Exec(`ALTER TABLE chat_stats ADD COLUMN message_rows INTEGER NOT NULL DEFAULT 0`); err != nil {
+		if _, err = tx.Exec(`ALTER TABLE chat_stats ADD COLUMN message_rows INTEGER NOT NULL DEFAULT 0`); err != nil {
 			return fmt.Errorf("upgrade chat stats message rows: %w", err)
 		}
-		if _, err = db.Exec(`UPDATE chat_stats SET message_rows=(SELECT COUNT(*) FROM chat_canonical a JOIN messages m ON m.chat_jid=a.alias WHERE a.canonical=chat_stats.canonical)`); err != nil {
+	}
+	var ready string
+	if err = tx.QueryRow(`SELECT COALESCE((SELECT value FROM archive_meta WHERE key='message_rows_ready'),'')`).Scan(&ready); err != nil {
+		return fmt.Errorf("inspect chat stats message rows upgrade: %w", err)
+	}
+	if ready != "1" {
+		if _, err = tx.Exec(`UPDATE chat_stats SET message_rows=(SELECT COUNT(*) FROM chat_canonical a JOIN messages m ON m.chat_jid=a.alias WHERE a.canonical=chat_stats.canonical)`); err != nil {
 			return fmt.Errorf("backfill chat stats message rows: %w", err)
 		}
+		if _, err = tx.Exec(`INSERT INTO archive_meta(key,value) VALUES('message_rows_ready','1')
+			ON CONFLICT(key) DO UPDATE SET value=excluded.value`); err != nil {
+			return fmt.Errorf("record chat stats message rows upgrade: %w", err)
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("commit chat stats message rows upgrade: %w", err)
 	}
 	return ensureV1IndexShapes(db)
 }
