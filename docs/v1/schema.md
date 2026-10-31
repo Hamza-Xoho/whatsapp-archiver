@@ -225,6 +225,7 @@ CREATE TABLE chat_stats (
   name TEXT NOT NULL DEFAULT '',              -- chat name, else contact/push name, else ''
   type TEXT NOT NULL DEFAULT '',
   messages INTEGER NOT NULL DEFAULT 0,        -- distinct ids over all aliases
+  message_rows INTEGER NOT NULL DEFAULT 0,    -- raw rows; greater than messages means alias duplicates
   last_ts INTEGER NOT NULL DEFAULT 0, oldest_ts INTEGER NOT NULL DEFAULT 0,
   oldest_history_ts INTEGER,                  -- NULL: no history message
   media_done INTEGER NOT NULL DEFAULT 0, media_failed INTEGER NOT NULL DEFAULT 0,
@@ -342,7 +343,7 @@ name and address, contact names, document filename.
    row from the mapping transaction).
 2. Directory upserts; if the chat's display name or type changed, update `chat_stats.name/type`.
 3. Message: dedupe = `EXISTS` on `(alias, id)` over `chat_canonical_by` (probes the `UNIQUE` index); if new, insert,
-   then `chat_stats`: `messages+1`, `last_ts`, `oldest_ts`, `oldest_history_ts`; FTS row if the body is not empty;
+   then `chat_stats`: `messages+1`, `message_rows+1`, `last_ts`, `oldest_ts`, `oldest_history_ts`; FTS row if the body is not empty;
    media row (`media_pending+1` unless `skipped`); recompute `gaps_open` only when `message_events_gaps` has a row
    for this id in the canonical.
 4. Event: `undecryptable` → recompute that canonical's `gaps_open`; a `source_id` matching a gap → recompute;

@@ -1,6 +1,6 @@
 # W6(i) UI evaluation
 
-Status: automated and static evaluation complete at `c04ddae`; interactive browser
+Status: automated and static evaluation complete at `19ffcfe`; interactive browser
 evaluation blocked by the T3 preview environment on 31 Oct 2026. This evaluation
 used synthetic data and fake WhatsApp boundaries only. It did not pair, import a
 session, connect to WhatsApp, access ryzen, or deploy anything.
@@ -9,7 +9,7 @@ session, connect to WhatsApp, access ryzen, or deploy anything.
 
 - Host: Linux 7.0.0-38-generic x86_64, UTC; Go 1.26.9 linux/amd64.
 - Branch/base: `v1/w6i-evaluation` from `origin/main` `41e91d9`.
-- Evaluated implementation revision: `c04ddae` (the documentation commit is later).
+- Evaluated implementation revision: `19ffcfe` (the documentation commit is later).
 - Data: ignored `data/` copies of deterministic seed 42: 250 canonical chats,
   exactly 300,000 messages, and 50,000 messages concentrated in one chat. The
   sentinel is `SEED-42-000000000` at timestamp 1761436842.
@@ -28,13 +28,19 @@ mkdir -p data/ui-evaluation-18090
 printf 'web:\n  listen: 127.0.0.1:18090\n' > data/ui-evaluation-18090/config.yaml
 ./.tools/go/bin/go run ./cmd/archiver devseed --data data/ui-evaluation-18090 --seed 42 --chats 250 --messages 300000 --large-chat-messages 50000 --simulate-live 5/s
 preview_status
-preview_open http://127.0.0.1:18090
+preview_open -> tab_2
+preview_navigate tab_2 -> http://127.0.0.1:18090
+preview_snapshot tab_2
+preview_open -> tab_3
+preview_navigate tab_3 -> http://localhost:18090
+preview_snapshot tab_3
+preview_navigate client preview-eacecf7b02ac81a6dbc8971bee158176 -> environment port 18090
 ```
 
 `make check-w6i` verifies the exact seed identity, gives each sequential package
 its own disposable archive copy, and exercises the devseed, store and HTTP layers.
 Every red/green implementation pair ran `make check`; the final implementation
-gate passed race tests, the 300k non-race scale test (17.389 s), lint and all five
+gate passed race tests, the 300k non-race scale test (17.491 s), lint and all five
 cross-platform builds.
 
 ## Browser tooling limitation
@@ -81,16 +87,16 @@ required bounded shape were asserted, not only elapsed time.
 
 | Operation | Captured result | Budget/result |
 |---|---:|---|
-| Shell / pairing page | pair 0.070/0.266 ms p50/p95 | <100 ms, PASS |
-| Pair SSE fragment | devseed 0.139/0.226 ms p50/p95; 738 bytes | <50 ms, PASS |
-| Chats first / filtered / next | 11.171/12.334; 14.003/26.267; 12.075/20.473 ms p50/p95 | <150 ms, PASS |
-| Row swap / bulk preview | 21.229/30.649; 15.778/21.969 ms p50/p95 | <50 / 150 ms, PASS |
-| Viewer initial / older / newer / jump | 131.018/139.298; 24.537/29.217; 23.915/31.244; 14.827/16.813 ms p50/p95 | <150 ms, PASS |
-| In-chat / Arabic global search | 264.395/271.013; 8.043/10.461 ms p50/p95 | <300 ms, PASS |
-| Logging overview / slowest section | 15.104/20.532; feed 3.361/4.424 ms p50/p95 | <150 ms, PASS |
-| Health / feed fragments | 0.154/0.184; 5.025/6.907 ms p50/p95 | <50 ms, PASS |
-| Export headers | 62.817 ms p95 | <150 ms, PASS |
-| Validated 20 MiB local ZIP | 618.857 ms, 32.3 MiB/s | >=20 MiB/s, PASS |
+| Shell / pairing page | pair 0.051/0.176 ms p50/p95 | <100 ms, PASS |
+| Pair SSE fragment | devseed 0.128/0.625 ms p50/p95; 738 bytes | <50 ms, PASS |
+| Chats first / filtered / next | 11.063/30.523; 12.879/21.846; 13.427/24.063 ms p50/p95 | <150 ms, PASS |
+| Row swap / bulk preview | 11.668/23.201; 22.275/33.631 ms p50/p95 | <50 / 150 ms, PASS |
+| Viewer initial / older / newer / jump | 128.947/136.026; 25.104/37.297; 20.866/28.450; 14.844/16.028 ms p50/p95 | <150 ms, PASS |
+| In-chat / Arabic global search | 266.011/272.934; 5.589/8.138 ms p50/p95 | <300 ms, PASS |
+| Logging overview / slowest section | 14.736/19.210; history 4.901/7.612 ms p50/p95 | <150 ms, PASS |
+| Health / feed fragments | 0.135/0.161; 4.202/6.816 ms p50/p95 | <50 ms, PASS |
+| Export headers | 0.492 ms p95 | <150 ms, PASS |
+| Validated 20 MiB local ZIP | 665.033 ms, 30.1 MiB/s | >=20 MiB/s, PASS |
 
 Additional bounds:
 
@@ -105,13 +111,18 @@ Additional bounds:
   media names in exactly three pages (1,000/1,000/201). Text export keeps one
   bounded page and per-page sender/media facts; filename collision detection uses
   a fixed 8 KiB snapshot Bloom filter. Snapshot startup is exactly three queries
-  (known chat, aliases and indexed insert-only bounds), with an executable EXPLAIN
-  assertion that no startup query touches media. A held read transaction freezes
-  mutable media rows; ZIP uses one media traversal and a private on-disk missing
-  manifest spool. Export cancellation and snapshot upper bounds are asserted.
-- The slowest measured Chats SQL was filtered ordered membership at 2.327 ms p95;
-  the slowest Logging read model was gaps at 2.816 ms. The slowest full HTTP
-  operation was in-chat search at 271.013 ms p95. No page hides server work behind
+  (indexed chat statistics, aliases and SQLite min/max rowid seeks), with executable
+  EXPLAIN assertions against temporary distinct state or media access. The derived
+  raw-row count makes duplicate detection a primary-key lookup; winner checks stay
+  page-local only for chats that actually contain alias duplicates. A held read
+  transaction freezes mutable media rows while a private disk plan is produced;
+  it closes before response-body backpressure, and validation failures close it
+  immediately. WAL checkpoint regressions pin both paths. ZIP then streams each
+  media file once and uses a private on-disk missing manifest. Export cancellation,
+  snapshot upper bounds and transcript-to-ZIP attachment names are asserted.
+- The slowest measured Chats SQL was filtered ordered membership at 2.334 ms p95;
+  the slowest Logging read model was gaps at 3.852 ms. The slowest full HTTP
+  operation was in-chat search at 272.934 ms p95. No page hides server work behind
   an unmeasured loading fragment.
 
 ## Accessibility and design review

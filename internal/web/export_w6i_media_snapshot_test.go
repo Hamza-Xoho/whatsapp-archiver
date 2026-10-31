@@ -15,7 +15,7 @@ import (
 	"whatsapp-archiver/internal/testkit"
 )
 
-func TestZIPMediaSnapshotSurvivesConcurrentStateAndFileChanges(t *testing.T) {
+func TestZIPMediaSnapshotKeepsPendingStateAcrossConcurrentCompletion(t *testing.T) {
 	u := newChatsUI(t)
 	chat, id := "snapshot@g.us", "mutable-media"
 	message := testkit.Message(chat, id, dashNow)
