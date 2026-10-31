@@ -1,6 +1,8 @@
 package devseed_test
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"html"
 	"io"
@@ -134,11 +136,38 @@ func TestW6IPerformanceBudgets(t *testing.T) {
 	}
 	req := httptest.NewRequest(http.MethodGet, "/chats/100000@lid/export/download?format=zip", nil)
 	req.Host = "localhost:8080"
-	w := &discardWriter{header: make(http.Header), started: time.Now()}
+	w := &discardWriter{header: make(http.Header), started: time.Now(), capture: true}
 	h.ServeHTTP(w, req)
 	elapsed := time.Since(w.started)
 	if elapsed >= time.Second {
 		t.Fatalf("20 MiB local ZIP stream took %s, want >=20 MiB/s", elapsed)
+	}
+	if w.status != http.StatusOK || w.header.Get("Content-Type") != "application/zip" || w.bytes < mediaBytes {
+		t.Fatalf("ZIP status/type/bytes = %d/%q/%d", w.status, w.header.Get("Content-Type"), w.bytes)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(w.body.Bytes()), int64(w.body.Len()))
+	if err != nil {
+		t.Fatalf("20 MiB stream is not a valid ZIP: %v", err)
+	}
+	var throughput *zip.File
+	for _, entry := range zr.File {
+		if entry.Name == "throughput.bin" {
+			throughput = entry
+			break
+		}
+	}
+	if throughput == nil || throughput.UncompressedSize64 != uint64(mediaBytes) {
+		t.Fatalf("ZIP throughput entry = %+v, want throughput.bin with %d bytes", throughput, mediaBytes)
+	}
+	reader, err := throughput.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	checker := &zeroCheckingWriter{}
+	_, copyErr := io.Copy(checker, reader)
+	closeErr := reader.Close()
+	if copyErr != nil || closeErr != nil || checker.nonzero || checker.bytes != mediaBytes {
+		t.Fatalf("throughput content bytes/nonzero/copy/close = %d/%v/%v/%v", checker.bytes, checker.nonzero, copyErr, closeErr)
 	}
 	t.Logf("20 MiB ZIP stream %s (%.1f MiB/s), export headers p95 %s", elapsed, 20/elapsed.Seconds(), percentile95(headerSamples))
 }
@@ -192,11 +221,13 @@ func percentile(samples []time.Duration, n int) time.Duration {
 
 type discardWriter struct {
 	header  http.Header
+	body    bytes.Buffer
 	status  int
 	started time.Time
 	first   time.Time
 	bytes   int64
 	cancel  context.CancelFunc
+	capture bool
 }
 
 func (w *discardWriter) Header() http.Header { return w.header }
@@ -214,7 +245,23 @@ func (w *discardWriter) Write(body []byte) (int, error) {
 		w.WriteHeader(http.StatusOK)
 	}
 	w.bytes += int64(len(body))
+	if w.capture {
+		_, _ = w.body.Write(body)
+	}
 	return len(body), nil
+}
+
+type zeroCheckingWriter struct {
+	bytes   int64
+	nonzero bool
+}
+
+func (w *zeroCheckingWriter) Write(p []byte) (int, error) {
+	w.bytes += int64(len(p))
+	for _, value := range p {
+		w.nonzero = w.nonzero || value != 0
+	}
+	return len(p), nil
 }
 
 type zeroReader struct{}
