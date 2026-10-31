@@ -99,9 +99,19 @@ func (s *ExportTextStream) NextPage(ctx context.Context) ([]ExportTextRecord, er
 		i := at[media.MessageID]
 		if out[i].Media == nil {
 			out[i].Media = &media
-			out[i].MediaNameCount = s.snapshot.mediaNameCount(media.Filename)
 		}
 		return nil
 	})
-	return out, err
+	if err != nil {
+		return out, err
+	}
+	// The media lookup is keyed for bounded enrichment rather than presentation
+	// order. Apply collision state in the chronological message-page order so
+	// transcript and ZIP traversals choose the same familiar/hash names.
+	for i := range out {
+		if out[i].Media != nil {
+			out[i].MediaNameCount = s.snapshot.mediaNameCount(out[i].Media.Filename)
+		}
+	}
+	return out, nil
 }
