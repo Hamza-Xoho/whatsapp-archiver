@@ -10,6 +10,7 @@ import (
 	"io"
 	"mime"
 	"net/http"
+	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -81,7 +82,17 @@ func (s *Server) exportDownload(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	defer func() { _ = scope.snapshot.Close() }()
+	spool, err := os.CreateTemp("", "whatsapp-archiver-export-*")
+	if err != nil {
+		_ = scope.snapshot.Close()
+		http.Error(w, errExportFailed.Error(), http.StatusInternalServerError)
+		return
+	}
+	spoolName := spool.Name()
+	defer func() {
+		_ = spool.Close()
+		_ = os.Remove(spoolName)
+	}()
 	ext := map[string]string{"json": "json", "html": "html", "txt": "_chat.txt", "zip": "zip"}[scope.format]
 	filename := safeExportName(scope.name) + "." + ext
 	h := w.Header()
@@ -90,20 +101,44 @@ func (s *Server) exportDownload(w http.ResponseWriter, r *http.Request) {
 	switch scope.format {
 	case "json":
 		h.Set("Content-Type", "application/json; charset=utf-8")
-		err = s.streamJSON(r.Context(), w, scope)
 	case "html":
 		h.Set("Content-Type", "text/html; charset=utf-8")
 		h.Set("Content-Security-Policy", "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:; media-src data:")
-		err = s.streamHTML(r.Context(), w, scope)
 	case "txt":
 		h.Set("Content-Type", "text/plain; charset=utf-8")
-		err = s.streamText(r.Context(), w, scope)
 	case "zip":
 		h.Set("Content-Type", "application/zip")
-		err = s.streamZIP(r.Context(), w, scope)
+	}
+	w.WriteHeader(http.StatusOK)
+	err = s.writeExport(r.Context(), spool, scope)
+	closeErr := scope.snapshot.Close()
+	scope.snapshot = nil
+	if err == nil {
+		err = closeErr
+	}
+	if err == nil {
+		_, err = spool.Seek(0, io.SeekStart)
+	}
+	if err == nil {
+		err = copyContext(r.Context(), w, spool)
 	}
 	if err != nil {
 		s.d.Logger.Error("chat export ended", "format", scope.format, "err", err)
+	}
+}
+
+func (s *Server) writeExport(ctx context.Context, w io.Writer, scope exportScope) error {
+	switch scope.format {
+	case "json":
+		return s.streamJSON(ctx, w, scope)
+	case "html":
+		return s.streamHTML(ctx, w, scope)
+	case "txt":
+		return s.streamText(ctx, w, scope)
+	case "zip":
+		return s.streamZIP(ctx, w, scope)
+	default:
+		return errExportFailed
 	}
 }
 
@@ -140,6 +175,12 @@ func (s *Server) validateExport(r *http.Request) (exportScope, int, error) {
 	if err != nil {
 		return x, 500, errExportFailed
 	}
+	keepSnapshot := false
+	defer func() {
+		if !keepSnapshot {
+			_ = x.snapshot.Close()
+		}
+	}()
 	x.aliases = x.snapshot.Aliases()
 	x.name, err = s.d.Store.ChatName(r.Context(), x.jid)
 	if err != nil {
@@ -155,6 +196,7 @@ func (s *Server) validateExport(r *http.Request) (exportScope, int, error) {
 	if !found {
 		return x, 400, errExportEmpty
 	}
+	keepSnapshot = true
 	return x, 200, nil
 }
 
