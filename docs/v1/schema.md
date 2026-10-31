@@ -233,6 +233,7 @@ CREATE TABLE chat_stats (
   media_pending INTEGER NOT NULL DEFAULT 0,   -- pending + downloading
   media_bytes INTEGER NOT NULL DEFAULT 0,     -- declared_size of done rows (FR-25)
   gaps_open INTEGER NOT NULL DEFAULT 0) WITHOUT ROWID;
+INSERT INTO archive_meta(key,value) VALUES ('message_rows_ready','1');
 CREATE INDEX chat_stats_recent ON chat_stats(last_ts DESC, canonical);
 -- rowid = messages.seq (text + caption + kind strings) or -message_events.seq (edit text). R13, R18.
 CREATE VIRTUAL TABLE search_fts USING fts5(body, content='', contentless_delete=1, tokenize='unicode61 remove_diacritics 0');

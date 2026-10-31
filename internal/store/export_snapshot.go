@@ -22,7 +22,8 @@ type ExportSnapshot struct {
 	hasDuplicates  bool
 }
 
-// NewExportSnapshot captures forms and every insert-only/artifact upper bound in one SQLite read snapshot.
+// NewExportSnapshot captures forms and every insert-only/artifact upper bound in one SQLite read snapshot. The caller
+// owns a successful result and must call Close, including when later validation rejects the export.
 func (s *Store) NewExportSnapshot(ctx context.Context, canonical string) (*ExportSnapshot, error) {
 	snapshot, _, err := s.newExportSnapshot(ctx, canonical)
 	return snapshot, err

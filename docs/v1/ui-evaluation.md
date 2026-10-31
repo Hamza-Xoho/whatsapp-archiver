@@ -1,6 +1,6 @@
 # W6(i) UI evaluation
 
-Status: automated and static evaluation complete at `19ffcfe`; interactive browser
+Status: automated and static evaluation complete at `03e85fc`; interactive browser
 evaluation blocked by the T3 preview environment on 31 Oct 2026. This evaluation
 used synthetic data and fake WhatsApp boundaries only. It did not pair, import a
 session, connect to WhatsApp, access ryzen, or deploy anything.
@@ -9,7 +9,7 @@ session, connect to WhatsApp, access ryzen, or deploy anything.
 
 - Host: Linux 7.0.0-38-generic x86_64, UTC; Go 1.26.9 linux/amd64.
 - Branch/base: `v1/w6i-evaluation` from `origin/main` `41e91d9`.
-- Evaluated implementation revision: `19ffcfe` (the documentation commit is later).
+- Evaluated implementation revision: `03e85fc` (the documentation commit is later).
 - Data: ignored `data/` copies of deterministic seed 42: 250 canonical chats,
   exactly 300,000 messages, and 50,000 messages concentrated in one chat. The
   sentinel is `SEED-42-000000000` at timestamp 1761436842.
@@ -40,7 +40,7 @@ preview_navigate client preview-eacecf7b02ac81a6dbc8971bee158176 -> environment 
 `make check-w6i` verifies the exact seed identity, gives each sequential package
 its own disposable archive copy, and exercises the devseed, store and HTTP layers.
 Every red/green implementation pair ran `make check`; the final implementation
-gate passed race tests, the 300k non-race scale test (17.491 s), lint and all five
+gate passed race tests, the 300k non-race scale test (17.526 s), lint and all five
 cross-platform builds.
 
 ## Browser tooling limitation
@@ -87,16 +87,16 @@ required bounded shape were asserted, not only elapsed time.
 
 | Operation | Captured result | Budget/result |
 |---|---:|---|
-| Shell / pairing page | pair 0.051/0.176 ms p50/p95 | <100 ms, PASS |
-| Pair SSE fragment | devseed 0.128/0.625 ms p50/p95; 738 bytes | <50 ms, PASS |
-| Chats first / filtered / next | 11.063/30.523; 12.879/21.846; 13.427/24.063 ms p50/p95 | <150 ms, PASS |
-| Row swap / bulk preview | 11.668/23.201; 22.275/33.631 ms p50/p95 | <50 / 150 ms, PASS |
-| Viewer initial / older / newer / jump | 128.947/136.026; 25.104/37.297; 20.866/28.450; 14.844/16.028 ms p50/p95 | <150 ms, PASS |
-| In-chat / Arabic global search | 266.011/272.934; 5.589/8.138 ms p50/p95 | <300 ms, PASS |
-| Logging overview / slowest section | 14.736/19.210; history 4.901/7.612 ms p50/p95 | <150 ms, PASS |
-| Health / feed fragments | 0.135/0.161; 4.202/6.816 ms p50/p95 | <50 ms, PASS |
-| Export headers | 0.492 ms p95 | <150 ms, PASS |
-| Validated 20 MiB local ZIP | 665.033 ms, 30.1 MiB/s | >=20 MiB/s, PASS |
+| Shell / pairing page | pair 0.123/0.520 ms p50/p95 | <100 ms, PASS |
+| Pair SSE fragment | devseed 0.111/0.142 ms p50/p95; 738 bytes | <50 ms, PASS |
+| Chats first / filtered / next | 13.384/18.535; 12.758/23.718; 11.867/20.074 ms p50/p95 | <150 ms, PASS |
+| Row swap / bulk preview | 21.827/32.577; 22.559/32.586 ms p50/p95 | <50 / 150 ms, PASS |
+| Viewer initial / older / newer / jump | 130.087/137.300; 20.391/33.446; 21.848/29.704; 14.735/16.418 ms p50/p95 | <150 ms, PASS |
+| In-chat / Arabic global search | 264.590/270.685; 8.667/17.816 ms p50/p95 | <300 ms, PASS |
+| Logging overview / slowest section | 15.595/19.106; feed 4.169/6.485 ms p50/p95 | <150 ms, PASS |
+| Health / feed fragments | 0.134/0.151; 4.413/6.193 ms p50/p95 | <50 ms, PASS |
+| Export headers | 0.883 ms p95; real client receives them before the gated body | <150 ms, PASS |
+| Validated 20 MiB local ZIP | 721.675 ms, 27.7 MiB/s | >=20 MiB/s, PASS |
 
 Additional bounds:
 
@@ -111,18 +111,21 @@ Additional bounds:
   media names in exactly three pages (1,000/1,000/201). Text export keeps one
   bounded page and per-page sender/media facts; filename collision detection uses
   a fixed 8 KiB snapshot Bloom filter. Snapshot startup is exactly three queries
-  (indexed chat statistics, aliases and SQLite min/max rowid seeks), with executable
-  EXPLAIN assertions against temporary distinct state or media access. The derived
+  (indexed chat statistics, aliases and three SQLite primary-key tail seeks), with
+  executable EXPLAIN assertions requiring three `Last` operations and rejecting
+  aggregate, sort or forward-scan bytecode. The derived
   raw-row count makes duplicate detection a primary-key lookup; winner checks stay
   page-local only for chats that actually contain alias duplicates. A held read
   transaction freezes mutable media rows while a private disk plan is produced;
   it closes before response-body backpressure, and validation failures close it
-  immediately. WAL checkpoint regressions pin both paths. ZIP then streams each
-  media file once and uses a private on-disk missing manifest. Export cancellation,
-  snapshot upper bounds and transcript-to-ZIP attachment names are asserted.
-- The slowest measured Chats SQL was filtered ordered membership at 2.334 ms p95;
-  the slowest Logging read model was gaps at 3.852 ms. The slowest full HTTP
-  operation was in-chat search at 272.934 ms p95. No page hides server work behind
+  immediately. WAL checkpoint regressions pin both paths. The upgrade that adds
+  the derived raw-row count backfills and records completion in one transaction,
+  and repairs an interrupted pre-release upgrade. ZIP then streams each media file
+  once and uses a private on-disk missing manifest. Export cancellation, snapshot
+  upper bounds and transcript-to-ZIP attachment names are asserted.
+- The slowest measured Chats SQL was filtered ordered membership at 2.284 ms p95;
+  the slowest Logging read model was gaps at 2.658 ms. The slowest full HTTP
+  operation was in-chat search at 270.685 ms p95. No page hides server work behind
   an unmeasured loading fragment.
 
 ## Accessibility and design review
@@ -147,9 +150,13 @@ labels and insufficient bidi isolation. Red/green fixes now provide:
 
 No Critical or Important static/spec finding remains. Browser-dependent contrast,
 layout, focus order, media playback, console/network cleanliness and announcement
-quality remain ungraded because the preview client was unavailable. The existing
-Minor finding remains: Logging storage may perform up to ten bounded chat-name
-reads for its top-ten projection.
+quality remain ungraded because the preview client was unavailable. Remaining
+Minor findings are: the Viewer sender filter is free text rather than a populated
+selector; Chats' size compactor can concatenate adjacent inline accessible text;
+Logging storage may perform up to ten bounded chat-name reads for its top-ten
+projection; the cached seed hash does not cover every transitive CLI/store
+generation dependency; the slowest query inside in-chat search is not isolated;
+and a crash can leave private export-spool metadata in the system temp directory.
 
 ## Outcome and remaining work
 
