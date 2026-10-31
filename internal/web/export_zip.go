@@ -59,34 +59,6 @@ func copyContext(ctx context.Context, w io.Writer, r io.Reader) error {
 
 func (s *Server) streamZIP(ctx context.Context, w io.Writer, x exportScope) error {
 	z := zip.NewWriter(w)
-	manifest, err := z.Create("missing-media.txt")
-	if err != nil {
-		return err
-	}
-	err = s.eachExportMedia(ctx, x, func(r store.ExportRecord) error {
-		m := r.Media
-		if m == nil {
-			return nil
-		}
-		name := exportArchiveName(x, r)
-		path, ok := s.insideMediaDir(m.Path)
-		state := m.State
-		if !ok || state != "done" {
-			if state == "done" {
-				state = "missing"
-			}
-			_, e := fmt.Fprintf(manifest, "%s\t%s\t%s\n", r.Message.ID, name, state)
-			return e
-		}
-		if st, e2 := os.Stat(path); e2 != nil || !st.Mode().IsRegular() {
-			_, e := fmt.Fprintf(manifest, "%s\t%s\tmissing\n", r.Message.ID, name)
-			return e
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
 	tw, err := z.CreateHeader(&zip.FileHeader{Name: "_chat.txt", Method: zip.Store})
 	if err != nil {
 		return err
@@ -98,20 +70,32 @@ func (s *Server) streamZIP(ctx context.Context, w io.Writer, x exportScope) erro
 	if err = textBuffer.Flush(); err != nil {
 		return err
 	}
+	manifest, err := os.CreateTemp("", "whatsapp-archiver-missing-media-*")
+	if err != nil {
+		return err
+	}
+	manifestName := manifest.Name()
+	defer func() { _ = os.Remove(manifestName) }()
 	err = s.eachExportMedia(ctx, x, func(r store.ExportRecord) error {
 		m := r.Media
-		if m == nil || m.State != "done" {
-			return nil
-		}
-		path, ok := s.insideMediaDir(m.Path)
-		if !ok {
-			return nil
-		}
-		f, e := os.Open(path)
-		if e != nil {
+		if m == nil {
 			return nil
 		}
 		name := exportArchiveName(x, r)
+		path, ok := s.insideMediaDir(m.Path)
+		if m.State != "done" || !ok {
+			state := m.State
+			if state == "done" {
+				state = "missing"
+			}
+			_, e := fmt.Fprintf(manifest, "%s\t%s\t%s\n", r.Message.ID, name, state)
+			return e
+		}
+		f, e := os.Open(path)
+		if e != nil {
+			_, e = fmt.Fprintf(manifest, "%s\t%s\tmissing\n", r.Message.ID, name)
+			return e
+		}
 		zw, e := z.CreateHeader(&zip.FileHeader{Name: name, Method: zip.Store})
 		if e == nil {
 			e = copyContext(ctx, zw, f)
@@ -122,6 +106,22 @@ func (s *Server) streamZIP(ctx context.Context, w io.Writer, x exportScope) erro
 		}
 		return e
 	})
+	if err != nil {
+		_ = manifest.Close()
+		return err
+	}
+	if _, err = manifest.Seek(0, io.SeekStart); err != nil {
+		_ = manifest.Close()
+		return err
+	}
+	mw, err := z.Create("missing-media.txt")
+	if err == nil {
+		err = copyContext(ctx, mw, manifest)
+	}
+	closeErr := manifest.Close()
+	if err == nil {
+		err = closeErr
+	}
 	if err != nil {
 		return err
 	}

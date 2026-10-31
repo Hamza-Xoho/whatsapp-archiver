@@ -95,7 +95,7 @@ func (s *ExportTextStream) NextPage(ctx context.Context) ([]ExportTextRecord, er
 		marks[i] = fmt.Sprintf("?%d", len(args)+1)
 		args = append(args, id)
 	}
-	err := s.store.scanRows(ctx, `SELECT chat_jid,message_id,filename,message_ts FROM media WHERE chat_jid IN (`+forms+
+	err := s.snapshot.scanRows(ctx, `SELECT chat_jid,message_id,filename,message_ts FROM media WHERE chat_jid IN (`+forms+
 		`) AND rowid<=?`+fmt.Sprint(mediaMax)+` AND message_id IN (`+strings.Join(marks, ",")+`) ORDER BY chat_jid`, args, func(rows *sql.Rows) error {
 		var media Media
 		if err := rows.Scan(&media.ChatJID, &media.MessageID, &media.Filename, &media.MessageTimestamp); err != nil {

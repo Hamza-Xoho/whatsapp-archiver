@@ -12,6 +12,7 @@ import (
 // ExportSnapshot is Store-owned canonicalization state for one export. Its fields are deliberately private so callers
 // cannot inject aliases, suppress duplicate handling, or move the upper bound while a stream is in progress.
 type ExportSnapshot struct {
+	tx             *sql.Tx
 	canonical      string
 	forms          []string
 	maxMessageSeq  int64
@@ -31,7 +32,12 @@ func (s *Store) NewExportSnapshot(ctx context.Context, canonical string) (*Expor
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = tx.Rollback() }()
+	keep := false
+	defer func() {
+		if !keep {
+			_ = tx.Rollback()
+		}
+	}()
 	var known bool
 	if err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM chat_stats WHERE canonical=?1)`, canonical).Scan(&known); err != nil {
 		return nil, err
@@ -56,7 +62,7 @@ func (s *Store) NewExportSnapshot(ctx context.Context, canonical string) (*Expor
 		return nil, err
 	}
 	marks, args := exportFormMarks(forms)
-	snapshot := ExportSnapshot{canonical: canonical, forms: forms}
+	snapshot := ExportSnapshot{tx: tx, canonical: canonical, forms: forms}
 	query := `SELECT
 	 COALESCE((SELECT MAX(seq) FROM messages WHERE chat_jid IN (` + marks + `)),0),
 	 (SELECT COUNT(*)<>COUNT(DISTINCT id) FROM messages WHERE chat_jid IN (` + marks + `)),
@@ -97,10 +103,35 @@ func (s *Store) NewExportSnapshot(ctx context.Context, canonical string) (*Expor
 			return nil, err
 		}
 	}
-	if err = tx.Commit(); err != nil {
-		return nil, err
-	}
+	keep = true
 	return &snapshot, nil
+}
+
+// Close releases the SQLite read snapshot held for the whole artifact.
+func (s *ExportSnapshot) Close() error {
+	if s == nil || s.tx == nil {
+		return nil
+	}
+	err := s.tx.Rollback()
+	s.tx = nil
+	if err == sql.ErrTxDone {
+		return nil
+	}
+	return err
+}
+
+func (s *ExportSnapshot) scanRows(ctx context.Context, query string, args []any, each func(*sql.Rows) error) error {
+	rows, err := s.tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("export snapshot query: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		if err = each(rows); err != nil {
+			return fmt.Errorf("export snapshot scan: %w", err)
+		}
+	}
+	return rows.Err()
 }
 
 // Aliases returns a copy suitable for export metadata.

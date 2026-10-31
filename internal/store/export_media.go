@@ -54,7 +54,7 @@ func (s *Store) ExportMediaPage(ctx context.Context, p ExportParams) ([]ExportRe
 	 SELECT ` + mediaSelect + `,x.selected_ts FROM selected_media x
 	 ORDER BY x.selected_ts,x.message_id`
 	var out []ExportRecord
-	err = s.scanRows(ctx, query, args, func(rows *sql.Rows) error {
+	err = snapshot.scanRows(ctx, query, args, func(rows *sql.Rows) error {
 		var media Media
 		var messageTS int64
 		if err := rows.Scan(append(media.fields(), &messageTS)...); err != nil {

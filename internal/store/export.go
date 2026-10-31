@@ -211,7 +211,7 @@ ORDER BY ts,id LIMIT ?` + fmt.Sprint(limitParam)
 		mediaMarks[i] = fmt.Sprintf("?%d", len(mediaArgs)+1)
 		mediaArgs = append(mediaArgs, id)
 	}
-	err = s.scanRows(ctx, `SELECT chat_jid,message_id,sender_jid,source,type,mime,filename,path,sha256,state,reason,error_class,retry_direct_path,declared_size,updated_at,message_ts,enqueued_at,next_attempt_at,done_at,source_rank,duration_s,width,height,pages,http_status,attempts,from_me,thumb FROM media WHERE chat_jid IN (`+mediaForms+`) AND rowid<=?`+fmt.Sprint(mediaMaxParam)+` AND message_id IN (`+strings.Join(mediaMarks, ",")+`) ORDER BY chat_jid`, mediaArgs, func(rows *sql.Rows) error {
+	err = snapshot.scanRows(ctx, `SELECT chat_jid,message_id,sender_jid,source,type,mime,filename,path,sha256,state,reason,error_class,retry_direct_path,declared_size,updated_at,message_ts,enqueued_at,next_attempt_at,done_at,source_rank,duration_s,width,height,pages,http_status,attempts,from_me,thumb FROM media WHERE chat_jid IN (`+mediaForms+`) AND rowid<=?`+fmt.Sprint(mediaMaxParam)+` AND message_id IN (`+strings.Join(mediaMarks, ",")+`) ORDER BY chat_jid`, mediaArgs, func(rows *sql.Rows) error {
 		var m Media
 		if err := rows.Scan(&m.ChatJID, &m.MessageID, &m.SenderJID, &m.Source, &m.Type, &m.MIME, &m.Filename, &m.Path, &m.SHA256, &m.State, &m.Reason, &m.ErrorClass, &m.RetryDirectPath, &m.DeclaredSize, &m.UpdatedAt, &m.MessageTimestamp, &m.EnqueuedAt, &m.NextAttemptAt, &m.DoneAt, &m.SourceRank, &m.DurationS, &m.Width, &m.Height, &m.Pages, &m.HTTPStatus, &m.Attempts, &m.FromMe, &m.Thumb); err != nil {
 			return err

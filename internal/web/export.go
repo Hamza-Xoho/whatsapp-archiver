@@ -81,6 +81,7 @@ func (s *Server) exportDownload(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	defer func() { _ = scope.snapshot.Close() }()
 	ext := map[string]string{"json": "json", "html": "html", "txt": "_chat.txt", "zip": "zip"}[scope.format]
 	filename := safeExportName(scope.name) + "." + ext
 	h := w.Header()
