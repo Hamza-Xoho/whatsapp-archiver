@@ -79,3 +79,33 @@ func TestExportSnapshotFreezesAliasesMediaEventsAndEmptyDecision(t *testing.T) {
 		t.Fatalf("event timeline crossed snapshot: %+v", events)
 	}
 }
+
+func TestExportSnapshotFreezesExistingMediaRowValues(t *testing.T) {
+	s := open(t)
+	ctx := t.Context()
+	message := store.Message{ChatJID: "mutable@g.us", ID: "media", Kind: "document", Source: "live", Timestamp: 10, ReceivedAt: 10, RawProto: []byte("x")}
+	if _, err := s.InsertMessage(ctx, message); err != nil {
+		t.Fatal(err)
+	}
+	pending := store.Media{ChatJID: message.ChatJID, MessageID: message.ID, Source: "live", Type: "document", Filename: "artifact.bin",
+		State: "pending", MessageTimestamp: message.Timestamp, DeclaredSize: 15}
+	if _, err := s.Apply(ctx, store.Batch{Media: &pending}); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := s.NewExportSnapshot(ctx, message.ChatJID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := pending
+	done.State, done.Path, done.SHA256 = "done", "/changed/artifact.bin", "changed"
+	if err = s.UpdateMedia(ctx, done); err != nil {
+		t.Fatal(err)
+	}
+	page, err := s.ExportMediaPage(ctx, store.ExportParams{CanonicalJID: message.ChatJID, Snapshot: snapshot, Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page) != 1 || page[0].Media == nil || page[0].Media.State != "pending" || page[0].Media.Path != "" || page[0].Media.SHA256 != "" {
+		t.Fatalf("mutable media crossed snapshot: %+v", page)
+	}
+}
