@@ -19,7 +19,7 @@ import (
 	"whatsapp-archiver/internal/view"
 )
 
-const exportPageSize = 200
+const exportPageSize = 1000
 
 type exportClientError string
 
@@ -67,6 +67,7 @@ type exportScope struct {
 	from, to          int64
 	loc               *time.Location
 	aliases           []string
+	snapshot          *store.ExportSnapshot
 	generated         time.Time
 }
 
@@ -88,17 +89,22 @@ func (s *Server) exportDownload(w http.ResponseWriter, r *http.Request) {
 	switch scope.format {
 	case "json":
 		h.Set("Content-Type", "application/json; charset=utf-8")
-		err = s.streamJSON(r.Context(), w, scope)
 	case "html":
 		h.Set("Content-Type", "text/html; charset=utf-8")
 		h.Set("Content-Security-Policy", "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:; media-src data:")
-		err = s.streamHTML(r.Context(), w, scope)
 	case "txt":
 		h.Set("Content-Type", "text/plain; charset=utf-8")
-		err = s.streamText(r.Context(), w, scope)
 	case "zip":
 		h.Set("Content-Type", "application/zip")
+	}
+	w.WriteHeader(http.StatusOK)
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
+	if scope.format == "zip" {
 		err = s.streamZIP(r.Context(), w, scope)
+	} else {
+		err = s.streamSpooledExport(r.Context(), w, scope)
 	}
 	if err != nil {
 		s.d.Logger.Error("chat export ended", "format", scope.format, "err", err)
@@ -131,13 +137,20 @@ func (s *Server) validateExport(r *http.Request) (exportScope, int, error) {
 	if x.from > 0 && x.to > 0 && x.from > x.to {
 		return x, 400, errors.New("from must not be after to")
 	}
-	x.aliases, err = s.d.Store.ExportAliases(r.Context(), x.jid)
+	x.snapshot, err = s.d.Store.NewExportSnapshot(r.Context(), x.jid)
 	if errors.Is(err, sql.ErrNoRows) {
 		return x, 404, err
 	}
 	if err != nil {
 		return x, 500, errExportFailed
 	}
+	keepSnapshot := false
+	defer func() {
+		if !keepSnapshot {
+			_ = x.snapshot.Close()
+		}
+	}()
+	x.aliases = x.snapshot.Aliases()
 	x.name, err = s.d.Store.ChatName(r.Context(), x.jid)
 	if err != nil {
 		return x, 500, errExportFailed
@@ -145,13 +158,14 @@ func (s *Server) validateExport(r *http.Request) (exportScope, int, error) {
 	if x.name == "" {
 		x.name = x.jid
 	}
-	first, err := s.d.Store.ExportPage(r.Context(), store.ExportParams{CanonicalJID: x.jid, From: x.from, To: x.to, Limit: 1})
+	found, err := s.d.Store.ExportSnapshotHasMessages(r.Context(), x.snapshot, x.from, x.to)
 	if err != nil {
 		return x, 500, errExportFailed
 	}
-	if len(first) == 0 {
+	if !found {
 		return x, 400, errExportEmpty
 	}
+	keepSnapshot = true
 	return x, 200, nil
 }
 
@@ -195,7 +209,7 @@ func (s *Server) eachExport(ctx context.Context, x exportScope, fn func(store.Ex
 	var id string
 	hasCursor := false
 	for {
-		page, err := s.d.Store.ExportPage(ctx, store.ExportParams{CanonicalJID: x.jid, From: x.from, To: x.to, AfterTS: ts, AfterID: id, HasCursor: hasCursor, Limit: exportPageSize})
+		page, err := s.d.Store.ExportPage(ctx, store.ExportParams{CanonicalJID: x.jid, Snapshot: x.snapshot, From: x.from, To: x.to, AfterTS: ts, AfterID: id, HasCursor: hasCursor, Limit: exportPageSize})
 		if err != nil {
 			return err
 		}
@@ -407,12 +421,13 @@ func (s *Server) streamHTML(ctx context.Context, w io.Writer, x exportScope) err
 }
 
 func (s *Server) streamText(ctx context.Context, w io.Writer, x exportScope) error {
-	return s.eachTimeline(ctx, x, func(r *store.ExportRecord, e *store.ExportEvent) error {
+	x.snapshot.ResetMediaNames()
+	return s.eachTextTimeline(ctx, x, func(r *store.ExportTextRecord, e *store.ExportEvent) error {
 		if e != nil {
 			return writeWALine(w, time.Unix(e.TS, 0).In(x.loc), exportEventSender(*e), exportEventLabel(*e))
 		}
 		m := r.Message
-		sender := r.SenderName
+		sender := m.PushName
 		if sender == "" {
 			sender = m.SenderJID
 		}
@@ -421,10 +436,7 @@ func (s *Server) streamText(ctx context.Context, w io.Writer, x exportScope) err
 			if body != "" {
 				body += " "
 			}
-			name, err := s.exportArchiveName(ctx, x, *r)
-			if err != nil {
-				return err
-			}
+			name := exportArchiveName(x, store.ExportRecord{Message: m, Media: r.Media, MediaNameCount: r.MediaNameCount})
 			body += "[attachment: " + name + "]"
 		}
 		if err := writeWALine(w, time.Unix(m.Timestamp, 0).In(x.loc), sender, body); err != nil {

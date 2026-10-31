@@ -116,13 +116,109 @@ func (s *Store) SearchChat(ctx context.Context, chat, query string, filter Viewe
 	return ids, nil
 }
 
+// ChatSearchPosition is one bounded point in the newest-first matches for a chat.
+// Only the selected and adjacent IDs leave SQLite, even when the match set is large.
+type ChatSearchPosition struct {
+	Count                         int
+	Index                         int
+	CurrentID, PreviousID, NextID string
+}
+
+// SearchChatPosition returns a selected match and its adjacent matches without
+// retaining the complete result set in Go memory.
+func (s *Store) SearchChatPosition(ctx context.Context, chat, query string, filter ViewerQuery, index int) (ChatSearchPosition, error) {
+	position := ChatSearchPosition{Index: index}
+	if index < 0 {
+		return position, fmt.Errorf("search chat position: index is out of range")
+	}
+	terms := strings.Fields(Fold(query))
+	if len(terms) == 0 {
+		return position, nil
+	}
+	table := "search_tri"
+	for _, term := range terms {
+		if len([]rune(term)) < 3 {
+			table = "search_fts"
+			break
+		}
+	}
+	for i := range terms {
+		terms[i] = `"` + strings.ReplaceAll(terms[i], `"`, `""`) + `"`
+	}
+	match := strings.Join(terms, " AND ")
+	dense, err := s.denseSearch(ctx, table, match)
+	if err != nil {
+		return position, err
+	}
+	if dense && table == "search_tri" {
+		hasDuplicates, duplicateErr := s.viewerHasDuplicates(ctx, chat)
+		if duplicateErr != nil {
+			return position, duplicateErr
+		}
+		hasEdits, editErr := s.hasEditSearchHit(ctx, table, match)
+		if editErr != nil {
+			return position, editErr
+		}
+		if !hasDuplicates && !hasEdits {
+			return s.searchDenseChatPosition(ctx, chat, table, match, filter, index)
+		}
+	}
+	args := []any{chat, match}
+	where := []string{"m.chat_jid IN (" + chatForms + ")"}
+	add := func(column string, value any) {
+		args = append(args, value)
+		where = append(where, column+fmt.Sprintf("=?%d", len(args)))
+	}
+	if filter.Sender != "" {
+		add("m.sender_jid", filter.Sender)
+	}
+	if filter.MediaKind != "" {
+		add("m.kind", filter.MediaKind)
+	}
+	if filter.FromTS > 0 {
+		add("m.ts>=", filter.FromTS)
+	}
+	if filter.ToTS > 0 {
+		add("m.ts<=", filter.ToTS)
+	}
+	args = append(args, index, index-1, index+1)
+	currentParam, previousParam, nextParam := len(args)-2, len(args)-1, len(args)
+	querySQL := `WITH hits(rowid) AS (SELECT rowid FROM ` + table + ` WHERE body MATCH ?2), found(id) AS (
+	 SELECT m.id FROM hits h JOIN messages m ON h.rowid=m.seq WHERE m.chat_jid IN (` + chatForms + `)
+	 UNION SELECT e.target_id FROM hits h JOIN message_events e ON h.rowid=-e.seq WHERE e.kind='edit' AND e.chat_jid IN (` + chatForms + `)),
+	 ordered(id,ts) AS (SELECT m.id,MAX(m.ts) FROM found f JOIN messages m ON m.id=f.id WHERE ` + strings.Join(where, " AND ") + ` GROUP BY m.id),
+	 ranked(id,idx,total) AS (SELECT id,ROW_NUMBER() OVER (ORDER BY ts DESC,id DESC)-1,COUNT(*) OVER () FROM ordered)
+	 SELECT COALESCE(MAX(total),0),COALESCE(MAX(CASE WHEN idx=?` + fmt.Sprint(currentParam) + ` THEN id END),''),
+	 COALESCE(MAX(CASE WHEN idx=?` + fmt.Sprint(previousParam) + ` THEN id END),''),COALESCE(MAX(CASE WHEN idx=?` + fmt.Sprint(nextParam) + ` THEN id END),'') FROM ranked`
+	if err := s.read.QueryRowContext(ctx, querySQL, args...).Scan(&position.Count, &position.CurrentID, &position.PreviousID, &position.NextID); err != nil {
+		return position, fmt.Errorf("search chat position: %w", err)
+	}
+	if position.Count > 0 && position.CurrentID == "" {
+		return position, fmt.Errorf("search chat position: index is out of range")
+	}
+	return position, nil
+}
+
 // ViewerPage reads one page plus all sender, event, quote and media facts in bounded batch queries.
 func (s *Store) ViewerPage(ctx context.Context, chat string, q ViewerQuery) ([]ViewMessage, error) {
 	if q.Limit <= 0 {
 		q.Limit = 100
 	}
+	hasDuplicates, err := s.viewerHasDuplicates(ctx, chat)
+	if err != nil {
+		return nil, err
+	}
 	args := []any{chat}
-	where := []string{"m.rk=1"}
+	where := []string{"m.chat_jid IN (" + chatForms + ")"}
+	source := "messages m"
+	columns := "m.seq,m.id,m.sender_jid,m.from_me,m.kind,m.text,m.caption,m.details,m.quoted_id,m.quoted_sender,m.view_once,m.ephemeral_secs,m.ts"
+	if hasDuplicates {
+		where[0] = "m.rk=1"
+		source = `(SELECT seq,id,sender_jid,kind,ts,
+		 ROW_NUMBER() OVER (PARTITION BY id ORDER BY received_at,chat_jid) AS rk
+		 FROM messages WHERE chat_jid IN (` + chatForms + `)) m JOIN messages body ON body.seq=m.seq`
+		columns = "body.seq,body.id,body.sender_jid,body.from_me,body.kind,body.text,body.caption,body.details,body.quoted_id,body.quoted_sender,body.view_once,body.ephemeral_secs,body.ts"
+	}
 	add := func(clause string, value any) {
 		args = append(args, value)
 		where = append(where, fmt.Sprintf(clause, len(args)))
@@ -159,14 +255,10 @@ func (s *Store) ViewerPage(ctx context.Context, chat string, q ViewerQuery) ([]V
 	if q.AfterTS > 0 {
 		order = "ASC"
 	}
-	query := `WITH m AS (
-	 SELECT seq,chat_jid,id,sender_jid,from_me,kind,text,caption,details,quoted_id,quoted_sender,view_once,ephemeral_secs,ts,
- ROW_NUMBER() OVER (PARTITION BY id ORDER BY received_at,chat_jid) AS rk
- FROM messages WHERE chat_jid IN (` + chatForms + `))
-	 SELECT m.seq,m.id,m.sender_jid,m.from_me,m.kind,m.text,m.caption,m.details,m.quoted_id,m.quoted_sender,m.view_once,m.ephemeral_secs,m.ts
- FROM m WHERE ` + strings.Join(where, " AND ") + ` ORDER BY m.ts ` + order + `,m.id ` + order + ` LIMIT ?` + fmt.Sprint(len(args))
+	query := `SELECT ` + columns + `
+	 FROM ` + source + ` WHERE ` + strings.Join(where, " AND ") + ` ORDER BY m.ts ` + order + `,m.id ` + order + ` LIMIT ?` + fmt.Sprint(len(args))
 	var page []ViewMessage
-	err := s.scanRows(ctx, query, args, func(rows *sql.Rows) error {
+	err = s.scanRows(ctx, query, args, func(rows *sql.Rows) error {
 		var m ViewMessage
 		if err := rows.Scan(&m.Seq, &m.ID, &m.Sender, &m.FromMe, &m.Kind, &m.Text, &m.Caption, &m.Details, &m.QuotedID, &m.QuotedSender, &m.ViewOnce, &m.EphemeralSecs, &m.TS); err != nil {
 			return err
@@ -195,14 +287,23 @@ func (s *Store) ViewerLiveAfter(ctx context.Context, chat string, after int64, l
 	if limit <= 0 {
 		limit = 100
 	}
-	query := `WITH m AS (
-	 SELECT seq,chat_jid,id,sender_jid,from_me,kind,text,caption,details,quoted_id,quoted_sender,view_once,ephemeral_secs,ts,source,
-	 ROW_NUMBER() OVER (PARTITION BY id ORDER BY received_at,chat_jid) AS rk
-	 FROM messages WHERE chat_jid IN (` + chatForms + `))
-	 SELECT seq,id,sender_jid,from_me,kind,text,caption,details,quoted_id,quoted_sender,view_once,ephemeral_secs,ts
-	 FROM m WHERE rk=1 AND seq>?2 AND source='live' ORDER BY seq LIMIT ?3`
+	hasDuplicates, err := s.viewerHasDuplicates(ctx, chat)
+	if err != nil {
+		return nil, err
+	}
+	source, unique := "messages m", "m.chat_jid IN ("+chatForms+")"
+	columns := "m.seq,m.id,m.sender_jid,m.from_me,m.kind,m.text,m.caption,m.details,m.quoted_id,m.quoted_sender,m.view_once,m.ephemeral_secs,m.ts"
+	if hasDuplicates {
+		unique = "m.rk=1"
+		source = `(SELECT seq,id,ts,source,
+		 ROW_NUMBER() OVER (PARTITION BY id ORDER BY received_at,chat_jid) AS rk
+		 FROM messages WHERE chat_jid IN (` + chatForms + `)) m JOIN messages body ON body.seq=m.seq`
+		columns = "body.seq,body.id,body.sender_jid,body.from_me,body.kind,body.text,body.caption,body.details,body.quoted_id,body.quoted_sender,body.view_once,body.ephemeral_secs,body.ts"
+	}
+	query := `SELECT ` + columns + `
+	 FROM ` + source + ` WHERE ` + unique + ` AND m.seq>?2 AND m.source='live' ORDER BY m.seq LIMIT ?3`
 	var page []ViewMessage
-	err := s.scanRows(ctx, query, []any{chat, after, limit}, func(rows *sql.Rows) error {
+	err = s.scanRows(ctx, query, []any{chat, after, limit}, func(rows *sql.Rows) error {
 		var m ViewMessage
 		if err := rows.Scan(&m.Seq, &m.ID, &m.Sender, &m.FromMe, &m.Kind, &m.Text, &m.Caption, &m.Details, &m.QuotedID, &m.QuotedSender, &m.ViewOnce, &m.EphemeralSecs, &m.TS); err != nil {
 			return err

@@ -7,7 +7,7 @@
       "request": "launch",
       "mode": "auto",
       "program": "${workspaceFolder}/cmd/archiver",
-      "args": ["run", "--data", "${workspaceFolder}/data/devseed"]
+      "args": ["devseed", "--data", "${workspaceFolder}/data/devseed", "--chats", "250", "--messages", "300000", "--large-chat-messages", "50000", "--seed", "42", "--simulate-live", "0.001/s"]
     },
     {
       "name": "Seeded UI + live 5/s (8090)",
@@ -15,7 +15,7 @@
       "request": "launch",
       "mode": "auto",
       "program": "${workspaceFolder}/cmd/archiver",
-      "args": ["devseed", "--data", "${workspaceFolder}/data/devseed", "--chats", "250", "--messages", "16", "--seed", "42", "--simulate-live", "5/s"]
+      "args": ["devseed", "--data", "${workspaceFolder}/data/devseed", "--chats", "250", "--messages", "300000", "--large-chat-messages", "50000", "--seed", "42", "--simulate-live", "5/s"]
     }
   ]
 }

@@ -152,6 +152,11 @@ Single status record for V1 (max 150 lines, update in place; history lives in gi
 
 - Done 30 Oct: initial/renewed QR flow, cancellation, safe failures, linked-device advice and process-observed session age; voluntary and LoggedOut re-pair reset only the whatsmeow device store and resume in the same process, leaving the archive and media untouched. Fake-boundary tests are `eb0e84b`, implementation `0aa1be2`; full `make check` passed and no golden files changed.
 
+## W6(i) evaluation
+
+- Automated/static evaluation complete 31 Oct on exact seed 42 (250 chats, 300,000 messages, one 50,000-message chat): every section 11 server budget, response bound, fake pairing state, stop/keep ingestion, Pipeline-to-SSE path and bounded snapshot export assertion passes. Final review adds measured pair SSE, exact encoded viewer-event bounds, validation/WAL-safe snapshot ownership, traversal-stable ZIP names, mutable-media read snapshots, one-pass ZIP media, crash-safe derived duplicate-state upgrade, real-client header flushing and three-query startup using indexed state plus three primary-key tail seeks through `03e85fc`. Full checks pass, with no Critical/Important static finding or golden change.
+- Browser evaluation is blocked, not passed: T3 `preview_status`/`preview_open` could not attach to the 18090 fallback after 8090 was occupied; its tabs remained Chrome error pages. Therefore screenshots, mobile/dark/RTL visual review, keyboard/screen-reader smoke, playback/download interaction and console/network inspection remain unavailable. Exact evidence and the PASS/BLOCKED matrix are in `docs/v1/ui-evaluation.md`; no real WhatsApp, ryzen access or deployment was used.
+
 ## Rulings
 
 - (a) The `add-message-kind` skill (replaces `add-event-kind`) was written in W2(c).

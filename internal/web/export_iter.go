@@ -17,7 +17,7 @@ func (s *Server) eachEvent(ctx context.Context, x exportScope, fn func(store.Exp
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		page, err := s.d.Store.ExportEventPage(ctx, store.ExportEventParams{CanonicalJID: x.jid, From: x.from, To: x.to, AfterTS: ts, AfterKey: key, HasCursor: hasCursor, Limit: exportPageSize})
+		page, err := s.d.Store.ExportEventPage(ctx, store.ExportEventParams{CanonicalJID: x.jid, Snapshot: x.snapshot, From: x.from, To: x.to, AfterTS: ts, AfterKey: key, HasCursor: hasCursor, Limit: exportPageSize})
 		if err != nil {
 			return err
 		}
@@ -57,7 +57,7 @@ func (i *messageIter) next() (*store.ExportRecord, error) {
 		return nil, nil
 	}
 	if i.at >= len(i.page) {
-		p, err := i.s.d.Store.ExportPage(i.ctx, store.ExportParams{CanonicalJID: i.x.jid, From: i.x.from, To: i.x.to, AfterTS: i.ts, AfterID: i.id, HasCursor: i.cursor, Limit: exportPageSize})
+		p, err := i.s.d.Store.ExportPage(i.ctx, store.ExportParams{CanonicalJID: i.x.jid, Snapshot: i.x.snapshot, From: i.x.from, To: i.x.to, AfterTS: i.ts, AfterID: i.id, HasCursor: i.cursor, SkipEvents: true, SkipMentions: true, Limit: exportPageSize})
 		if err != nil {
 			return nil, err
 		}
@@ -91,7 +91,7 @@ func (i *eventIter) next() (*store.ExportEvent, error) {
 		return nil, nil
 	}
 	if i.at >= len(i.page) {
-		p, err := i.s.d.Store.ExportEventPage(i.ctx, store.ExportEventParams{CanonicalJID: i.x.jid, From: i.x.from, To: i.x.to, AfterTS: i.ts, AfterKey: i.key, HasCursor: i.cursor, Limit: exportPageSize})
+		p, err := i.s.d.Store.ExportEventPage(i.ctx, store.ExportEventParams{CanonicalJID: i.x.jid, Snapshot: i.x.snapshot, From: i.x.from, To: i.x.to, AfterTS: i.ts, AfterKey: i.key, HasCursor: i.cursor, Limit: exportPageSize})
 		if err != nil {
 			return nil, err
 		}

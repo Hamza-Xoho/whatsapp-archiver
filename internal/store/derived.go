@@ -34,9 +34,9 @@ func statsSelect(filtered bool) string {
 	if filtered {
 		byAlias, byGaps = " WHERE a.canonical=?1", " WHERE canonical_jid=?1"
 	}
-	return `INSERT INTO chat_stats(canonical,name,type,messages,last_ts,oldest_ts,oldest_history_ts,media_done,media_failed,media_expired,media_pending,media_bytes,gaps_open)
+	return `INSERT INTO chat_stats(canonical,name,type,messages,message_rows,last_ts,oldest_ts,oldest_history_ts,media_done,media_failed,media_expired,media_pending,media_bytes,gaps_open)
 WITH msg AS (
-  SELECT a.canonical AS c, COUNT(DISTINCT m.id) AS n, MAX(m.ts) AS last, MIN(m.ts) AS oldest,
+	SELECT a.canonical AS c, COUNT(DISTINCT m.id) AS n, COUNT(*) AS rows, MAX(m.ts) AS last, MIN(m.ts) AS oldest,
    MIN(CASE WHEN m.source='history' THEN m.ts END) AS oldest_history
   FROM chat_canonical a JOIN messages m ON m.chat_jid=a.alias` + byAlias + ` GROUP BY a.canonical),
 med AS (
@@ -51,7 +51,7 @@ keys(c) AS (
   UNION SELECT a.canonical FROM chat_canonical a JOIN chat_rules t ON t.jid=a.alias` + byAlias + `
   UNION SELECT a.canonical FROM chat_canonical a JOIN chat_seen t ON t.jid=a.alias` + byAlias + `)
 SELECT k.c, ` + nameExpr("k.c") + `, ` + typeExpr("k.c") + `,
- COALESCE(msg.n,0), COALESCE(msg.last,0), COALESCE(msg.oldest,0), msg.oldest_history,
+	COALESCE(msg.n,0), COALESCE(msg.rows,0), COALESCE(msg.last,0), COALESCE(msg.oldest,0), msg.oldest_history,
  COALESCE(med.done,0), COALESCE(med.failed,0), COALESCE(med.expired,0), COALESCE(med.pending,0), COALESCE(med.bytes,0),
  COALESCE(gap.n,0)
 FROM keys k LEFT JOIN msg ON msg.c=k.c LEFT JOIN med ON med.c=k.c LEFT JOIN gap ON gap.c=k.c`
@@ -145,7 +145,7 @@ func gapsOf(ctx context.Context, tx execer, chat, id string, closing bool) error
 // computed from the raw tables, which already hold the message.
 func (w batch) messageAdded(ctx context.Context, tx execer) error {
 	m := w.msg
-	res, err := tx.ExecContext(ctx, `UPDATE chat_stats SET messages=messages+1, last_ts=MAX(last_ts,?2),
+	res, err := tx.ExecContext(ctx, `UPDATE chat_stats SET messages=messages+1, message_rows=message_rows+1, last_ts=MAX(last_ts,?2),
  oldest_ts=CASE WHEN messages=0 THEN ?2 ELSE MIN(oldest_ts,?2) END,
  oldest_history_ts=CASE WHEN ?3 THEN CASE WHEN oldest_history_ts IS NULL THEN ?2 ELSE MIN(oldest_history_ts,?2) END ELSE oldest_history_ts END
  WHERE canonical=`+canonicalOfAlias, m.ChatJID, m.Timestamp, m.Source == "history")

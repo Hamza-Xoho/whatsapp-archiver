@@ -13,6 +13,7 @@ type ExportEventParams struct {
 	AfterTS      int64
 	AfterKey     string
 	HasCursor    bool
+	Snapshot     *ExportSnapshot
 	Limit        int
 }
 
@@ -46,29 +47,31 @@ func (e ExportEvent) RawProto() []byte {
 // ExportEventPage includes events whose targets are absent or empty and chat-level events; canonical aliases and the
 // date range are applied before the stable (timestamp,key) cursor.
 func (s *Store) ExportEventPage(ctx context.Context, p ExportEventParams) ([]ExportEvent, error) {
-	known, err := s.ChatKnown(ctx, p.CanonicalJID)
+	snapshot, err := s.exportSnapshot(ctx, p.CanonicalJID, p.Snapshot)
 	if err != nil {
 		return nil, err
-	}
-	if !known {
-		return nil, sql.ErrNoRows
 	}
 	limit := p.Limit
 	if limit <= 0 || limit > 500 {
 		limit = 200
 	}
-	const q = `WITH events AS (
+	forms, args := exportFormMarks(snapshot.forms)
+	args = append(args, snapshot.maxEventSeq, snapshot.maxChatEvent, p.From, p.To,
+		p.HasCursor || p.AfterTS != 0 || p.AfterKey != "", p.AfterTS, p.AfterKey, limit)
+	eventMax, chatMax := len(snapshot.forms)+1, len(snapshot.forms)+2
+	fromParam, toParam := len(snapshot.forms)+3, len(snapshot.forms)+4
+	cursorParam, tsParam, keyParam, limitParam := len(snapshot.forms)+5, len(snapshot.forms)+6, len(snapshot.forms)+7, len(snapshot.forms)+8
+	q := `WITH events AS (
  SELECT 'm:'||hex(chat_jid)||':'||hex(target_id)||':'||hex(kind)||':'||hex(event_id) AS k,chat_jid,target_id,kind,event_id,source_id,cause,sender_jid,source,new_text,value,ts,received_at,0 AS chat
- FROM message_events WHERE chat_jid IN (` + chatForms + `) AND (?2=0 OR ts>=?2) AND (?3=0 OR ts<=?3)
+ FROM message_events WHERE chat_jid IN (` + forms + `) AND seq<=?` + fmt.Sprint(eventMax) + ` AND (?` + fmt.Sprint(fromParam) + `=0 OR ts>=?` + fmt.Sprint(fromParam) + `) AND (?` + fmt.Sprint(toParam) + `=0 OR ts<=?` + fmt.Sprint(toParam) + `)
  UNION ALL
  SELECT 'c:'||hex(chat_jid)||':'||hex(kind)||':'||hex(event_id),chat_jid,'',kind,event_id,'','',sender_jid,'','',value,ts,received_at,1
- FROM chat_events WHERE chat_jid IN (` + chatForms + `) AND (?2=0 OR ts>=?2) AND (?3=0 OR ts<=?3)
+ FROM chat_events WHERE chat_jid IN (` + forms + `) AND rowid<=?` + fmt.Sprint(chatMax) + ` AND (?` + fmt.Sprint(fromParam) + `=0 OR ts>=?` + fmt.Sprint(fromParam) + `) AND (?` + fmt.Sprint(toParam) + `=0 OR ts<=?` + fmt.Sprint(toParam) + `)
 )
 SELECT k,chat_jid,target_id,kind,event_id,source_id,cause,sender_jid,source,new_text,value,ts,received_at,chat
-FROM events WHERE (?4=0 OR ts>?5 OR (ts=?5 AND k>?6)) ORDER BY ts,k LIMIT ?7`
+FROM events WHERE (?` + fmt.Sprint(cursorParam) + `=0 OR ts>?` + fmt.Sprint(tsParam) + ` OR (ts=?` + fmt.Sprint(tsParam) + ` AND k>?` + fmt.Sprint(keyParam) + `)) ORDER BY ts,k LIMIT ?` + fmt.Sprint(limitParam)
 	var out []ExportEvent
-	hasCursor := p.HasCursor || p.AfterTS != 0 || p.AfterKey != ""
-	err = s.scanRows(ctx, q, []any{p.CanonicalJID, p.From, p.To, hasCursor, p.AfterTS, p.AfterKey, limit}, func(rows *sql.Rows) error {
+	err = s.scanRows(ctx, q, args, func(rows *sql.Rows) error {
 		var x ExportEvent
 		var chat bool
 		var chatJID, target, kind, id, sourceID, cause, sender, source, newText, value string

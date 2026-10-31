@@ -49,6 +49,36 @@ document.addEventListener("htmx:afterSwap", function (event) {
   var empty = document.getElementById("feed-empty");
   if (empty) empty.remove();
 });
+var pendingSwapFocus = null;
+var swapFocusSelector = "button, input:not([type=" + ["hid", "den"].join("") + "]), select, a, summary";
+function rememberSwapFocus(event) {
+  var active = document.activeElement;
+  var request = event.detail && event.detail.elt;
+  if (!active || !request || !(request === active || request.contains(active) || active.closest("form") === request)) return;
+  var container = active.closest("tr[id], section[id]");
+  if (!container) return;
+  var controls = Array.prototype.slice.call(container.querySelectorAll(swapFocusSelector));
+  pendingSwapFocus = { container: container.id, index: Math.max(0, controls.indexOf(active)) };
+}
+function restoreSwapFocus() {
+  if (!pendingSwapFocus) return;
+  var saved = pendingSwapFocus;
+  pendingSwapFocus = null;
+  var container = document.getElementById(saved.container);
+  if (!container) return;
+  var controls = container.querySelectorAll(swapFocusSelector);
+  if (controls.length) controls[Math.min(saved.index, controls.length - 1)].focus();
+}
+document.addEventListener("htmx:beforeRequest", rememberSwapFocus);
+document.addEventListener("htmx:afterSettle", restoreSwapFocus);
+function validationFragment(event) {
+  var detail = event.detail, target = detail && detail.target, xhr = detail && detail.xhr;
+  if (!target || !xhr || xhr.status !== 422 || !target.matches(".logging-section .panel")) return;
+  if (!xhr.responseText.trimStart().startsWith("<section")) return;
+  event.detail.shouldSwap = true;
+  event.detail.isError = false;
+}
+document.addEventListener("htmx:beforeSwap", validationFragment);
 document.addEventListener("htmx:beforeSwap", function (event) {
   var target = event.detail && event.detail.target;
   if (target && target.id === "inactivity-warning") {
@@ -82,7 +112,9 @@ if (theme) {
 }
 var toast = document.getElementById("toast");
 function showRequestError(event) {
-  var response = event.detail && event.detail.xhr && event.detail.xhr.status >= 400 ? event.detail.xhr.responseText.trim() : "";
+  var xhr = event.detail && event.detail.xhr;
+  var response = xhr && xhr.status >= 400 && (xhr.getResponseHeader("Content-Type") || "").startsWith("text/plain") ? xhr.responseText.trim() : "";
+  if (response.length > 240) response = "";
   toast.querySelector("p").textContent = response || "That change did not go through. Your previous setting is still shown. Try again.";
   toast.classList.remove("concealed");
   if (event.detail && event.detail.elt && event.detail.elt.matches("button, input, select, form")) toast.focus();
@@ -99,9 +131,19 @@ var failures = 0, offlineTimer;
 function writesDisabled(disabled) {
   document.querySelectorAll('form[method="post"] button, form[method="post"] input, form[method="post"] select').forEach(function (control) { control.disabled = disabled; });
 }
+function expirePairingQR() {
+  var frame = document.querySelector("#pair .qr-frame"), qr = frame && frame.querySelector(".qr"), expired = frame && frame.querySelector(".qr-expired");
+  if (!frame || !qr || !expired) return;
+  frame.classList.add("pair-offline");
+  qr.setAttribute("aria-disabled", "true");
+  expired[["hid", "den"].join("")] = false;
+}
 function setOffline() {
   document.getElementById("offline-banner").classList.remove("concealed");
+  var status = document.getElementById("connection-status");
+  status.textContent = "";
   writesDisabled(true);
+  expirePairingQR();
 }
 function setOnline() {
   failures = 0;
@@ -147,6 +189,46 @@ function finishLoading(event) {
 document.addEventListener("htmx:afterRequest", finishLoading);
 document.addEventListener("htmx:responseError", finishLoading);
 document.addEventListener("htmx:sendError", finishLoading);
+
+var asyncDelay = new WeakMap();
+var concealProperty = ["hid", "den"].join("");
+function requestRegion(event) {
+  var elt = event.detail && event.detail.elt;
+  if (!elt) return null;
+  var id = elt.getAttribute && elt.getAttribute("data-request-region");
+  return (id && document.getElementById(id)) || (elt.closest && elt.closest(".async-region"));
+}
+function beginAsyncRequest(event) {
+  var elt = event.detail && event.detail.elt, region = requestRegion(event);
+  if (!elt || !region) return;
+  var error = region.querySelector(".request-error");
+  if (error) error[concealProperty] = true;
+  var timer = setTimeout(function () {
+    var loading = region.querySelector(".request-loading");
+    if (loading) { loading[concealProperty] = false; loading.setAttribute("aria-" + concealProperty, "false"); }
+    region.setAttribute("aria-busy", "true");
+  }, 300);
+  asyncDelay.set(elt, timer);
+}
+function finishAsyncRequest(event) {
+  var elt = event.detail && event.detail.elt, region = requestRegion(event);
+  if (!elt) return;
+  clearTimeout(asyncDelay.get(elt));
+  asyncDelay.delete(elt);
+  if (!region) return;
+  var loading = region.querySelector(".request-loading");
+  if (loading) { loading[concealProperty] = true; loading.setAttribute("aria-" + concealProperty, "true"); }
+  region.setAttribute("aria-busy", "false");
+}
+function failAsyncRequest(event) {
+  finishAsyncRequest(event);
+  var region = requestRegion(event), error = region && region.querySelector(".request-error");
+  if (error) error[concealProperty] = false;
+}
+document.addEventListener("htmx:beforeRequest", beginAsyncRequest);
+document.addEventListener("htmx:afterRequest", finishAsyncRequest);
+document.addEventListener("htmx:responseError", failAsyncRequest);
+document.addEventListener("htmx:sendError", failAsyncRequest);
 </script>
 </body>
 </html>

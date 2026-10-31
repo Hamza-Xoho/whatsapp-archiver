@@ -9,7 +9,7 @@
 
 {{define "rule_preview"}}<section class="panel rule-preview" aria-labelledby="preview-title">
   {{if .Changed}}<p class="warn">The filtered set changed. Review the new count and estimate before applying.</p>{{end}}
-  <h2 id="preview-title">{{if eq .Count 1}}Keep logging {{(index .Rows 0).DisplayName}}?{{else}}Change logging for {{.Count}} chats?{{end}}</h2>{{if gt .AffectedChildren 0}}<p>{{.AffectedChildren}} child chats affected</p>{{end}}
+  <h2 id="preview-title">{{if eq .Count 1}}Keep logging <bdi dir="auto">{{(index .Rows 0).DisplayName}}?</bdi>{{else}}Change logging for {{.Count}} chats?{{end}}</h2>{{if gt .AffectedChildren 0}}<p>{{.AffectedChildren}} child chats affected</p>{{end}}
   {{if .MediaSummary}}<p><strong>Chosen media rule:</strong> {{.MediaSummary}}</p>{{end}}
   <p><strong>Projected per week</strong></p>
   {{if .Unavailable}}<p>Text: Estimate unavailable<br>Media: Estimate unavailable</p>{{else}}<p>Text: {{.TextPerWeek}}<br>Media: {{.MediaPerWeek}}</p>{{end}}

@@ -34,9 +34,31 @@ BUILD_TARGETS := linux/amd64 linux/arm64 darwin/arm64 darwin/amd64 windows/amd64
 VERSION ?= $(shell git describe --always --dirty --tags 2>/dev/null || echo dev)
 LDFLAGS := -X main.version=$(VERSION)
 
-.PHONY: check check-fast test test-quiet lint build build-all fmt tools
+.PHONY: check check-fast check-w6i test test-quiet lint build build-all fmt tools
 
 check: test lint build-all
+
+# Deterministic opt-in release budgets on the synthetic W6(i) dataset.
+check-w6i: $(GO)
+	@mkdir -p $(ROOT)/data; \
+	lock_dir="$(ROOT)/data/.w6i-check.lock"; \
+	if ! mkdir "$$lock_dir" 2>/dev/null; then echo "check-w6i is already running" >&2; exit 1; fi; \
+	trap 'rmdir "$$lock_dir"' EXIT HUP INT TERM; \
+	seed_revision=$$($(SHA256) internal/devseed/devseed.go internal/devseed/generator.go internal/devseed/media.go internal/store/migrations/*.sql | $(SHA256) | awk '{print $$1}'); \
+	ready_identity="seed=42 chats=250 messages=300000 large=50000 revision=$$seed_revision"; \
+	seed_data="$(ROOT)/data/w6i-seed-42-250-300000-50000-$$seed_revision"; \
+	if [ ! -f "$$seed_data/.ready" ] || [ "$$(cat "$$seed_data/.ready")" != "$$ready_identity" ]; then \
+	  seed_build=$$(mktemp -d "$(ROOT)/data/w6i-seed-build.XXXXXX"); \
+	  $(GO) run ./cmd/archiver devseed --data "$$seed_build" --seed 42 --chats 250 --messages 300000 --large-chat-messages 50000 || exit 1; \
+	  printf '%s\n' "$$ready_identity" > "$$seed_build/.ready"; mv "$$seed_build" "$$seed_data"; \
+	fi; \
+	for pkg in ./internal/devseed ./internal/store ./internal/web; do \
+	  perf_data=$$(mktemp -d "$(ROOT)/data/w6i-perf-$${pkg##*/}.XXXXXX") || exit 1; \
+	  cp -R "$$seed_data/." "$$perf_data/" || exit 1; \
+	  W6I_PERF=1 W6I_DEVSEED_DATA="$$perf_data" W6B_DEVSEED_DATA="$$perf_data" W6F_DEVSEED_DATA="$$perf_data" \
+	    $(GO) test -p 1 -v -count=1 -run 'W6I|ChatsW6BAtScale|ChatsSQLAtScale|LoggingW6FAtScale|LoggingReviewScale' "$$pkg"; rc=$$?; \
+	  rm -rf "$$perf_data"; [ $$rc -eq 0 ] || exit $$rc; \
+	done
 
 # Fast gate for the Stop hook: race tests on packages with Go changes vs HEAD, then lint. No build-all.
 check-fast: $(GO)

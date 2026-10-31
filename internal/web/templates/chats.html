@@ -1,25 +1,25 @@
 {{define "chat_row"}}<tr id="{{.RowID}}"{{if .OOB}} hx-swap-oob="true"{{end}}>
-  <td data-label="Select"><input class="chat-select" type="checkbox" name="jid[]" value="{{.CanonicalJID}}" form="bulk" aria-label="Select {{.DisplayName}}"></td>
-  <td data-label="Chat"><a href="/chats/{{pathEscape .CanonicalJID}}"><bdi dir="auto">{{.DisplayName}}</bdi></a>{{if .New}} <span class="badge">New</span>{{end}}
-    {{if ne .DisplayName .CanonicalJID}}<br><span class="chat"><bdi>{{.CanonicalJID}}</bdi></span>{{end}}
-    {{if .HistoryBackTo}}<br><span class="muted">History back to {{.HistoryBackTo}}</span>{{end}}
+  <td data-label=Select><input class=chat-select type=checkbox name="jid[]" value="{{.CanonicalJID}}" form=bulk aria-label="Select {{.DisplayName}}"></td>
+  <td data-label=Chat><a href="/chats/{{pathEscape .CanonicalJID}}"><bdi dir=auto>{{.DisplayName}}</bdi></a>{{if .New}} <span class=badge>New</span>{{end}}
+    {{if ne .DisplayName .CanonicalJID}}<br><span class=chat><bdi>{{.CanonicalJID}}</bdi></span>{{end}}
+    {{if .HistoryBackTo}}<br><span class=muted>History back to {{.HistoryBackTo}}</span>{{end}}
     {{if gt .ChildCount 0}}<br><details class="community"><summary>{{.ChildCount}} child chats</summary><span class="muted">Community rules apply to children unless they have an own rule.</span><ul>{{range .Children}}<li><a href="/chats/{{pathEscape .JID}}"><bdi dir="auto">{{if .Name}}{{.Name}}{{else}}{{.JID}}{{end}}</bdi></a></li>{{end}}</ul></details>{{end}}
   </td>
-  <td class="num" data-label="Messages">{{.MessageCount}}{{if gt .OpenGaps 0}}<br><span class="warn">{{.OpenGaps}} gap{{if ne .OpenGaps 1}}s{{end}}</span>{{end}}</td>
-  <td data-label="Last">{{.LastMessage}}</td>
-  <td data-label="Logging">{{if .Logging}}<span class="ok">Logging</span>{{else}}<span class="bad">Not logging</span>{{end}}</td>
-  <td data-label="Media">{{.RuleLabel}}{{if gt .MediaFailed 0}}<br><span class="bad">{{.MediaFailed}} failed</span>{{end}}</td>
-  <td class="actions" data-label="Actions">
-    {{if .Logging}}<form method="post" action="/chats/rules" hx-post="/chats/rules" hx-swap="none" hx-confirm="{{.StopConfirm}}" onsubmit="if(!window.htmx&&!confirm('{{.StopConfirm}}')){return false}">
-      <input type="hidden" name="jid[]" value="{{.CanonicalJID}}"><input type="hidden" name="logging" value="off"><button>Stop logging</button>
-    </form>{{else}}<form method="post" action="/chats/rules/preview" hx-post="/chats/rules/preview" hx-target="#rule-preview" hx-swap="innerHTML">
-      <input type="hidden" name="jid[]" value="{{.CanonicalJID}}"><input type="hidden" name="logging" value="on"><button>Keep logging</button><button type="button" hidden>Start logging</button>
+  <td class=num data-label=Messages>{{.MessageCount}}{{if gt .OpenGaps 0}}<br><span class=warn>{{.OpenGaps}} gap{{if ne .OpenGaps 1}}s{{end}}</span>{{end}}</td>
+  <td data-label=Last>{{.LastMessage}}</td>
+  <td data-label=Logging>{{if .Logging}}<span class=ok>Logging</span>{{else}}<span class=bad>Not logging</span>{{end}}</td>
+  <td data-label=Media>{{.RuleLabel}}{{if gt .MediaFailed 0}}<br><span class=bad>{{.MediaFailed}} failed</span>{{end}}</td>
+  <td class=actions data-label=Actions>
+    {{if .Logging}}<form method=post action=/chats/rules hx-post=/chats/rules hx-swap=none hx-confirm="{{.StopConfirm}}" onsubmit="if(!window.htmx&&!confirm('{{.StopConfirm}}')){return false}">
+      <input type=hidden name="jid[]" value="{{.CanonicalJID}}"><button name=logging value=off>Stop logging</button>
+    </form>{{else}}<form method=post action=/chats/rules/preview hx-post=/chats/rules/preview hx-target=#rule-preview hx-swap=innerHTML>
+      <input type=hidden name="jid[]" value="{{.CanonicalJID}}"><button name=logging value=on>Keep logging</button><button type=button hidden>Start logging</button>
     </form>{{end}}
-    <details class="row-rule"><summary>Media rules…</summary>
-      <form method="post" action="/chats/rules" hx-post="/chats/rules" hx-swap="none"><input type="hidden" name="jid[]" value="{{.CanonicalJID}}"><label>Rule <select name="media"><option value="default">Default</option><option value="text-only">Text only</option><option value="custom">Custom types</option></select></label><fieldset><legend>Custom types</legend>{{range .MediaTypes}}<label><input type="checkbox" name="download" value="{{.}}"> {{.}}</label> {{end}}<label>Largest video (MB) <input type="number" name="video_max_mb" min="0" value="0"></label></fieldset><button>Save media rule</button></form>
+    <details class=row-rule><summary>Media rules…</summary>
+      <form method=post action=/chats/rules hx-post=/chats/rules hx-swap=none><input type=hidden name="jid[]" value="{{.CanonicalJID}}"><label>Rule <select name=media><option value=default>Default</option><option value=text-only>Text only</option><option value=custom>Custom types</option></select></label><fieldset><legend>Types</legend>{{if eq .Type "community"}}{{range .MediaTypes}}<label><input type=checkbox name="download" value="{{.}}">{{if eq . "image"}}Photos{{else if eq . "video"}}Videos{{else if eq . "audio"}}Audio{{else}}Documents{{end}}</label>{{end}}{{else}}<label>Download types <select name=download multiple>{{range .MediaTypes}}<option>{{.}}</option>{{end}}</select></label>{{end}}<label>Video cap (MB) <input type=number name="video_max_mb" min=0 value=0></label></fieldset><button>Save</button></form>
     </details>
-    {{if and .Parent (eq .RuleLabel "Own rule")}}<form method="post" action="/chats/rules/inherit" hx-post="/chats/rules/inherit" hx-swap="none"><input type="hidden" name="jid[]" value="{{.CanonicalJID}}"><button>Use community rule</button></form>{{end}}
-    {{if .New}}<form method="post" action="/chats/ack" hx-post="/chats/ack" hx-swap="none"><input type="hidden" name="jid[]" value="{{.CanonicalJID}}"><button>Mark as seen</button></form>{{end}}
+    {{if and .Parent (eq .RuleLabel "Own rule")}}<form method=post action=/chats/rules/inherit hx-post=/chats/rules/inherit hx-swap=none><input type=hidden name="jid[]" value="{{.CanonicalJID}}"><button>Use community rule</button></form>{{end}}
+    {{if .New}}<form method=post action=/chats/ack hx-post=/chats/ack hx-swap=none><input type=hidden name="jid[]" value="{{.CanonicalJID}}"><button>Mark as seen</button></form>{{end}}
   </td>
 </tr>{{end}}
 

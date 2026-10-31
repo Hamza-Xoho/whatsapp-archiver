@@ -2,14 +2,15 @@ package web
 
 import (
 	"archive/zip"
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"whatsapp-archiver/internal/store"
@@ -22,36 +23,20 @@ func archiveMediaName(chat, id, filename string) string {
 	sum := sha256.Sum256([]byte(chat + "\x00" + id))
 	return stem + "_" + hex.EncodeToString(sum[:]) + ext
 }
-func ordinalName(base string, n int) string {
-	if n <= 1 {
-		return base
-	}
-	ext := filepath.Ext(base)
-	return base[:len(base)-len(ext)] + "_" + strconv.Itoa(n) + ext
-}
 
-// exportArchiveName is deterministic per record and stores no archive-sized state. Familiar basenames are retained
-// when unambiguous; reserved or adversarial collisions use the full canonical-chat/message-id hash.
-func (s *Server) exportArchiveName(ctx context.Context, x exportScope, r store.ExportRecord) (string, error) {
+// exportArchiveName is deterministic per record and stores no archive-sized state. The Store batches the exact
+// collision count into each record; unique safe basenames remain familiar and every other name uses a full hash.
+func exportArchiveName(x exportScope, r store.ExportRecord) string {
 	m := r.Media
 	if m == nil {
-		return "", nil
+		return ""
 	}
 	base := safeMediaName(m.Filename, r.Message.ID)
-	ordinal, _, err := s.d.Store.ExportMediaNameFacts(ctx, x.jid, m.Filename, base, r.Message.ID, m.MessageTimestamp)
-	if err != nil {
-		return "", err
-	}
-	candidate := ordinalName(base, ordinal)
-	_, collision, err := s.d.Store.ExportMediaNameFacts(ctx, x.jid, m.Filename, candidate, r.Message.ID, m.MessageTimestamp)
-	if err != nil {
-		return "", err
-	}
 	originalBase := filepath.Base(strings.ReplaceAll(m.Filename, "\\", "/"))
-	if collision || base != originalBase || candidate == "_chat.txt" || candidate == "missing-media.txt" {
-		candidate = archiveMediaName(x.jid, r.Message.ID, base)
+	if r.MediaNameCount != 1 || base != originalBase || base == "_chat.txt" || base == "missing-media.txt" {
+		return archiveMediaName(x.jid, r.Message.ID, base)
 	}
-	return candidate, nil
+	return base
 }
 
 type contextReader struct {
@@ -66,7 +51,7 @@ func (r contextReader) Read(p []byte) (int, error) {
 	return r.r.Read(p)
 }
 func copyContext(ctx context.Context, w io.Writer, r io.Reader) error {
-	_, err := io.CopyBuffer(w, contextReader{ctx, r}, make([]byte, 32<<10))
+	_, err := io.CopyBuffer(w, contextReader{ctx, r}, make([]byte, 1<<20))
 	if err == nil {
 		err = ctx.Err()
 	}
@@ -74,75 +59,180 @@ func copyContext(ctx context.Context, w io.Writer, r io.Reader) error {
 }
 
 func (s *Server) streamZIP(ctx context.Context, w io.Writer, x exportScope) error {
-	z := zip.NewWriter(w)
-	manifest, err := z.Create("missing-media.txt")
+	plan, err := s.prepareZIP(ctx, x)
+	closeErr := x.snapshot.Close()
 	if err != nil {
 		return err
 	}
-	err = s.eachExport(ctx, x, func(r store.ExportRecord) error {
+	defer plan.close()
+	if closeErr != nil {
+		return closeErr
+	}
+	return s.writePreparedZIP(ctx, w, plan)
+}
+
+type preparedZIP struct {
+	transcript *os.File
+	media      *os.File
+}
+
+type preparedZIPMedia struct {
+	ID, Name, State, Path string
+}
+
+func (s *Server) prepareZIP(ctx context.Context, x exportScope) (*preparedZIP, error) {
+	transcript, err := os.CreateTemp("", "whatsapp-archiver-transcript-*")
+	if err != nil {
+		return nil, err
+	}
+	media, err := os.CreateTemp("", "whatsapp-archiver-media-plan-*")
+	if err != nil {
+		_ = transcript.Close()
+		_ = os.Remove(transcript.Name())
+		return nil, err
+	}
+	plan := &preparedZIP{transcript: transcript, media: media}
+	ok := false
+	defer func() {
+		if !ok {
+			plan.close()
+		}
+	}()
+	if err = s.streamText(ctx, transcript, x); err != nil {
+		return nil, err
+	}
+	encoder := json.NewEncoder(media)
+	err = s.eachExportMedia(ctx, x, func(r store.ExportRecord) error {
 		m := r.Media
 		if m == nil {
 			return nil
 		}
-		name, e := s.exportArchiveName(ctx, x, r)
-		if e != nil {
-			return e
+		return encoder.Encode(preparedZIPMedia{ID: r.Message.ID, Name: exportArchiveName(x, r), State: m.State, Path: m.Path})
+	})
+	if err != nil {
+		return nil, err
+	}
+	if _, err = transcript.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	if _, err = media.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	ok = true
+	return plan, nil
+}
+
+func (p *preparedZIP) close() {
+	for _, f := range []*os.File{p.transcript, p.media} {
+		if f != nil {
+			name := f.Name()
+			_ = f.Close()
+			_ = os.Remove(name)
 		}
-		path, ok := s.insideMediaDir(m.Path)
-		state := m.State
-		if !ok || state != "done" {
+	}
+}
+
+func (s *Server) writePreparedZIP(ctx context.Context, w io.Writer, plan *preparedZIP) error {
+	z := zip.NewWriter(w)
+	tw, err := z.CreateHeader(&zip.FileHeader{Name: "_chat.txt", Method: zip.Store})
+	if err != nil {
+		return err
+	}
+	textBuffer := bufio.NewWriterSize(tw, 64<<10)
+	if err = copyContext(ctx, textBuffer, plan.transcript); err != nil {
+		return err
+	}
+	if err = textBuffer.Flush(); err != nil {
+		return err
+	}
+	manifest, err := os.CreateTemp("", "whatsapp-archiver-missing-media-*")
+	if err != nil {
+		return err
+	}
+	manifestName := manifest.Name()
+	defer func() { _ = os.Remove(manifestName) }()
+	decoder := json.NewDecoder(plan.media)
+	for {
+		var item preparedZIPMedia
+		if err = decoder.Decode(&item); err == io.EOF {
+			break
+		}
+		if err != nil {
+			_ = manifest.Close()
+			return err
+		}
+		path, ok := s.insideMediaDir(item.Path)
+		if item.State != "done" || !ok {
+			state := item.State
 			if state == "done" {
 				state = "missing"
 			}
-			_, e = fmt.Fprintf(manifest, "%s\t%s\t%s\n", r.Message.ID, name, state)
-			return e
+			if _, err = fmt.Fprintf(manifest, "%s\t%s\t%s\n", item.ID, item.Name, state); err != nil {
+				_ = manifest.Close()
+				return err
+			}
+			continue
 		}
-		if st, e2 := os.Stat(path); e2 != nil || !st.Mode().IsRegular() {
-			_, e = fmt.Fprintf(manifest, "%s\t%s\tmissing\n", r.Message.ID, name)
-			return e
+		f, openErr := os.Open(path)
+		if openErr != nil {
+			if _, err = fmt.Fprintf(manifest, "%s\t%s\tmissing\n", item.ID, item.Name); err != nil {
+				_ = manifest.Close()
+				return err
+			}
+			continue
 		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	tw, err := z.Create("_chat.txt")
-	if err != nil {
-		return err
-	}
-	if err = s.streamText(ctx, tw, x); err != nil {
-		return err
-	}
-	err = s.eachExport(ctx, x, func(r store.ExportRecord) error {
-		m := r.Media
-		if m == nil || m.State != "done" {
-			return nil
-		}
-		path, ok := s.insideMediaDir(m.Path)
-		if !ok {
-			return nil
-		}
-		f, e := os.Open(path)
-		if e != nil {
-			return nil
-		}
-		name, e := s.exportArchiveName(ctx, x, r)
-		if e != nil {
-			_ = f.Close()
-			return e
-		}
-		zw, e := z.Create(name)
-		if e == nil {
-			e = copyContext(ctx, zw, f)
+		zw, writeErr := z.CreateHeader(&zip.FileHeader{Name: item.Name, Method: zip.Store})
+		if writeErr == nil {
+			writeErr = copyContext(ctx, zw, f)
 		}
 		closeErr := f.Close()
-		if e == nil {
-			e = closeErr
+		if writeErr == nil {
+			writeErr = closeErr
 		}
-		return e
-	})
+		if writeErr != nil {
+			_ = manifest.Close()
+			return writeErr
+		}
+	}
+	if _, err = manifest.Seek(0, io.SeekStart); err != nil {
+		_ = manifest.Close()
+		return err
+	}
+	mw, err := z.Create("missing-media.txt")
+	if err == nil {
+		err = copyContext(ctx, mw, manifest)
+	}
+	closeErr := manifest.Close()
+	if err == nil {
+		err = closeErr
+	}
 	if err != nil {
 		return err
 	}
 	return z.Close()
+}
+
+func (s *Server) eachExportMedia(ctx context.Context, x exportScope, fn func(store.ExportRecord) error) error {
+	x.snapshot.ResetMediaNames()
+	var ts int64
+	var id string
+	hasCursor := false
+	for {
+		page, err := s.d.Store.ExportMediaPage(ctx, store.ExportParams{CanonicalJID: x.jid, Snapshot: x.snapshot, From: x.from, To: x.to, AfterTS: ts, AfterID: id, HasCursor: hasCursor, Limit: exportPageSize})
+		if err != nil {
+			return err
+		}
+		for _, record := range page {
+			if err = ctx.Err(); err != nil {
+				return err
+			}
+			if err = fn(record); err != nil {
+				return err
+			}
+			ts, id, hasCursor = record.Message.Timestamp, record.Message.ID, true
+		}
+		if len(page) < exportPageSize {
+			return nil
+		}
+	}
 }

@@ -116,6 +116,14 @@ func (s *Server) writeHealth(w http.ResponseWriter) error {
 
 // writeEvent writes one SSE event; data with line breaks becomes several data lines.
 func writeEvent(w http.ResponseWriter, id, name, data string) error {
+	_, err := w.Write(encodeEvent(id, name, data))
+	return err
+}
+
+// encodeEvent is the exact SSE wire representation. Keeping encoding separate
+// lets fragment budgets measure what the browser receives, including one data
+// prefix for every line.
+func encodeEvent(id, name, data string) []byte {
 	var b strings.Builder
 	if id != "" {
 		fmt.Fprintf(&b, "id: %s\n", id)
@@ -125,6 +133,5 @@ func writeEvent(w http.ResponseWriter, id, name, data string) error {
 		fmt.Fprintf(&b, "data: %s\n", line)
 	}
 	b.WriteString("\n")
-	_, err := w.Write([]byte(b.String()))
-	return err
+	return []byte(b.String())
 }

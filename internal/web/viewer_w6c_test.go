@@ -1,9 +1,11 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -13,6 +15,7 @@ import (
 	"time"
 
 	"whatsapp-archiver/internal/activity"
+	"whatsapp-archiver/internal/ingest"
 	"whatsapp-archiver/internal/store"
 	"whatsapp-archiver/internal/testkit"
 )
@@ -216,6 +219,55 @@ func TestViewerSSEUsesAStableLiveCursorAndResumesWithoutDuplicates(t *testing.T)
 	got := next(t, resumed, "viewer", 2*time.Second)
 	if !strings.Contains(got.data, "after reconnect") || strings.Contains(got.data, "same-second lower id") {
 		t.Fatalf("resumed live event = %#v", got)
+	}
+}
+
+func TestW6IPipelineMessageReachesViewerSSEWithinTwoSecondsAndLargePayloadRefetches(t *testing.T) {
+	u := newChatsUI(t)
+	u.typedMessage(t, store.Message{ID: "initial", Kind: "text", Text: "initial", Timestamp: 100})
+	bus := activity.NewBus(20)
+	pipe := ingest.NewPipeline(u.st, ingest.NewFilter(u.rules, func(jid string) ([]string, error) {
+		return u.st.Aliases(context.Background(), jid)
+	}), nopQueue{}, nopHealth{}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	pipe = pipe.WithActivity(bus)
+	s := New(Deps{Store: u.st, Rules: u.rules, Config: u.cfg, Activity: bus})
+	srv := httptest.NewServer(s.Handler())
+	defer srv.Close()
+	page, err := srv.Client().Get(srv.URL + "/chats/g@g.us")
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := io.ReadAll(page.Body)
+	_ = page.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := regexp.MustCompile(`sse-connect="([^"]+)"`).FindStringSubmatch(string(raw))
+	if len(path) != 2 {
+		t.Fatalf("viewer has no SSE path: %s", raw)
+	}
+	stream, stop := openViewerStream(t, srv, path[1], nil)
+	defer stop()
+	started := time.Now()
+	pipe.Handle(liveText("g@g.us", "normal-live", "visible synthetic live message"))
+	normal := next(t, stream, "viewer", 2*time.Second)
+	if time.Since(started) >= 2*time.Second || !strings.Contains(normal.data, "visible synthetic live message") {
+		t.Fatalf("normal live event late/missing: elapsed=%s event=%#v", time.Since(started), normal)
+	}
+	largeText := strings.Repeat("archived-large-payload-", 4096)
+	pipe.Handle(liveText("g@g.us", "large-live", largeText))
+	large := next(t, stream, "viewer-refetch", 2*time.Second)
+	if len(large.data) >= 16<<10 || !strings.Contains(large.data, "/chats/g@g.us/m/large-live") || strings.Contains(large.data, largeText[:1024]) {
+		t.Fatalf("large live event is not a bounded refetch contract: bytes=%d event=%#v", len(large.data), large)
+	}
+	detail, err := srv.Client().Get(srv.URL + "/chats/g@g.us/m/large-live")
+	if err != nil {
+		t.Fatal(err)
+	}
+	detailBody, err := io.ReadAll(detail.Body)
+	_ = detail.Body.Close()
+	if err != nil || detail.StatusCode != http.StatusOK || !bytes.Contains(detailBody, []byte(largeText[:1024])) {
+		t.Fatalf("full archived content unavailable after refetch marker: status=%d err=%v", detail.StatusCode, err)
 	}
 }
 
