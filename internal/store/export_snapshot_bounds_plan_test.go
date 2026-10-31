@@ -15,6 +15,9 @@ func TestExportSnapshotBoundsPlanHasNoArchiveWideDistinctAggregate(t *testing.T)
 	}
 
 	query := exportSnapshotBoundsQuery("?1")
+	if strings.Contains(strings.ToUpper(query), "MAX(") {
+		t.Fatalf("snapshot bounds query uses MAX, whose plan can become an unindexed archive scan:\n%s", query)
+	}
 	plan := strings.ToLower(planOf(t, s, query, message.ChatJID))
 	if strings.Contains(plan, "use temp b-tree") {
 		t.Fatalf("snapshot startup builds archive-sized temporary state:\n%s", plan)
@@ -25,6 +28,7 @@ func TestExportSnapshotBoundsPlanHasNoArchiveWideDistinctAggregate(t *testing.T)
 		t.Fatal(err)
 	}
 	defer func() { _ = rows.Close() }()
+	lastSeeks := 0
 	for rows.Next() {
 		var address, p1, p2, p3, p5 int
 		var opcode string
@@ -32,11 +36,17 @@ func TestExportSnapshotBoundsPlanHasNoArchiveWideDistinctAggregate(t *testing.T)
 		if err = rows.Scan(&address, &opcode, &p1, &p2, &p3, &p4, &p5, &comment); err != nil {
 			t.Fatal(err)
 		}
-		if opcode == "OpenEphemeral" || (opcode == "AggStep" && !strings.HasPrefix(p4.String, "max(")) {
-			t.Fatalf("snapshot startup opcode %d %s %q performs archive-wide aggregation", address, opcode, p4.String)
+		if opcode == "Last" {
+			lastSeeks++
+		}
+		if opcode == "OpenEphemeral" || opcode == "SorterOpen" || opcode == "Sort" || opcode == "Rewind" || opcode == "Next" || opcode == "AggStep" {
+			t.Fatalf("snapshot startup opcode %d %s %q permits archive-row iteration", address, opcode, p4.String)
 		}
 	}
 	if err = rows.Err(); err != nil {
 		t.Fatal(err)
+	}
+	if lastSeeks != 3 {
+		t.Fatalf("snapshot startup has %d primary-key tail seeks, want exactly 3", lastSeeks)
 	}
 }
