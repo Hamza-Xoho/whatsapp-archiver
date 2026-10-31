@@ -410,6 +410,7 @@ func (s *Server) streamHTML(ctx context.Context, w io.Writer, x exportScope) err
 }
 
 func (s *Server) streamText(ctx context.Context, w io.Writer, x exportScope) error {
+	x.snapshot.ResetMediaNames()
 	return s.eachTextTimeline(ctx, x, func(r *store.ExportTextRecord, e *store.ExportEvent) error {
 		if e != nil {
 			return writeWALine(w, time.Unix(e.TS, 0).In(x.loc), exportEventSender(*e), exportEventLabel(*e))

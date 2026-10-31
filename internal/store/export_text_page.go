@@ -84,19 +84,14 @@ func (s *ExportTextStream) NextPage(ctx context.Context) ([]ExportTextRecord, er
 			}
 		}
 	}
-	if s.snapshot.mediaCount == 0 || out[len(out)-1].Message.Timestamp < s.snapshot.mediaMinTS || out[0].Message.Timestamp > s.snapshot.mediaMaxTS {
-		return out, nil
-	}
 	forms, args := exportFormMarks(s.snapshot.forms)
-	args = append(args, s.snapshot.maxMediaRowID)
-	mediaMax := len(args)
 	marks := make([]string, len(ids))
 	for i, id := range ids {
 		marks[i] = fmt.Sprintf("?%d", len(args)+1)
 		args = append(args, id)
 	}
 	err := s.snapshot.scanRows(ctx, `SELECT chat_jid,message_id,filename,message_ts FROM media WHERE chat_jid IN (`+forms+
-		`) AND rowid<=?`+fmt.Sprint(mediaMax)+` AND message_id IN (`+strings.Join(marks, ",")+`) ORDER BY chat_jid`, args, func(rows *sql.Rows) error {
+		`) AND message_id IN (`+strings.Join(marks, ",")+`) ORDER BY chat_jid`, args, func(rows *sql.Rows) error {
 		var media Media
 		if err := rows.Scan(&media.ChatJID, &media.MessageID, &media.Filename, &media.MessageTimestamp); err != nil {
 			return err

@@ -129,6 +129,7 @@ func (s *Server) streamZIP(ctx context.Context, w io.Writer, x exportScope) erro
 }
 
 func (s *Server) eachExportMedia(ctx context.Context, x exportScope, fn func(store.ExportRecord) error) error {
+	x.snapshot.ResetMediaNames()
 	var ts int64
 	var id string
 	hasCursor := false
