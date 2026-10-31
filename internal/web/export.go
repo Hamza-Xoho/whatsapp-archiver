@@ -98,6 +98,9 @@ func (s *Server) exportDownload(w http.ResponseWriter, r *http.Request) {
 		h.Set("Content-Type", "application/zip")
 	}
 	w.WriteHeader(http.StatusOK)
+	if flusher, ok := w.(http.Flusher); ok {
+		flusher.Flush()
+	}
 	if scope.format == "zip" {
 		err = s.streamZIP(r.Context(), w, scope)
 	} else {
