@@ -34,6 +34,7 @@ var browserPairTiming = devPairTiming{
 
 type devPairRun struct {
 	updates chan web.PairUpdate
+	ctx     context.Context
 	cancel  context.CancelFunc
 }
 
@@ -106,7 +107,7 @@ func (p *devPairer) stopLocked(report bool) {
 
 func (p *devPairer) startLocked() <-chan web.PairUpdate {
 	ctx, cancel := context.WithCancel(p.root)
-	run := &devPairRun{updates: make(chan web.PairUpdate, 2), cancel: cancel}
+	run := &devPairRun{updates: make(chan web.PairUpdate, 2), ctx: ctx, cancel: cancel}
 	p.attempt++
 	attempt := p.attempt
 	p.active, p.started, p.state = run, time.Now(), "starting"
@@ -133,31 +134,46 @@ func (p *devPairer) run(ctx context.Context, run *devPairRun, attempt int) {
 		if !waitDevPair(ctx, p.timing.QR) || !p.send(ctx, run, web.PairUpdate{QR: "synthetic-devseed-qr-2"}, "pairing") || !waitDevPair(ctx, p.timing.Finish) {
 			return
 		}
-		p.setState("not_paired", false)
+		if !p.setStateForRun(run, "not_paired", false) {
+			return
+		}
 		_ = sendDevPairUpdate(ctx, run.updates, web.PairUpdate{Err: "synthetic devseed pairing failure"})
 		return
 	}
 	if !waitDevPair(ctx, p.timing.Finish) {
 		return
 	}
-	p.setState("connected", true)
+	if !p.setStateForRun(run, "connected", true) {
+		return
+	}
 	if !sendDevPairUpdate(ctx, run.updates, web.PairUpdate{Done: true}) {
 		return
 	}
 	if attempt == 2 && waitDevPair(ctx, p.timing.LoggedOutDelay) {
-		p.setState("logged_out", false)
+		p.setStateForRun(run, "logged_out", false)
 	}
 }
 
 func (p *devPairer) send(ctx context.Context, run *devPairRun, update web.PairUpdate, state string) bool {
-	p.setState(state, false)
+	if !p.setStateForRun(run, state, false) {
+		return false
+	}
 	return sendDevPairUpdate(ctx, run.updates, update)
 }
 
-func (p *devPairer) setState(state string, paired bool) {
+func (p *devPairer) setStateForRun(run *devPairRun, state string, paired bool) bool {
 	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.active != run {
+		return false
+	}
+	select {
+	case <-run.ctx.Done():
+		return false
+	default:
+	}
 	p.state, p.paired = state, paired
-	p.mu.Unlock()
+	return true
 }
 
 func waitDevPair(ctx context.Context, delay time.Duration) bool {

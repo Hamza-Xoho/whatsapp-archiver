@@ -127,6 +127,7 @@ type pairView struct {
 	History    []string
 	LoggedOut  bool
 	SessionAge string
+	Starting   bool
 }
 
 type pairData struct {
@@ -143,7 +144,9 @@ func (s *Server) pairView(ctx context.Context) (pairView, error) {
 	v := pairView{Available: true, JustPaired: p.done, Running: p.ch != nil && !p.done && p.err == "", HasQR: p.qr != "", Seq: p.seq, Err: p.err}
 	p.mu.Unlock()
 	if s.d.Health != nil {
-		v.LoggedOut = s.d.Health().State == "logged_out"
+		state := s.d.Health().State
+		v.LoggedOut = state == "logged_out"
+		v.Starting = state == "starting"
 		if v.LoggedOut {
 			v.JustPaired, v.Running, v.HasQR = false, false, false
 		}
