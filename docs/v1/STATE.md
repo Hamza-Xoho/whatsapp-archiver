@@ -2,6 +2,9 @@ Single status record for V1 (max 150 lines, update in place; history lives in gi
 
 ## Done
 
+- 7 Nov: standalone Linux amd64 archive MCP companion implemented on `feature/archive-mcp`. Legacy/V1 read-only adapters, selected-chat policy, bounded/cited evidence tools, generic unavailable artifact seam, Linux installer/recovery, README and `docs/mcp-linux.md` / `docs/hermes-linux.md`. No live deployment, archive restart/reinstall/migration, credentials or live-message reads. User authorized committing/pushing the feature branch and approved the existing author identity (configured repository-locally).
+- MCP integration: branch starts at `f5a8824`; fetched `origin/main` is `1843fde` (264 subsequent commits). Feature publication preserves both histories; reconcile current main before merging this companion. No rebase, merge, force-push or main update is part of this checkpoint.
+- MCP verification: final `GOFLAGS=-p=1 make check` passed (all-package race, 300k scale, lint 0 issues, five capture builds, Linux MCP build, 27 installer/syntax tests). Independent final/fix reviews accepted; regression coverage includes policy/aliases, edits/revokes, NUL/UTF-8, concurrency, cancellation and output backpressure. Real ACL/UID no-create smoke passed on disposable files. Source/build/test artifacts stay ignored; build scratch uses `.cache/tmp`.
 - Phases 0-2 finished and deployed: a87a30f on ryzen since 2026-10-20 (old log: `docs/reviews/2026-10-26-progress-phase0-2-archive.md`).
 - 2026-10-26 V1 plan committed: 325a8e6, `docs/plans/2026-10-26-v1-plan.md`.
 - Week review report: `docs/reviews/2026-10-26-week-review-issues.md`.

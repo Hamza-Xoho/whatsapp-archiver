@@ -8,12 +8,36 @@ It is written in Go on top of [whatsmeow](https://github.com/tulir/whatsmeow), b
 
 > **Status: phase 0 (capture logger).** The capture pipeline, health alerts, backups and the Ubuntu setup guide (below) are built and tested. It has not yet been paired with a real account: that acceptance run is the next step (see [What is left](#what-is-left)). The modules, web UI and search described in the [charter](docs/charter/WhatsApp%20Archiver%20%E2%80%94%20Project%20Charter%20%26%20Build%20Plan.md) are later phases.
 
+## Read an existing archive with Hermes
+
+The separate **Linux amd64 archive MCP companion** reads supported legacy and
+V1 databases alongside capture. It does not require upgrading, reinstalling or
+restarting your existing archiver. Start with the
+[Linux installation and local verification guide](docs/mcp-linux.md), then use
+[Hermes on Linux with OpenRouter](docs/hermes-linux.md) to connect an ordinary
+user's restricted archive profile. The bridge defaults to an empty chat
+allowlist; you choose access locally.
+
+```sh
+make mcp-test
+make mcp-build
+make mcp-release
+```
+
+Install from a source checkout with
+`sudo ./scripts/install-mcp.sh --binary .cache/build/archiver-mcp --caller YOUR_LINUX_USER`
+after reviewing the guide's prerequisites, existing service metadata and archive
+path/account. Hermes uses `/usr/local/bin/archiver-mcp-launch` with no arguments.
+The bridge searches stored message text/captions and safe attachment metadata;
+OCR, transcription and module artifacts need future archiver support. Running
+Hermes locally with OpenRouter still sends selected evidence to cloud models.
+
 ## Read this first
 
 - **It is an unofficial client.** WhatsApp does not offer a supported way to archive personal chats, and linking an unofficial client carries a small risk that the account is restricted. The archiver stays silent to keep that risk low, but the risk is not zero.
 - **It depends on staying up to date.** WhatsApp retires old client versions without warning. The archiver detects a rejected version, raises a "client outdated" alert and can look up the newest version itself, but you still have to update the program when told.
 - **Your archive holds other people's messages.** Keep it, its backups and anything made from it for your own use, and check the law where you live before archiving anyone's messages. Chats that must never be stored belong in the `exclude` list, and it has to be set **before** the first pairing because stored rows are never deleted.
-- **Your data stays on your machines.** The archiver talks to WhatsApp, and to the ntfy server you choose for alerts. Alert text contains no chat identifier and no message text.
+- **Capture stores its archive locally.** The archiver talks to WhatsApp, and to the ntfy server you choose for alerts. Alert text contains no chat identifier and no message text. If you separately connect Hermes to a cloud model, selected archive evidence can be sent to that provider; see the [Hermes guide](docs/hermes-linux.md).
 
 ## What it does
 

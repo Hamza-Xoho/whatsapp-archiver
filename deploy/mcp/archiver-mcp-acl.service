@@ -1,0 +1,20 @@
+[Unit]
+Description=Maintain exact WhatsApp archive reader ACLs
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I /usr/local/libexec/archiver-mcp/manage.py refresh
+User=root
+Group=root
+RuntimeDirectory=archiver-mcp-admin
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=@ARCHIVE_DIR@ /var/lib/archiver-mcp
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH CAP_FOWNER
+RestrictAddressFamilies=AF_UNIX
+LockPersonality=yes
+MemoryDenyWriteExecute=yes

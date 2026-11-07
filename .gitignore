@@ -13,3 +13,7 @@
 
 # Private testing logs (never commit)
 /docs/testing-status-*.md
+
+# Linux installer validation caches.
+__pycache__/
+*.pyc

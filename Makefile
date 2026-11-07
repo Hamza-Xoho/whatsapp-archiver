@@ -5,6 +5,11 @@ export GOMODCACHE := $(ROOT)/.cache/gomod
 export GOCACHE := $(ROOT)/.cache/gocache
 export GOBIN := $(ROOT)/.tools/bin
 export GOTOOLCHAIN := local
+# Keep compiler scratch files off the host's small /tmp tmpfs. The toolchain
+# target prepares this ignored directory before any Go command runs.
+export TMPDIR := $(ROOT)/.cache/tmp
+export GOTMPDIR := $(ROOT)/.cache/tmp
+$(shell mkdir -p "$(ROOT)/.cache/tmp")
 # Make 3.81 ignores an exported PATH when it looks up simple recipe commands,
 # so every direct invocation below uses these absolute paths instead.
 export PATH := $(ROOT)/.tools/bin:$(ROOT)/.tools/go/bin:$(PATH)
@@ -95,3 +100,39 @@ install-lint:
 	echo "$(LINT_SHA256_$(HOST))  .cache/tools/lint.tar.gz" | $(SHA256) -c -
 	tar -xzf .cache/tools/lint.tar.gz -C .cache/tools --strip-components=1 golangci-lint-$(LINT_VERSION)-$(HOST_OS)-$(HOST_ARCH)/golangci-lint
 	mv .cache/tools/golangci-lint $(LINT)
+
+# Standalone archive MCP companion: Linux amd64 only. The existing archiver's
+# cross-platform build-all matrix is intentionally independent.
+MCP_VERSION := $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)$(shell test -z "$$(git status --porcelain 2>/dev/null)" || printf '%s' '-dirty')
+.PHONY: mcp-test mcp-build mcp-release mcp-deps mcp-fmt mcp-tidy
+check: mcp-build
+mcp-test: $(GO)
+	$(GO) test -race -short ./internal/archiveread ./internal/mcpbridge ./cmd/archiver-mcp
+mcp-tidy: $(GO)
+	$(GO) mod tidy
+mcp-deps: $(GO)
+	$(GO) mod download
+mcp-fmt: $(GO)
+	$(ROOT)/.tools/go/bin/gofmt -w internal/mcpbridge/*.go cmd/archiver-mcp/*.go
+mcp-build: $(GO)
+	mkdir -p .cache/build
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -trimpath -ldflags "-X main.version=$(MCP_VERSION)" -o .cache/build/archiver-mcp ./cmd/archiver-mcp
+mcp-release: mcp-build
+	rm -rf .cache/release/archiver-mcp-linux-amd64
+	mkdir -p .cache/release/archiver-mcp-linux-amd64/scripts .cache/release/archiver-mcp-linux-amd64/docs .cache/release/archiver-mcp-linux-amd64/deploy/mcp
+	cp .cache/build/archiver-mcp .cache/release/archiver-mcp-linux-amd64/archiver-mcp
+	cp deploy/mcp/manage.py deploy/mcp/mcp_host.py deploy/mcp/config.yaml deploy/mcp/archiver-mcp-* deploy/mcp/archiver-mcp.tmpfiles .cache/release/archiver-mcp-linux-amd64/deploy/mcp/
+	cp scripts/install-mcp.sh scripts/uninstall-mcp.sh .cache/release/archiver-mcp-linux-amd64/scripts/
+	cp docs/mcp-linux.md docs/hermes-linux.md .cache/release/archiver-mcp-linux-amd64/docs/
+	cp README.md .cache/release/archiver-mcp-linux-amd64/README.md
+	printf '%s\n' '$(MCP_VERSION)' > .cache/release/archiver-mcp-linux-amd64/VERSION
+	cd .cache/release/archiver-mcp-linux-amd64 && find . -type f ! -name SHA256SUMS -print0 | LC_ALL=C sort -z | xargs -0 $(SHA256) > SHA256SUMS
+	cd .cache/release && tar -czf archiver-mcp-linux-amd64-$(MCP_VERSION).tar.gz archiver-mcp-linux-amd64
+	cd .cache/release && $(SHA256) archiver-mcp-linux-amd64-$(MCP_VERSION).tar.gz > archiver-mcp-linux-amd64-$(MCP_VERSION).tar.gz.sha256
+
+.PHONY: mcp-install-test
+check: mcp-install-test
+mcp-install-test:
+	PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/mcp -p 'test_*.py'
+	python3 -m py_compile deploy/mcp/manage.py deploy/mcp/mcp_host.py tests/mcp/test_install.py
+	sh -n scripts/install-mcp.sh scripts/uninstall-mcp.sh deploy/mcp/archiver-mcp-launch deploy/mcp/archiver-mcp-serve

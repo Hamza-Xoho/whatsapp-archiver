@@ -1,0 +1,7 @@
+archive: @ARCHIVE@
+runtime_dir: /run/archiver-mcp
+policy:
+  mode: selected
+  allow_chats: []
+  deny_chats: []
+viewer_base_url: ""

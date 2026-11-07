@@ -1,0 +1,10 @@
+[Unit]
+Description=Watch archive directory entries for recreated WAL and SHM
+
+[Path]
+# Directory entry changes, not PathModified on the busy WAL file.
+PathChanged=@ARCHIVE_DIR@
+Unit=archiver-mcp-acl.service
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,7 @@
+#!/bin/sh
+# Public entry point. Its only permitted sudo operation is the fixed server.
+if [ "$#" -ne 0 ]; then
+    echo 'archiver-mcp: caller arguments are forbidden' >&2
+    exit 64
+fi
+exec /usr/bin/sudo -n -u archiver-mcp -- /usr/local/libexec/archiver-mcp-serve
